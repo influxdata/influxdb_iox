@@ -2,7 +2,7 @@ use delorean::delorean::Bucket;
 use delorean::delorean::{
     delorean_server::Delorean,
     read_response::{
-        frame::Data, DataType, FloatPointsFrame, Frame, IntegerPointsFrame, SeriesFrame,
+        frame::Data, DataType, FloatPointsFrame, Frame, GroupFrame, IntegerPointsFrame, SeriesFrame,
     },
     storage_server::Storage,
     CapabilitiesResponse, CreateBucketRequest, CreateBucketResponse, DeleteBucketRequest,
@@ -14,6 +14,8 @@ use delorean::storage::database::Database;
 use delorean::storage::inverted_index::SeriesFilter;
 use delorean::storage::SeriesDataType;
 
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
 use std::convert::TryInto;
 use std::sync::Arc;
 
@@ -163,9 +165,38 @@ impl Storage for GrpcServer {
 
     async fn read_group(
         &self,
-        _req: tonic::Request<ReadGroupRequest>,
+        req: tonic::Request<ReadGroupRequest>,
     ) -> Result<tonic::Response<Self::ReadGroupStream>, Status> {
-        Err(Status::unimplemented("Not yet implemented"))
+        let (mut tx, rx) = mpsc::channel(4);
+
+        let read_group_request = req.into_inner();
+
+        let _org_id = read_group_request.org_id()?;
+        let bucket = read_group_request.bucket(&self.app.db)?;
+        let predicate = read_group_request.predicate;
+        let range = read_group_request.range;
+        let group_keys = read_group_request.group_keys;
+        // TODO: handle Group::None
+        let _group = read_group_request.group;
+        // TODO: handle aggregate values, especially whether None is the same as
+        // Some(AggregateType::None) or not
+        let _aggregate = read_group_request.aggregate;
+
+        let app = Arc::clone(&self.app);
+
+        // TODO: is this blocking because of the blocking calls to the database...?
+        tokio::spawn(async move {
+            let predicate = predicate.as_ref();
+            let range = range.as_ref();
+
+            if let Err(e) =
+                send_groups(tx.clone(), app, &bucket, predicate, range, group_keys).await
+            {
+                tx.send(Err(e)).await.unwrap();
+            }
+        });
+
+        Ok(tonic::Response::new(rx))
     }
 
     type TagKeysStream = mpsc::Receiver<Result<StringValuesResponse, Status>>;
@@ -350,4 +381,179 @@ async fn send_points(
     }
 
     Ok(())
+}
+
+async fn send_groups(
+    mut tx: mpsc::Sender<Result<ReadResponse, Status>>,
+    app: Arc<App>,
+    bucket: &Bucket,
+    predicate: Option<&Predicate>,
+    range: Option<&TimestampRange>,
+    group_keys: Vec<String>,
+) -> Result<(), Status> {
+    // Query for all the SeriesFilters that should be returned.
+    let filter_iter = app
+        .db
+        .read_series_matching_predicate_and_range(&bucket, predicate, range)
+        .map_err(|e| Status::internal(format!("could not query for filters: {}", e)))?;
+
+    // Group the SeriesFilters by the values they have for the group_keys.
+    let mut series_filters_by_group = BTreeMap::new();
+    for series_filter in filter_iter {
+        let partition_key_values = PartitionKeyValues::new(&group_keys, &series_filter);
+
+        let entry = series_filters_by_group
+            .entry(partition_key_values)
+            .or_insert_with(|| vec![]);
+        entry.push(series_filter);
+    }
+
+    for (partition_key_values, series_filters) in series_filters_by_group {
+        // Unify all the tag keys present in all of the SeriesFilters in this group.
+        let tag_keys: BTreeSet<_> = series_filters
+            .iter()
+            .map(|sf| sf.tag_keys())
+            .flatten()
+            .collect();
+
+        let group_frame = ReadResponse {
+            frames: vec![Frame {
+                data: Some(Data::Group(GroupFrame {
+                    tag_keys: tag_keys.iter().map(|tk| tk.bytes().collect()).collect(),
+                    partition_key_vals: partition_key_values
+                        .values
+                        .iter()
+                        .map(|tv| {
+                            tv.as_ref()
+                                .map(|opt| opt.as_bytes().to_vec())
+                                .unwrap_or_else(|| vec![])
+                        })
+                        .collect(),
+                })),
+            }],
+        };
+
+        tx.send(Ok(group_frame)).await.unwrap();
+
+        let range = range.as_ref().expect("TODO: Must have a range?");
+
+        for series in series_filters {
+            if let Err(e) =
+                send_points(tx.clone(), Arc::clone(&app), bucket, range, series.clone()).await
+            {
+                tx.send(Err(e)).await.unwrap();
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(PartialEq, Eq, Hash, Debug)]
+struct PartitionKeyValues {
+    values: Vec<Option<String>>,
+}
+
+impl PartitionKeyValues {
+    fn new(group_keys: &[String], series_filter: &SeriesFilter) -> Self {
+        PartitionKeyValues {
+            values: group_keys
+                .iter()
+                .map(|group_key| series_filter.tag_with_key(group_key).map(String::from))
+                .collect(),
+        }
+    }
+}
+
+impl Ord for PartitionKeyValues {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.values
+            .iter()
+            .zip(other.values.iter())
+            .fold(Ordering::Equal, |acc, (a, b)| {
+                acc.then_with(|| match (a, b) {
+                    (Some(a), Some(b)) => a.partial_cmp(b).unwrap(),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                })
+            })
+    }
+}
+
+impl PartialOrd for PartitionKeyValues {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PartitionKeyValues;
+    use delorean::storage::inverted_index::SeriesFilter;
+    use delorean::storage::SeriesDataType;
+
+    #[test]
+    fn partition_key_values_creation() {
+        let sf = SeriesFilter {
+            id: 1,
+            key: "cpu,host=b,region=west\tusage_system".to_string(),
+            value_predicate: None,
+            series_type: SeriesDataType::I64,
+        };
+
+        let group_keys = vec![
+            String::from("region"),
+            String::from("not_present"),
+            String::from("host"),
+        ];
+
+        let partition_key_values = PartitionKeyValues::new(&group_keys, &sf);
+
+        assert_eq!(
+            partition_key_values.values,
+            vec![Some(String::from("west")), None, Some(String::from("b"))]
+        );
+    }
+
+    impl From<&Vec<Option<&str>>> for PartitionKeyValues {
+        fn from(other: &Vec<Option<&str>>) -> Self {
+            Self {
+                values: other.iter().map(|o| o.map(String::from)).collect(),
+            }
+        }
+    }
+
+    #[test]
+    fn partition_key_values_ordering() {
+        let mut partitions: Vec<PartitionKeyValues> = vec![
+            vec![None, Some("val12")],
+            vec![None, None],
+            vec![Some("val21"), Some("val11")],
+            vec![None, Some("val10")],
+            vec![Some("val20"), Some("val10")],
+            vec![None, Some("val11")],
+            vec![Some("val20"), Some("val11")],
+        ]
+        .iter()
+        .map(Into::into)
+        .collect();
+
+        partitions.sort();
+
+        let expected_ordering: Vec<PartitionKeyValues> = vec![
+            vec![Some("val20"), Some("val10")],
+            vec![Some("val20"), Some("val11")],
+            vec![Some("val21"), Some("val11")],
+            vec![None, Some("val10")],
+            vec![None, Some("val11")],
+            vec![None, Some("val12")],
+            vec![None, None],
+        ]
+        .iter()
+        .map(Into::into)
+        .collect();
+
+        assert_eq!(partitions, expected_ordering);
+    }
 }

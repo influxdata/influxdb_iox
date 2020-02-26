@@ -86,12 +86,12 @@ impl SeriesFilter {
 
     /// Returns the `Tag` value associated with the provided key.
     pub fn tag_with_key(&self, key: &str) -> Option<&str> {
-        self.tag_string_slices().get(key).map(|val| *val)
+        self.tag_string_slices().get(key).copied()
     }
 
     /// Returns all tag keys.
     pub fn tag_keys(&self) -> Vec<&str> {
-        self.tag_string_slices().keys().map(|val| *val).collect()
+        self.tag_string_slices().keys().copied().collect()
     }
 }
 
@@ -329,12 +329,7 @@ pub mod tests {
 
         assert_eq!(
             sf.tag_keys(),
-            vec![
-                "_field",
-                "_measurement",
-                "host",
-                "region",
-            ]
+            vec!["_field", "_measurement", "host", "region"],
         );
     }
 }
