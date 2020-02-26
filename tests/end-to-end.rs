@@ -39,8 +39,10 @@ use grpc::Organization;
 use grpc::ReadSource;
 use grpc::{
     node::{Comparison, Value},
+    read_group_request::Group,
     read_response::{frame::Data, DataType},
-    Node, Predicate, ReadFilterRequest, Tag, TagKeysRequest, TagValuesRequest, TimestampRange,
+    Node, Predicate, ReadFilterRequest, ReadGroupRequest, Tag, TagKeysRequest, TagValuesRequest,
+    TimestampRange,
 };
 
 macro_rules! assert_unwrap {
@@ -309,14 +311,13 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     let tag_keys_response = storage_client.tag_keys(tag_keys_request).await?;
     let responses: Vec<_> = tag_keys_response.into_inner().try_collect().await?;
 
-    let keys = &responses[0].values;
-    let keys: Vec<_> = keys.iter().map(|s| str::from_utf8(s).unwrap()).collect();
+    let keys = byte_vecs_to_strings(&responses[0].values);
 
     assert_eq!(keys, vec!["_f", "_m", "host", "region"]);
 
     let tag_values_request = tonic::Request::new(TagValuesRequest {
-        tags_source: read_source,
-        range,
+        tags_source: read_source.clone(),
+        range: range.clone(),
         predicate,
         tag_key: String::from("host"),
     });
@@ -324,10 +325,60 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     let tag_values_response = storage_client.tag_values(tag_values_request).await?;
     let responses: Vec<_> = tag_values_response.into_inner().try_collect().await?;
 
-    let values = &responses[0].values;
-    let values: Vec<_> = values.iter().map(|s| str::from_utf8(s).unwrap()).collect();
-
+    let values = byte_vecs_to_strings(&responses[0].values);
     assert_eq!(values, vec!["server01", "server02"]);
+
+    let read_group_request = tonic::Request::new(ReadGroupRequest {
+        read_source: read_source.clone(),
+        range: range.clone(),
+        predicate: None,
+        group_keys: vec![String::from("host")],
+        group: Group::By as _,
+        aggregate: None,
+    });
+    let read_group_response = storage_client.read_group(read_group_request).await?;
+
+    let responses: Vec<_> = read_group_response.into_inner().try_collect().await?;
+    let frames: Vec<_> = responses
+        .into_iter()
+        .flat_map(|r| r.frames)
+        .flat_map(|f| f.data)
+        .collect();
+
+    assert_eq!(
+        frames.len(),
+        6,
+        "expected exactly 6 frames, but there were {}",
+        frames.len()
+    );
+
+    let f = assert_unwrap!(&frames[0], Data::Group, "in frame 0");
+    assert_eq!(byte_vecs_to_strings(&f.tag_keys), vec!["host", "region"]);
+
+    let partition_vals = byte_vecs_to_strings(&f.partition_key_vals);
+    assert_eq!(partition_vals, vec!["server01"], "in frame 0");
+
+    let f = assert_unwrap!(&frames[1], Data::FloatPoints, "in frame 1");
+    assert_eq!(f.timestamps, [ns_since_epoch], "in frame 1");
+    assert_eq!(f.values, [0.64], "in frame 1");
+
+    let f = assert_unwrap!(&frames[2], Data::FloatPoints, "in frame 2");
+    assert_eq!(f.timestamps, [ns_since_epoch + 3], "in frame 2");
+    assert_eq!(f.values, [0.000_003], "in frame 2");
+
+    let f = assert_unwrap!(&frames[3], Data::FloatPoints, "in frame 3");
+    assert_eq!(f.timestamps, [ns_since_epoch + 2], "in frame 3");
+    assert_eq!(f.values, [1_234_567.891_011], "in frame 3");
+
+    let f = assert_unwrap!(&frames[4], Data::Group, "in frame 4");
+    assert_eq!(byte_vecs_to_strings(&f.tag_keys), vec!["host", "region"]);
+
+    let partition_vals = byte_vecs_to_strings(&f.partition_key_vals);
+    assert_eq!(partition_vals, vec!["server02"], "in frame 4");
+
+    let f = assert_unwrap!(&frames[5], Data::FloatPoints, "in frame 5");
+    assert_eq!(f.timestamps, [ns_since_epoch + 1], "in frame 5");
+    assert_eq!(f.values, [3.89], "in frame 5");
 
     server_thread
         .kill()
@@ -345,4 +396,8 @@ fn tags_as_strings(tags: &[Tag]) -> Vec<(&str, &str)> {
             )
         })
         .collect()
+}
+
+fn byte_vecs_to_strings(v: &[Vec<u8>]) -> Vec<&str> {
+    v.iter().map(|i| str::from_utf8(i).unwrap()).collect()
 }

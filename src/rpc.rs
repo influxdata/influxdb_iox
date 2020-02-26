@@ -1,12 +1,13 @@
 use delorean::delorean::Bucket;
 use delorean::delorean::{
     delorean_server::Delorean,
+    node::{Comparison, Value},
     read_response::{
-        frame::Data, DataType, FloatPointsFrame, Frame, IntegerPointsFrame, SeriesFrame,
+        frame::Data, DataType, FloatPointsFrame, Frame, GroupFrame, IntegerPointsFrame, SeriesFrame,
     },
     storage_server::Storage,
     CapabilitiesResponse, CreateBucketRequest, CreateBucketResponse, DeleteBucketRequest,
-    DeleteBucketResponse, GetBucketsResponse, Organization, Predicate, ReadFilterRequest,
+    DeleteBucketResponse, GetBucketsResponse, Node, Organization, Predicate, ReadFilterRequest,
     ReadGroupRequest, ReadResponse, ReadSource, StringValuesResponse, TagKeysRequest,
     TagValuesRequest, TimestampRange,
 };
@@ -157,9 +158,38 @@ impl Storage for GrpcServer {
 
     async fn read_group(
         &self,
-        _req: tonic::Request<ReadGroupRequest>,
+        req: tonic::Request<ReadGroupRequest>,
     ) -> Result<tonic::Response<Self::ReadGroupStream>, Status> {
-        Err(Status::unimplemented("Not yet implemented"))
+        let (mut tx, rx) = mpsc::channel(4);
+
+        let read_group_request = req.into_inner();
+
+        let _org_id = read_group_request.org_id()?;
+        let bucket = read_group_request.bucket(&self.app.db)?;
+        let predicate = read_group_request.predicate;
+        let range = read_group_request.range;
+        let group_keys = read_group_request.group_keys;
+        // TODO: handle Group::None
+        let _group = read_group_request.group;
+        // TODO: handle aggregate values, especially whether None is the same as
+        // Some(AggregateType::None) or not
+        let _aggregate = read_group_request.aggregate;
+
+        let app = Arc::clone(&self.app);
+
+        // TODO: is this blocking because of the blocking calls to the database...?
+        tokio::spawn(async move {
+            let predicate = predicate.as_ref();
+            let range = range.as_ref();
+
+            if let Err(e) =
+                send_groups(tx.clone(), app, &bucket, predicate, range, group_keys).await
+            {
+                tx.send(Err(e)).await.unwrap();
+            }
+        });
+
+        Ok(tonic::Response::new(rx))
     }
 
     type TagKeysStream = mpsc::Receiver<Result<StringValuesResponse, Status>>;
@@ -334,6 +364,90 @@ async fn send_points(
             let data_frame_response = Ok(ReadResponse { frames });
 
             tx.send(data_frame_response).await.unwrap();
+        }
+    }
+
+    Ok(())
+}
+
+async fn send_groups(
+    mut tx: mpsc::Sender<Result<ReadResponse, Status>>,
+    app: Arc<App>,
+    bucket: &Bucket,
+    predicate: Option<&Predicate>,
+    range: Option<&TimestampRange>,
+    group_keys: Vec<String>,
+) -> Result<(), Status> {
+    // TODO: group_resultset.go has sorting; not sure how/if that fits into proto
+
+    // TODO: handle multiple group keys
+    let group_key = group_keys
+        .first()
+        .ok_or_else(|| Status::invalid_argument("Expected at least one group key"))?;
+
+    // TODO: Pass range when get_tag_values supports range
+    let tag_values_iter = app
+        .db
+        .get_tag_values(&bucket, &group_key, predicate)
+        .map_err(|e| Status::internal(format!("could not query for tag values: {}", e)))?;
+
+    for tag_value in tag_values_iter {
+        // TODO: AND with passed in predicate
+        let partition_predicate = Predicate {
+            root: Some(Node {
+                children: vec![
+                    Node {
+                        children: vec![],
+                        value: Some(Value::TagRefValue(group_key.clone())),
+                    },
+                    Node {
+                        children: vec![],
+                        value: Some(Value::StringValue(tag_value.clone())),
+                    },
+                ],
+                value: Some(Value::Comparison(Comparison::Equal as _)),
+            }),
+        };
+
+        let mut partition_series = app
+            .db
+            .read_series_matching_predicate_and_range(&bucket, Some(&partition_predicate), range)
+            .map_err(|e| Status::internal(format!("could not query for filters: {}", e)))?;
+
+        // Series needed to get the tag_keys
+        let first_series = partition_series
+            .next()
+            .expect("Series wouldn't be in tag values if there wasn't at least one");
+        let tag_keys: Vec<_> = first_series
+            .tags()
+            .iter()
+            .map(|tag| tag.key.clone())
+            .collect();
+
+        let group_frame = ReadResponse {
+            frames: vec![Frame {
+                data: Some(Data::Group(GroupFrame {
+                    tag_keys: tag_keys,
+                    partition_key_vals: vec![tag_value.into_bytes()],
+                })),
+            }],
+        };
+
+        tx.send(Ok(group_frame)).await.unwrap();
+
+        let range = range.as_ref().expect("TODO: Must have a range?");
+
+        // Send the points from the first series that was used to get the tag keys
+        if let Err(e) = send_points(tx.clone(), Arc::clone(&app), bucket, range, first_series).await
+        {
+            tx.send(Err(e)).await.unwrap();
+        }
+
+        // Send the points from the rest of the series filters
+        for series in partition_series {
+            if let Err(e) = send_points(tx.clone(), Arc::clone(&app), bucket, range, series).await {
+                tx.send(Err(e)).await.unwrap();
+            }
         }
     }
 
