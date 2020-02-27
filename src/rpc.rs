@@ -11,6 +11,7 @@ use delorean::delorean::{
     TagValuesRequest, TimestampRange,
 };
 use delorean::storage::database::Database;
+use delorean::storage::inverted_index::SeriesFilter;
 use delorean::storage::SeriesDataType;
 
 use std::convert::TryInto;
@@ -269,57 +270,70 @@ async fn send_series_filters(
 
         tx.send(series_frame_response_header).await.unwrap();
 
-        // TODO: Should this match https://github.com/influxdata/influxdb/blob/d96f3dc5abb6bb187374caa9e7c7a876b4799bd2/storage/reads/response_writer.go#L21 ?
-        const BATCH_SIZE: usize = 1;
+        let app = Arc::clone(&app);
+        if let Err(e) = send_points(tx.clone(), app, bucket, range, series_filter).await {
+            tx.send(Err(e)).await.unwrap();
+        }
+    }
 
-        match series_filter.series_type {
-            SeriesDataType::F64 => {
-                let iter = app
-                    .db
-                    .read_f64_range(&bucket, &series_filter, &range, BATCH_SIZE)
-                    .map_err(|e| {
-                        Status::internal(format!("could not query for SeriesFilter data: {}", e))
-                    })?;
+    Ok(())
+}
 
-                let frames = iter
-                    .map(|batch| {
-                        // TODO: Performance hazard; splitting this vector is non-ideal
-                        let (timestamps, values) =
-                            batch.into_iter().map(|p| (p.time, p.value)).unzip();
-                        Frame {
-                            data: Some(Data::FloatPoints(FloatPointsFrame { timestamps, values })),
-                        }
-                    })
-                    .collect();
-                let data_frame_response = Ok(ReadResponse { frames });
+async fn send_points(
+    mut tx: mpsc::Sender<Result<ReadResponse, Status>>,
+    app: Arc<App>,
+    bucket: &Bucket,
+    range: &TimestampRange,
+    series_filter: SeriesFilter,
+) -> Result<(), Status> {
+    // TODO: Should this match https://github.com/influxdata/influxdb/blob/d96f3dc5abb6bb187374caa9e7c7a876b4799bd2/storage/reads/response_writer.go#L21 ?
+    const BATCH_SIZE: usize = 1;
 
-                tx.send(data_frame_response).await.unwrap();
-            }
-            SeriesDataType::I64 => {
-                let iter = app
-                    .db
-                    .read_i64_range(&bucket, &series_filter, &range, BATCH_SIZE)
-                    .map_err(|e| {
-                        Status::internal(format!("could not query for SeriesFilter data: {}", e))
-                    })?;
+    match series_filter.series_type {
+        SeriesDataType::F64 => {
+            let iter = app
+                .db
+                .read_f64_range(&bucket, &series_filter, &range, BATCH_SIZE)
+                .map_err(|e| {
+                    Status::internal(format!("could not query for SeriesFilter data: {}", e))
+                })?;
 
-                let frames = iter
-                    .map(|batch| {
-                        // TODO: Performance hazard; splitting this vector is non-ideal
-                        let (timestamps, values) =
-                            batch.into_iter().map(|p| (p.time, p.value)).unzip();
-                        Frame {
-                            data: Some(Data::IntegerPoints(IntegerPointsFrame {
-                                timestamps,
-                                values,
-                            })),
-                        }
-                    })
-                    .collect();
-                let data_frame_response = Ok(ReadResponse { frames });
+            let frames = iter
+                .map(|batch| {
+                    // TODO: Performance hazard; splitting this vector is non-ideal
+                    let (timestamps, values) = batch.into_iter().map(|p| (p.time, p.value)).unzip();
+                    Frame {
+                        data: Some(Data::FloatPoints(FloatPointsFrame { timestamps, values })),
+                    }
+                })
+                .collect();
+            let data_frame_response = Ok(ReadResponse { frames });
 
-                tx.send(data_frame_response).await.unwrap();
-            }
+            tx.send(data_frame_response).await.unwrap();
+        }
+        SeriesDataType::I64 => {
+            let iter = app
+                .db
+                .read_i64_range(&bucket, &series_filter, &range, BATCH_SIZE)
+                .map_err(|e| {
+                    Status::internal(format!("could not query for SeriesFilter data: {}", e))
+                })?;
+
+            let frames = iter
+                .map(|batch| {
+                    // TODO: Performance hazard; splitting this vector is non-ideal
+                    let (timestamps, values) = batch.into_iter().map(|p| (p.time, p.value)).unzip();
+                    Frame {
+                        data: Some(Data::IntegerPoints(IntegerPointsFrame {
+                            timestamps,
+                            values,
+                        })),
+                    }
+                })
+                .collect();
+            let data_frame_response = Ok(ReadResponse { frames });
+
+            tx.send(data_frame_response).await.unwrap();
         }
     }
 
