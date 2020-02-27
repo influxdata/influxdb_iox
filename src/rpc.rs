@@ -261,12 +261,11 @@ async fn send_series_filters(
             SeriesDataType::F64 => DataType::Float,
             SeriesDataType::I64 => DataType::Integer,
         } as _;
-        let series = SeriesFrame { data_type, tags };
-        let data = Data::Series(series);
-        let data = Some(data);
-        let frame = Frame { data };
-        let frames = vec![frame];
-        let series_frame_response_header = Ok(ReadResponse { frames });
+        let series_frame_response_header = Ok(ReadResponse {
+            frames: vec![Frame {
+                data: Some(Data::Series(SeriesFrame { data_type, tags })),
+            }],
+        });
 
         tx.send(series_frame_response_header).await.unwrap();
 
@@ -287,10 +286,9 @@ async fn send_series_filters(
                         // TODO: Performance hazard; splitting this vector is non-ideal
                         let (timestamps, values) =
                             batch.into_iter().map(|p| (p.time, p.value)).unzip();
-                        let frame = FloatPointsFrame { timestamps, values };
-                        let data = Data::FloatPoints(frame);
-                        let data = Some(data);
-                        Frame { data }
+                        Frame {
+                            data: Some(Data::FloatPoints(FloatPointsFrame { timestamps, values })),
+                        }
                     })
                     .collect();
                 let data_frame_response = Ok(ReadResponse { frames });
@@ -310,10 +308,12 @@ async fn send_series_filters(
                         // TODO: Performance hazard; splitting this vector is non-ideal
                         let (timestamps, values) =
                             batch.into_iter().map(|p| (p.time, p.value)).unzip();
-                        let frame = IntegerPointsFrame { timestamps, values };
-                        let data = Data::IntegerPoints(frame);
-                        let data = Some(data);
-                        Frame { data }
+                        Frame {
+                            data: Some(Data::IntegerPoints(IntegerPointsFrame {
+                                timestamps,
+                                values,
+                            })),
+                        }
                     })
                     .collect();
                 let data_frame_response = Ok(ReadResponse { frames });
