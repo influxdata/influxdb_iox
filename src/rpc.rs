@@ -25,6 +25,12 @@ pub struct GrpcServer {
     pub app: Arc<App>,
 }
 
+const MEASUREMENT_KEY: &str = "_measurement";
+const FIELD_KEY: &str = "_field";
+
+const MEASUREMENT_KEY_BYTES: &[u8] = MEASUREMENT_KEY.as_bytes();
+const FIELD_KEY_BYTES: &[u8] = FIELD_KEY.as_bytes();
+
 #[tonic::async_trait]
 impl Delorean for GrpcServer {
     async fn create_bucket(
@@ -186,7 +192,13 @@ impl Storage for GrpcServer {
                     .unwrap(),
                 Ok(tag_keys_iter) => {
                     // TODO: Should these be batched? If so, how?
-                    let tag_keys: Vec<_> = tag_keys_iter.map(|s| s.into_bytes()).collect();
+                    let tag_keys: Vec<_> = tag_keys_iter
+                        .map(|s| match s.as_ref() {
+                            "_m" => MEASUREMENT_KEY_BYTES.to_vec(),
+                            "_f" => FIELD_KEY_BYTES.to_vec(),
+                            other => other.as_bytes().to_vec(),
+                        })
+                        .collect();
                     tx.send(Ok(StringValuesResponse { values: tag_keys }))
                         .await
                         .unwrap();
