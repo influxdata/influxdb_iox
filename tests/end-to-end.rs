@@ -277,7 +277,12 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     assert_eq!(f.data_type, DataType::Float as i32, "in frame 0");
     assert_eq!(
         tags_as_strings(&f.tags),
-        vec![("host", "server01"), ("region", "us-west")]
+        vec![
+            ("_measurement", "cpu_load_short"),
+            ("host", "server01"),
+            ("region", "us-west"),
+            ("_field", "value")
+        ]
     );
 
     let f = assert_unwrap!(&frames[1], Data::FloatPoints, "in frame 1");
@@ -293,7 +298,12 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
 
     assert_eq!(
         tags_as_strings(&f.tags),
-        vec![("host", "server01"), ("region", "us-east")]
+        vec![
+            ("_measurement", "cpu_load_short"),
+            ("host", "server01"),
+            ("region", "us-east"),
+            ("_field", "value")
+        ]
     );
 
     let f = assert_unwrap!(&frames[4], Data::FloatPoints, "in frame 4");
@@ -312,7 +322,7 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     let keys = &responses[0].values;
     let keys: Vec<_> = keys.iter().map(|s| str::from_utf8(s).unwrap()).collect();
 
-    assert_eq!(keys, vec!["_f", "_m", "host", "region"]);
+    assert_eq!(keys, vec!["_field", "_measurement", "host", "region"]);
 
     let tag_values_request = tonic::Request::new(TagValuesRequest {
         tags_source: read_source,
