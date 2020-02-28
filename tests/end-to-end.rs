@@ -165,10 +165,12 @@ async fn read_and_write_data() -> Result<(), Box<dyn std::error::Error>> {
         bucket_name,
         format!(
             "\
+cpu_load_short,region=us-east value=27.99 {}
 cpu_load_short,host=server01,region=us-west value=0.64 {}
 cpu_load_short,host=server02,region=us-west value=3.89 {}
 cpu_load_short,host=server01,region=us-east value=1234567.891011 {}
 cpu_load_short,host=server01,region=us-west value=0.000003 {}",
+            ns_since_epoch + 4,
             ns_since_epoch,
             ns_since_epoch + 1,
             ns_since_epoch + 2,
@@ -357,8 +359,8 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
 
     assert_eq!(
         frames.len(),
-        6,
-        "expected exactly 6 frames, but there were {}",
+        8,
+        "expected exactly 8 frames, but there were {}",
         frames.len()
     );
 
@@ -395,6 +397,17 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     let f = assert_unwrap!(&frames[5], Data::FloatPoints, "in frame 5");
     assert_eq!(f.timestamps, [ns_since_epoch + 1], "in frame 5");
     assert_eq!(f.values, [3.89], "in frame 5");
+
+    let f = assert_unwrap!(&frames[6], Data::Group, "in frame 6");
+    assert_eq!(
+        byte_vecs_to_strings(&f.tag_keys),
+        vec!["_measurement", "region", "_field"]
+    );
+    assert!(f.partition_key_vals.is_empty(), "in frame 6");
+
+    let f = assert_unwrap!(&frames[7], Data::FloatPoints, "in frame 7");
+    assert_eq!(f.timestamps, [ns_since_epoch + 4], "in frame 7");
+    assert_eq!(f.values, [27.99], "in frame 7");
 
     server_thread
         .kill()
