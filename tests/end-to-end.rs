@@ -279,7 +279,12 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     assert_eq!(f.data_type, DataType::Float as i32, "in frame 0");
     assert_eq!(
         tags_as_strings(&f.tags),
-        vec![("host", "server01"), ("region", "us-west")]
+        vec![
+            ("_measurement", "cpu_load_short"),
+            ("host", "server01"),
+            ("region", "us-west"),
+            ("_field", "value")
+        ]
     );
 
     let f = assert_unwrap!(&frames[1], Data::FloatPoints, "in frame 1");
@@ -295,7 +300,12 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
 
     assert_eq!(
         tags_as_strings(&f.tags),
-        vec![("host", "server01"), ("region", "us-east")]
+        vec![
+            ("_measurement", "cpu_load_short"),
+            ("host", "server01"),
+            ("region", "us-east"),
+            ("_field", "value")
+        ]
     );
 
     let f = assert_unwrap!(&frames[4], Data::FloatPoints, "in frame 4");
@@ -313,7 +323,7 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
 
     let keys = byte_vecs_to_strings(&responses[0].values);
 
-    assert_eq!(keys, vec!["_f", "_m", "host", "region"]);
+    assert_eq!(keys, vec!["_field", "_measurement", "host", "region"]);
 
     let tag_values_request = tonic::Request::new(TagValuesRequest {
         tags_source: read_source.clone(),
@@ -353,7 +363,10 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     );
 
     let f = assert_unwrap!(&frames[0], Data::Group, "in frame 0");
-    assert_eq!(byte_vecs_to_strings(&f.tag_keys), vec!["host", "region"]);
+    assert_eq!(
+        byte_vecs_to_strings(&f.tag_keys),
+        vec!["_measurement", "host", "region", "_field"]
+    );
 
     let partition_vals = byte_vecs_to_strings(&f.partition_key_vals);
     assert_eq!(partition_vals, vec!["server01"], "in frame 0");
@@ -371,7 +384,10 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     assert_eq!(f.values, [1_234_567.891_011], "in frame 3");
 
     let f = assert_unwrap!(&frames[4], Data::Group, "in frame 4");
-    assert_eq!(byte_vecs_to_strings(&f.tag_keys), vec!["host", "region"]);
+    assert_eq!(
+        byte_vecs_to_strings(&f.tag_keys),
+        vec!["_measurement", "host", "region", "_field"]
+    );
 
     let partition_vals = byte_vecs_to_strings(&f.partition_key_vals);
     assert_eq!(partition_vals, vec!["server02"], "in frame 4");

@@ -41,31 +41,46 @@ impl SeriesFilter {
     // TODO: Handle escaping of ',', '=', and '\t'
     // TODO: Better error handling
     pub fn tags(&self) -> Vec<Tag> {
-        let before_tab = self
-            .key
-            .splitn(2, '\t')
+        let mut tags = vec![];
+        let mut split_on_tab = self.key.splitn(2, '\t');
+
+        let before_tab = split_on_tab
             .next()
             .expect("SeriesFilter key did not contain a tab");
 
-        before_tab
-            .split(',')
-            .skip(1)
-            .map(|kv| {
-                let mut parts = kv.splitn(2, '=');
-                Tag {
-                    key: parts
-                        .next()
-                        .expect("SeriesFilter did not contain expected parts")
-                        .bytes()
-                        .collect(),
-                    value: parts
-                        .next()
-                        .expect("SeriesFilter did not contain expected parts")
-                        .bytes()
-                        .collect(),
-                }
-            })
-            .collect()
+        let mut before_tab_split_on_comma = before_tab.split(',');
+
+        let m = before_tab_split_on_comma
+            .next()
+            .expect("SeriesFilter key did not contain a comma");
+        tags.push(Tag::new("_measurement", m));
+
+        for kv in before_tab_split_on_comma {
+            let mut parts = kv.splitn(2, '=');
+            let key = parts
+                .next()
+                .expect("SeriesFilter key did not contain expected parts");
+            let value = parts
+                .next()
+                .expect("SeriesFilter key did not contain expected parts");
+            tags.push(Tag::new(key, value));
+        }
+
+        let f = split_on_tab
+            .next()
+            .expect("SeriesFilter key did not contain a tab");
+        tags.push(Tag::new("_field", f));
+
+        tags
+    }
+}
+
+impl Tag {
+    fn new(key: &str, value: &str) -> Tag {
+        Tag {
+            key: key.bytes().collect(),
+            value: value.bytes().collect(),
+        }
     }
 }
 
@@ -258,7 +273,12 @@ pub mod tests {
 
         assert_eq!(
             tags_as_strings(&sf.tags()),
-            vec![("host", "b"), ("region", "west")]
+            vec![
+                ("_measurement", "cpu"),
+                ("host", "b"),
+                ("region", "west"),
+                ("_field", "usage_system")
+            ]
         );
     }
 }
