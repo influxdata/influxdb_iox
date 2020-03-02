@@ -41,6 +41,13 @@ impl SeriesFilter {
     // TODO: Handle escaping of ',', '=', and '\t'
     // TODO: Better error handling
     pub fn tags(&self) -> Vec<Tag> {
+        self.tag_string_slices()
+            .iter()
+            .map(|(key, value)| Tag::new(key, value))
+            .collect()
+    }
+
+    fn tag_string_slices(&self) -> Vec<(&str, &str)> {
         let mut tags = vec![];
         let mut split_on_tab = self.key.splitn(2, '\t');
 
@@ -53,7 +60,7 @@ impl SeriesFilter {
         let m = before_tab_split_on_comma
             .next()
             .expect("SeriesFilter key did not contain a comma");
-        tags.push(Tag::new("_measurement", m));
+        tags.push(("_measurement", m));
 
         for kv in before_tab_split_on_comma {
             let mut parts = kv.splitn(2, '=');
@@ -63,13 +70,13 @@ impl SeriesFilter {
             let value = parts
                 .next()
                 .expect("SeriesFilter key did not contain expected parts");
-            tags.push(Tag::new(key, value));
+            tags.push((key, value));
         }
 
         let f = split_on_tab
             .next()
             .expect("SeriesFilter key did not contain a tab");
-        tags.push(Tag::new("_field", f));
+        tags.push(("_field", f));
 
         tags
     }
