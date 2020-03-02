@@ -83,6 +83,11 @@ impl SeriesFilter {
 
         tags
     }
+
+    /// Returns the `Tag` value associated with the provided key.
+    pub fn tag_with_key(&self, key: &str) -> Option<&str> {
+        self.tag_string_slices().get(key).map(|val| *val)
+    }
 }
 
 impl Tag {
@@ -290,5 +295,21 @@ pub mod tests {
                 ("region", "west"),
             ]
         );
+    }
+
+    #[test]
+    fn series_filter_tag_lookup() {
+        let sf = SeriesFilter {
+            id: 1,
+            key: "cpu,host=b,region=west\tusage_system".to_string(),
+            value_predicate: None,
+            series_type: SeriesDataType::I64,
+        };
+
+        assert_eq!(sf.tag_with_key("_measurement"), Some("cpu"));
+        assert_eq!(sf.tag_with_key("host"), Some("b"));
+        assert_eq!(sf.tag_with_key("region"), Some("west"));
+        assert_eq!(sf.tag_with_key("_field"), Some("usage_system"));
+        assert_eq!(sf.tag_with_key("not_present"), None);
     }
 }
