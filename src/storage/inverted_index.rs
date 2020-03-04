@@ -2,6 +2,8 @@ use crate::delorean::{Predicate, Tag};
 use crate::line_parser::PointType;
 use crate::storage::{SeriesDataType, StorageError};
 
+use std::collections::BTreeMap;
+
 pub trait InvertedIndex: Sync + Send {
     fn get_or_create_series_ids_for_points(
         &self,
@@ -40,6 +42,7 @@ pub struct SeriesFilter {
 impl SeriesFilter {
     // TODO: Handle escaping of ',', '=', and '\t'
     // TODO: Better error handling
+    /// Returns the `Tag` keys and values for this `SeriesFilter`, sorted by key.
     pub fn tags(&self) -> Vec<Tag> {
         self.tag_string_slices()
             .iter()
@@ -47,8 +50,8 @@ impl SeriesFilter {
             .collect()
     }
 
-    fn tag_string_slices(&self) -> Vec<(&str, &str)> {
-        let mut tags = vec![];
+    fn tag_string_slices(&self) -> BTreeMap<&str, &str> {
+        let mut tags = BTreeMap::new();
         let mut split_on_tab = self.key.splitn(2, '\t');
 
         let before_tab = split_on_tab
@@ -60,7 +63,7 @@ impl SeriesFilter {
         let m = before_tab_split_on_comma
             .next()
             .expect("SeriesFilter key did not contain a comma");
-        tags.push(("_measurement", m));
+        tags.insert("_measurement", m);
 
         for kv in before_tab_split_on_comma {
             let mut parts = kv.splitn(2, '=');
@@ -70,13 +73,13 @@ impl SeriesFilter {
             let value = parts
                 .next()
                 .expect("SeriesFilter key did not contain expected parts");
-            tags.push((key, value));
+            tags.insert(key, value);
         }
 
         let f = split_on_tab
             .next()
             .expect("SeriesFilter key did not contain a tab");
-        tags.push(("_field", f));
+        tags.insert("_field", f);
 
         tags
     }
@@ -281,10 +284,10 @@ pub mod tests {
         assert_eq!(
             tags_as_strings(&sf.tags()),
             vec![
+                ("_field", "usage_system"),
                 ("_measurement", "cpu"),
                 ("host", "b"),
                 ("region", "west"),
-                ("_field", "usage_system")
             ]
         );
     }

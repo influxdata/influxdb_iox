@@ -279,10 +279,10 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     assert_eq!(
         tags_as_strings(&f.tags),
         vec![
+            ("_field", "value"),
             ("_measurement", "cpu_load_short"),
             ("host", "server01"),
             ("region", "us-west"),
-            ("_field", "value")
         ]
     );
 
@@ -299,9 +299,9 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     assert_eq!(
         tags_as_strings(&f.tags),
         vec![
+            ("_field", "value"),
             ("_measurement", "cpu_load_short"),
             ("host", "server01"),
-            ("_field", "value")
         ]
     );
 
@@ -314,10 +314,10 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     assert_eq!(
         tags_as_strings(&f.tags),
         vec![
+            ("_field", "value"),
             ("_measurement", "cpu_load_short"),
             ("host", "server01"),
             ("region", "us-east"),
-            ("_field", "value")
         ]
     );
 
