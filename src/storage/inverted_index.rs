@@ -88,6 +88,11 @@ impl SeriesFilter {
     pub fn tag_with_key(&self, key: &str) -> Option<&str> {
         self.tag_string_slices().get(key).map(|val| *val)
     }
+
+    /// Returns all tag keys.
+    pub fn tag_keys(&self) -> Vec<&str> {
+        self.tag_string_slices().keys().map(|val| *val).collect()
+    }
 }
 
 impl Tag {
@@ -311,5 +316,25 @@ pub mod tests {
         assert_eq!(sf.tag_with_key("region"), Some("west"));
         assert_eq!(sf.tag_with_key("_field"), Some("usage_system"));
         assert_eq!(sf.tag_with_key("not_present"), None);
+    }
+
+    #[test]
+    fn series_filter_tag_keys() {
+        let sf = SeriesFilter {
+            id: 1,
+            key: "cpu,host=b,region=west\tusage_system".to_string(),
+            value_predicate: None,
+            series_type: SeriesDataType::I64,
+        };
+
+        assert_eq!(
+            sf.tag_keys(),
+            vec![
+                "_field",
+                "_measurement",
+                "host",
+                "region",
+            ]
+        );
     }
 }
