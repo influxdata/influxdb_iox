@@ -7,6 +7,8 @@ use nom::{
     sequence::{separated_pair, terminated, tuple},
     IResult,
 };
+use std::convert::TryInto;
+use std::time::SystemTime;
 use std::{error, fmt};
 
 #[derive(Debug, PartialEq, Clone)]
@@ -199,7 +201,14 @@ pub fn parse(input: &str) -> Vec<PointType> {
                 } = parsed_line;
 
                 assert!(tag_set.is_none(), "TODO: tag set not supported");
-                let timestamp = timestamp.expect("TODO: default timestamp not supported");
+                let timestamp = timestamp.unwrap_or_else(|| {
+                    SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("System time should have been after the epoch")
+                        .as_nanos()
+                        .try_into()
+                        .expect("Unable to represent system time")
+                });
 
                 field_set.into_iter().map(move |(field_key, field_value)| {
                     let series = format!("{}\t{}", measurement, field_key);
@@ -359,6 +368,21 @@ mod test {
         let vals = parse(input);
 
         assert_eq!(vals[0].series(), "foo,tag1=1,tag2=2\tvalue");
+    }
+
+    #[test]
+    fn parse_no_time() {
+        let input = "foo asdf=23.1,bar=5i";
+
+        let vals = parse(input);
+        assert_eq!(vals[0].series(), "foo\tasdf");
+        // Just test that we haven't traveled back in time
+        assert!(vals[0].time() > 1_583_443_428_970_606_000);
+        assert!(approximately_equal(vals[0].f64_value().unwrap(), 23.1));
+
+        assert_eq!(vals[1].series(), "foo\tbar");
+        assert!(vals[1].time() > 1_583_443_428_970_606_000);
+        assert_eq!(vals[1].i64_value().unwrap(), 5);
     }
 
     #[test]
