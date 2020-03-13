@@ -28,11 +28,8 @@ pub struct GrpcServer {
     pub app: Arc<App>,
 }
 
-const MEASUREMENT_KEY: &str = "_measurement";
-const FIELD_KEY: &str = "_field";
-
-const MEASUREMENT_KEY_BYTES: &[u8] = MEASUREMENT_KEY.as_bytes();
-const FIELD_KEY_BYTES: &[u8] = FIELD_KEY.as_bytes();
+const MEASUREMENT_KEY_BYTES: &[u8] = b"_measurement";
+const FIELD_KEY_BYTES: &[u8] = b"_field";
 
 #[tonic::async_trait]
 impl Delorean for GrpcServer {
