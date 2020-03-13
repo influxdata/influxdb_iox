@@ -419,7 +419,7 @@ async fn send_groups(
         let group_frame = ReadResponse {
             frames: vec![Frame {
                 data: Some(Data::Group(GroupFrame {
-                    tag_keys: tag_keys.iter().map(|tk| tk.bytes().collect()).collect(),
+                    tag_keys: tag_keys.iter().map(|tk| tk.as_bytes().to_vec()).collect(),
                     partition_key_vals: partition_key_values
                         .values
                         .iter()

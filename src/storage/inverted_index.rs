@@ -98,8 +98,8 @@ impl SeriesFilter {
 impl Tag {
     fn new(key: &str, value: &str) -> Tag {
         Tag {
-            key: key.bytes().collect(),
-            value: value.bytes().collect(),
+            key: key.as_bytes().to_vec(),
+            value: value.as_bytes().to_vec(),
         }
     }
 }
