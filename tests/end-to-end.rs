@@ -66,8 +66,8 @@ macro_rules! assert_unwrap {
 async fn read_data(
     client: &reqwest::Client,
     path: &str,
-    org_id: u32,
-    bucket_name: &str,
+    org_id: &str,
+    bucket_id: &str,
     predicate: &str,
     seconds_ago: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
@@ -75,8 +75,8 @@ async fn read_data(
     Ok(client
         .get(&url)
         .query(&[
-            ("bucket_name", bucket_name),
-            ("org_id", &org_id.to_string()),
+            ("bucket", bucket_id),
+            ("org", org_id),
             ("predicate", predicate),
             ("start", &format!("-{}s", seconds_ago)),
         ])
@@ -90,17 +90,14 @@ async fn read_data(
 async fn write_data(
     client: &reqwest::Client,
     path: &str,
-    org_id: u32,
-    bucket_name: &str,
+    org_id: &str,
+    bucket_id: &str,
     body: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let url = format!("{}{}", URL_BASE, path);
     client
         .post(&url)
-        .query(&[
-            ("bucket_name", bucket_name),
-            ("org_id", &org_id.to_string()),
-        ])
+        .query(&[("bucket", bucket_id), ("org", org_id)])
         .body(body)
         .send()
         .await?
@@ -130,8 +127,10 @@ async fn read_and_write_data() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: poll the server to see if it's ready instead of sleeping
     sleep(Duration::from_secs(3));
 
-    let org_id = 7878;
-    let bucket_name = "all";
+    let org_id_str = "0000111100001111";
+    let org_id = u64::from_str_radix(org_id_str, 16).unwrap();
+    let bucket_id_str = "1111000011110000";
+    let bucket_id = u64::from_str_radix(bucket_id_str, 16).unwrap();
 
     let client = reqwest::Client::new();
     let mut grpc_client = DeloreanClient::connect(GRPC_URL_BASE).await?;
@@ -161,8 +160,8 @@ async fn read_and_write_data() -> Result<(), Box<dyn std::error::Error>> {
     write_data(
         &client,
         "/write",
-        org_id,
-        bucket_name,
+        org_id_str,
+        bucket_id_str,
         format!(
             "\
 cpu_load_short,host=server01,region=us-west value=0.64 {}
@@ -188,8 +187,8 @@ cpu_load_short,host=server01,region=us-west value=0.000003 {}",
     let text = read_data(
         &client,
         "/read",
-        org_id,
-        bucket_name,
+        org_id_str,
+        bucket_id_str,
         r#"host="server01""#,
         seconds_ago,
     )
@@ -221,8 +220,6 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
 
     let mut storage_client = StorageClient::connect(GRPC_URL_BASE).await?;
 
-    let org_id = u64::from(u32::MAX);
-    let bucket_id = 1; // TODO: how do we know this?
     let partition_id = u64::from(u32::MAX);
     let read_source = ReadSource {
         org_id,

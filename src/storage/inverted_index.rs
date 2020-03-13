@@ -1,4 +1,5 @@
 use crate::delorean::{Predicate, Tag};
+use crate::id::Id;
 use crate::line_parser::PointType;
 use crate::storage::{SeriesDataType, StorageError};
 
@@ -7,25 +8,25 @@ use std::collections::BTreeMap;
 pub trait InvertedIndex: Sync + Send {
     fn get_or_create_series_ids_for_points(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         points: &mut [PointType],
     ) -> Result<(), StorageError>;
 
     fn read_series_matching(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = SeriesFilter> + Send>, StorageError>;
 
     fn get_tag_keys(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = String> + Send>, StorageError>;
 
     fn get_tag_values(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         tag_key: &str,
         predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = String> + Send>, StorageError>;
@@ -107,6 +108,7 @@ impl Tag {
 #[cfg(test)]
 pub mod tests {
     use crate::delorean::Tag;
+    use crate::id::Id;
     use crate::line_parser::PointType;
     use crate::storage::inverted_index::{InvertedIndex, SeriesFilter};
     use crate::storage::predicate::parse_predicate;
@@ -117,8 +119,8 @@ pub mod tests {
     // Test helpers for other implementations to run
 
     pub fn series_id_indexing(index: Box<dyn InvertedIndex>) {
-        let bucket_id = 1;
-        let bucket_2 = 2;
+        let bucket_id: Id = 1u64.into();
+        let bucket_2: Id = 2u64.into();
         let p1 = PointType::new_i64("one".to_string(), 1, 0);
         let p2 = PointType::new_i64("two".to_string(), 23, 40);
         let p3 = PointType::new_i64("three".to_string(), 33, 86);
@@ -147,7 +149,7 @@ pub mod tests {
     }
 
     pub fn series_metadata_indexing(index: Box<dyn InvertedIndex>) {
-        let bucket_id = 1;
+        let bucket_id: Id = 1u64.into();
         let p1 = PointType::new_i64("cpu,host=b,region=west\tusage_system".to_string(), 1, 0);
         let p2 = PointType::new_i64("cpu,host=a,region=west\tusage_system".to_string(), 1, 0);
         let p3 = PointType::new_i64("cpu,host=a,region=west\tusage_user".to_string(), 1, 0);

@@ -13,6 +13,12 @@ pub mod delorean {
     include!(concat!(env!("OUT_DIR"), "/delorean.rs"));
 }
 
+impl delorean::Bucket {
+    fn id(&self) -> id::Id {
+        self.id.into()
+    }
+}
+
 // TODO: audit all errors and their handling in main
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,17 +1,18 @@
 use crate::delorean::TimestampRange;
+use crate::id::Id;
 use crate::line_parser::PointType;
 use crate::storage::StorageError;
 
 pub trait SeriesStore: Sync + Send {
     fn write_points_with_series_ids(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         points: &[PointType],
     ) -> Result<(), StorageError>;
 
     fn read_i64_range(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         series_id: u64,
         range: &TimestampRange,
         batch_size: usize,
@@ -19,7 +20,7 @@ pub trait SeriesStore: Sync + Send {
 
     fn read_f64_range(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         series_id: u64,
         range: &TimestampRange,
         batch_size: usize,
@@ -36,12 +37,13 @@ pub struct ReadPoint<T: Clone> {
 #[cfg(test)]
 pub mod tests {
     use crate::delorean::TimestampRange;
+    use crate::id::Id;
     use crate::line_parser::PointType;
     use crate::storage::series_store::{ReadPoint, SeriesStore};
 
     pub fn write_and_read_i64(store: Box<dyn SeriesStore>) {
-        let b1_id = 1;
-        let b2_id = 2;
+        let b1_id: Id = 1u64.into();
+        let b2_id: Id = 2u64.into();
         let mut p1 = PointType::new_i64("cpu,host=b,region=west\tusage_system".to_string(), 1, 1);
         p1.set_series_id(1);
         let mut p2 = PointType::new_i64("cpu,host=b,region=west\tusage_system".to_string(), 1, 2);
@@ -127,7 +129,7 @@ pub mod tests {
     }
 
     pub fn write_and_read_f64(store: Box<dyn SeriesStore>) {
-        let bucket_id = 1;
+        let bucket_id: Id = 1u64.into();
         let mut p1 = PointType::new_f64("cpu,host=b,region=west\tusage_system".to_string(), 1.0, 1);
         p1.set_series_id(1);
         let mut p2 = PointType::new_f64("cpu,host=b,region=west\tusage_system".to_string(), 2.2, 2);

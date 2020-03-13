@@ -10,6 +10,7 @@ use delorean::delorean::{
     ReadGroupRequest, ReadResponse, ReadSource, StringValuesResponse, TagKeysRequest,
     TagValuesRequest, TimestampRange,
 };
+use delorean::id::Id;
 use delorean::storage::database::Database;
 use delorean::storage::inverted_index::SeriesFilter;
 use delorean::storage::SeriesDataType;
@@ -75,23 +76,23 @@ trait GrpcInputs {
         })?)
     }
 
-    fn org_id(&self) -> Result<u32, Status> {
+    fn org_id(&self) -> Result<Id, Status> {
         Ok(self
             .read_source()?
             .org_id
             .try_into()
-            .map_err(|_| Status::invalid_argument("org_id did not fit in a u32"))?)
+            .map_err(|_| Status::invalid_argument("org_id did not fit in a u64"))?)
     }
 
-    fn bucket(&self, db: &Database) -> Result<Arc<Bucket>, Status> {
-        let bucket_id = self
+    fn bucket(&self, org: Id, db: &Database) -> Result<Arc<Bucket>, Status> {
+        let bucket_id: Id = self
             .read_source()?
             .bucket_id
             .try_into()
-            .map_err(|_| Status::invalid_argument("bucket_id did not fit in a u32"))?;
+            .map_err(|_| Status::invalid_argument("bucket_id did not fit in a u64"))?;
 
         let maybe_bucket = db
-            .get_bucket_by_id(bucket_id)
+            .get_bucket_by_name(org, &bucket_id.to_string())
             .map_err(|_| Status::internal("could not query for bucket"))?;
 
         Ok(maybe_bucket
@@ -135,8 +136,8 @@ impl Storage for GrpcServer {
 
         let read_filter_request = req.into_inner();
 
-        let _org_id = read_filter_request.org_id()?;
-        let bucket = read_filter_request.bucket(&self.app.db)?;
+        let org_id = read_filter_request.org_id()?;
+        let bucket = read_filter_request.bucket(org_id, &self.app.db)?;
         let predicate = read_filter_request.predicate;
         let range = read_filter_request.range;
 
@@ -168,8 +169,8 @@ impl Storage for GrpcServer {
 
         let read_group_request = req.into_inner();
 
-        let _org_id = read_group_request.org_id()?;
-        let bucket = read_group_request.bucket(&self.app.db)?;
+        let org_id = read_group_request.org_id()?;
+        let bucket = read_group_request.bucket(org_id, &self.app.db)?;
         let predicate = read_group_request.predicate;
         let range = read_group_request.range;
         let group_keys = read_group_request.group_keys;
@@ -206,8 +207,8 @@ impl Storage for GrpcServer {
 
         let tag_keys_request = req.get_ref();
 
-        let _org_id = tag_keys_request.org_id()?;
-        let bucket = tag_keys_request.bucket(&self.app.db)?;
+        let org_id = tag_keys_request.org_id()?;
+        let bucket = tag_keys_request.bucket(org_id, &self.app.db)?;
         let predicate = tag_keys_request.predicate.clone();
         let _range = tag_keys_request.range.as_ref();
 
@@ -248,8 +249,8 @@ impl Storage for GrpcServer {
 
         let tag_values_request = req.get_ref();
 
-        let _org_id = tag_values_request.org_id()?;
-        let bucket = tag_values_request.bucket(&self.app.db)?;
+        let org_id = tag_values_request.org_id()?;
+        let bucket = tag_values_request.bucket(org_id, &self.app.db)?;
         let predicate = tag_values_request.predicate.clone();
         let _range = tag_values_request.range.as_ref();
 

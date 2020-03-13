@@ -1,4 +1,5 @@
 use crate::delorean::{Bucket, IndexLevel, Node, Predicate, TimestampRange};
+use crate::id::Id;
 use crate::line_parser::PointType;
 use crate::storage::config_store::ConfigStore;
 use crate::storage::inverted_index::{InvertedIndex, SeriesFilter};
@@ -31,9 +32,9 @@ use rocksdb::{
 pub struct RocksDB {
     db: Arc<RwLock<DB>>,
     // bucket_map is an in memory map of what buckets exist in the system. the key is the org id and bucket name together as bytes
-    bucket_map: Arc<RwLock<HashMap<Vec<u8>, Arc<Bucket>>>>,
+    bucket_map: Arc<RwLock<HashMap<Vec<u8>, Arc<RocksBucket>>>>,
     // `bucket_id_map` is an in-memory map of bucket IDs to buckets that exist in the system.
-    bucket_id_map: Arc<RwLock<HashMap<u32, Arc<Bucket>>>>,
+    bucket_id_map: Arc<RwLock<HashMap<u32, Arc<RocksBucket>>>>,
     // series_insert_lock is a map of mutexes for creating new series in each bucket. Bucket ids are unique across all orgs
     series_insert_lock: Arc<RwLock<HashMap<u32, Mutex<u64>>>>,
 }
@@ -157,10 +158,10 @@ impl RocksDB {
     ///
     /// * `org_id` - The organization this bucket is under
     /// * `bucket` - The bucket to create along with all of its configuration options. Ignores the ID.
-    pub fn create_bucket_if_not_exists(
+    fn create_bucket_if_not_exists(
         &self,
         org_id: u32,
-        bucket: &Bucket,
+        bucket: &RocksBucket,
     ) -> Result<u32, StorageError> {
         validate_bucket_fields(bucket)?;
 
@@ -195,7 +196,8 @@ impl RocksDB {
         };
 
         store.id = next_id;
-        store
+        let real_bucket_store: Bucket = store.clone().into();
+        real_bucket_store
             .encode(&mut buf)
             .expect("unexpected error encoding bucket");
 
@@ -211,7 +213,7 @@ impl RocksDB {
         let id = store.id;
         let arc_bucket = Arc::new(store);
         map.insert(key, arc_bucket.clone());
-        id_map.insert(id, arc_bucket);
+        id_map.insert(id as u32, arc_bucket);
 
         Ok(id)
     }
@@ -222,11 +224,11 @@ impl RocksDB {
     ///
     /// * `org_id` - The organization this bucket is under
     /// * `name` - The name of the bucket (which is unique under an organization)
-    pub fn get_bucket_by_name(
+    fn get_bucket_by_name(
         &self,
         org_id: u32,
         name: &str,
-    ) -> Result<Option<Arc<Bucket>>, StorageError> {
+    ) -> Result<Option<Arc<RocksBucket>>, StorageError> {
         let buckets = self.bucket_map.read().unwrap();
         let key = bucket_key(org_id, name);
         Ok(buckets.get(&key).map(Arc::clone))
@@ -237,7 +239,7 @@ impl RocksDB {
     /// # Arguments
     ///
     /// * `bucket_id` - The ID of the bucket (which is globally unique)
-    pub fn get_bucket_by_id(&self, bucket_id: u32) -> Result<Option<Arc<Bucket>>, StorageError> {
+    fn get_bucket_by_id(&self, bucket_id: u32) -> Result<Option<Arc<RocksBucket>>, StorageError> {
         let buckets = self.bucket_id_map.read().unwrap();
         Ok(buckets.get(&bucket_id).map(Arc::clone))
     }
@@ -655,6 +657,7 @@ impl RocksDB {
                 }
                 BucketEntryType::Bucket => {
                     let bucket = Bucket::decode(&*value).expect("unexpected error decoding bucket");
+                    let bucket: RocksBucket = bucket.into();
                     let key = bucket_key(bucket.org_id, &bucket.name);
                     let arc_bucket = Arc::new(bucket);
                     bucket_map.insert(key, arc_bucket.clone());
@@ -696,42 +699,58 @@ impl ToRocksDBBytes for f64 {
     }
 }
 
+// Truncate ID values for RocksDB to keep the internal implementation somewhat stable, rather than
+// spend time updating it when it might not be used
+impl From<Id> for u32 {
+    fn from(value: Id) -> u32 {
+        let u64_value: u64 = value.into();
+        u64_value as u32
+    }
+}
+
+// For convenience with the current RocksDB internal implementation; shouldn't be needed elsewhere.
+impl From<u32> for Id {
+    fn from(value: u32) -> Id {
+        (value as u64).into()
+    }
+}
+
 impl InvertedIndex for RocksDB {
     fn get_or_create_series_ids_for_points(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         points: &mut [PointType],
     ) -> Result<(), StorageError> {
-        self.get_series_ids(bucket_id, points)?;
-        self.insert_series_without_ids(bucket_id, points);
+        self.get_series_ids(bucket_id.into(), points)?;
+        self.insert_series_without_ids(bucket_id.into(), points);
         Ok(())
     }
 
     fn read_series_matching(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = SeriesFilter> + Send>, StorageError> {
-        let filters = self.get_series_filters(bucket_id, predicate)?;
+        let filters = self.get_series_filters(bucket_id.into(), predicate)?;
         Ok(Box::new(filters.into_iter()))
     }
 
     fn get_tag_keys(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = String> + Send>, StorageError> {
-        let keys = self.get_tag_keys(bucket_id, predicate);
+        let keys = self.get_tag_keys(bucket_id.into(), predicate);
         Ok(Box::new(keys.into_iter()))
     }
 
     fn get_tag_values(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         tag_key: &str,
         predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = String> + Send>, StorageError> {
-        let values = self.get_tag_values(bucket_id, tag_key, predicate);
+        let values = self.get_tag_values(bucket_id.into(), tag_key, predicate);
         Ok(Box::new(values.into_iter()))
     }
 }
@@ -739,52 +758,52 @@ impl InvertedIndex for RocksDB {
 impl SeriesStore for RocksDB {
     fn write_points_with_series_ids(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         points: &[PointType],
     ) -> Result<(), StorageError> {
-        self.write_points(bucket_id, &points)
+        self.write_points(bucket_id.into(), &points)
     }
 
     fn read_i64_range(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         series_id: u64,
         range: &TimestampRange,
         batch_size: usize,
     ) -> Result<Box<dyn Iterator<Item = Vec<ReadPoint<i64>>> + Send>, StorageError> {
-        self.read_range(bucket_id, series_id, range, batch_size)
+        self.read_range(bucket_id.into(), series_id, range, batch_size)
     }
 
     fn read_f64_range(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         series_id: u64,
         range: &TimestampRange,
         batch_size: usize,
     ) -> Result<Box<dyn Iterator<Item = Vec<ReadPoint<f64>>> + Send>, StorageError> {
-        self.read_range(bucket_id, series_id, range, batch_size)
+        self.read_range(bucket_id.into(), series_id, range, batch_size)
     }
 }
 
 impl ConfigStore for RocksDB {
-    fn create_bucket_if_not_exists(
-        &self,
-        org_id: u32,
-        bucket: &Bucket,
-    ) -> Result<u32, StorageError> {
-        self.create_bucket_if_not_exists(org_id, bucket)
+    fn create_bucket_if_not_exists(&self, org_id: Id, bucket: &Bucket) -> Result<Id, StorageError> {
+        let bucket: RocksBucket = bucket.into();
+        self.create_bucket_if_not_exists(org_id.into(), &bucket)
+            .map(Into::into)
     }
 
     fn get_bucket_by_name(
         &self,
-        org_id: u32,
+        org_id: Id,
         bucket_name: &str,
     ) -> Result<Option<Arc<Bucket>>, StorageError> {
-        self.get_bucket_by_name(org_id, bucket_name)
+        let rocks_bucket = self.get_bucket_by_name(org_id.into(), bucket_name)?;
+        Ok(rocks_bucket.map(|rb| Arc::new(rb.into())))
     }
 
-    fn get_bucket_by_id(&self, bucket_id: u32) -> Result<Option<Arc<Bucket>>, StorageError> {
-        self.get_bucket_by_id(bucket_id)
+    fn get_bucket_by_id(&self, bucket_id: Id) -> Result<Option<Arc<Bucket>>, StorageError> {
+        let rocks_bucket = self.get_bucket_by_id(bucket_id.into())?;
+        Ok(rocks_bucket.map(|rb| Arc::new(rb.into())))
     }
 }
 
@@ -1044,7 +1063,7 @@ impl TryFrom<u8> for BucketEntryType {
 }
 
 // TODO: ensure required fields are present and write tests
-fn validate_bucket_fields(_bucket: &Bucket) -> Result<(), StorageError> {
+fn validate_bucket_fields(_bucket: &RocksBucket) -> Result<(), StorageError> {
     Ok(())
 }
 // returns the byte key to find this bucket in the buckets CF in rocks
@@ -1090,18 +1109,64 @@ impl FromBytes for f64 {
     }
 }
 
-impl Bucket {
-    pub fn new(org_id: u32, name: String) -> Bucket {
+#[derive(Debug, Clone, PartialEq)]
+struct RocksBucket {
+    org_id: u32,
+    id: u32,
+    name: String,
+    retention: String,
+    posting_list_rollover: u32,
+    index_levels: Vec<IndexLevel>,
+}
+
+impl From<Bucket> for RocksBucket {
+    fn from(other: Bucket) -> RocksBucket {
+        RocksBucket {
+            org_id: other.org_id as u32,
+            id: other.id as u32,
+            name: other.name,
+            retention: other.retention,
+            posting_list_rollover: other.posting_list_rollover,
+            index_levels: other.index_levels,
+        }
+    }
+}
+
+impl From<&Bucket> for RocksBucket {
+    fn from(other: &Bucket) -> RocksBucket {
+        RocksBucket {
+            org_id: other.org_id as u32,
+            id: other.id as u32,
+            name: other.name.clone(),
+            retention: other.retention.clone(),
+            posting_list_rollover: other.posting_list_rollover,
+            index_levels: other.index_levels.clone(),
+        }
+    }
+}
+
+impl From<RocksBucket> for Bucket {
+    fn from(other: RocksBucket) -> Bucket {
         Bucket {
-            org_id,
-            id: 0,
-            name,
-            retention: "0".to_string(),
-            posting_list_rollover: 10_000,
-            index_levels: vec![IndexLevel {
-                duration_seconds: 0,
-                timezone: "EDT".to_string(),
-            }],
+            org_id: other.org_id.into(),
+            id: other.id.into(),
+            name: other.name,
+            retention: other.retention,
+            posting_list_rollover: other.posting_list_rollover,
+            index_levels: other.index_levels,
+        }
+    }
+}
+
+impl From<Arc<RocksBucket>> for Bucket {
+    fn from(other: Arc<RocksBucket>) -> Bucket {
+        Bucket {
+            org_id: other.org_id.into(),
+            id: other.id.into(),
+            name: other.name.clone(),
+            retention: other.retention.clone(),
+            posting_list_rollover: other.posting_list_rollover,
+            index_levels: other.index_levels.clone(),
         }
     }
 }
@@ -1123,14 +1188,30 @@ mod tests {
 
     use crate::storage::predicate::parse_predicate;
 
+    impl RocksBucket {
+        pub fn new(org_id: u32, name: String) -> RocksBucket {
+            RocksBucket {
+                org_id,
+                id: 0,
+                name,
+                retention: "0".to_string(),
+                posting_list_rollover: 10_000,
+                index_levels: vec![IndexLevel {
+                    duration_seconds: 0,
+                    timezone: "EDT".to_string(),
+                }],
+            }
+        }
+    }
+
     #[test]
     fn create_and_get_buckets() {
-        let bucket: Arc<Bucket>;
+        let bucket: Arc<RocksBucket>;
         let org_id = 1;
-        let mut bucket2 = Bucket::new(2, "Foo".to_string());
+        let mut bucket2 = RocksBucket::new(2, "Foo".to_string());
         {
             let db = test_database("create_and_get_buckets", true);
-            let mut b = Bucket::new(org_id, "Foo".to_string());
+            let mut b = RocksBucket::new(org_id, "Foo".to_string());
 
             b.id = db.create_bucket_if_not_exists(org_id, &b).unwrap();
             assert_eq!(b.id, 1);
@@ -1159,7 +1240,7 @@ mod tests {
             assert_eq!(Arc::new(bucket2), stored2);
 
             // ensure second bucket gets new ID
-            let mut b2 = Bucket::new(org_id, "two".to_string());
+            let mut b2 = RocksBucket::new(org_id, "two".to_string());
             b2.id = db.create_bucket_if_not_exists(org_id, &b2).unwrap();
             assert_eq!(b2.id, 3);
             let stored_bucket = db.get_bucket_by_name(org_id, &b2.name).unwrap().unwrap();
@@ -1178,7 +1259,7 @@ mod tests {
             assert_eq!(bucket, stored_bucket);
 
             // ensure a new bucket will get a new ID
-            let mut b = Bucket::new(org_id, "asdf".to_string());
+            let mut b = RocksBucket::new(org_id, "asdf".to_string());
             b.id = db.create_bucket_if_not_exists(org_id, &b).unwrap();
             assert_eq!(b.id, 4);
         }
@@ -1187,8 +1268,10 @@ mod tests {
     #[test]
     fn series_id_indexing() {
         let org_id = 23;
-        let mut b = Bucket::new(org_id, "series".to_string());
-        let mut b2 = Bucket::new(1, "series".to_string());
+        let mut rb = RocksBucket::new(org_id, "series".to_string());
+        let mut b: Bucket = rb.clone().into();
+        let mut rb2 = RocksBucket::new(1, "series".to_string());
+        let mut b2: Bucket = rb2.clone().into();
         let p1 = PointType::new_i64("one".to_string(), 1, 0);
         let p2 = PointType::new_i64("two".to_string(), 23, 40);
         let p3 = PointType::new_i64("three".to_string(), 33, 86);
@@ -1196,32 +1279,34 @@ mod tests {
 
         {
             let db = test_database("series_id_indexing", true);
-            b.id = db.create_bucket_if_not_exists(org_id, &b).unwrap();
-            b2.id = db.create_bucket_if_not_exists(b2.org_id, &b2).unwrap();
+            rb.id = db.create_bucket_if_not_exists(org_id, &rb).unwrap();
+            b.id = rb.id.into();
+            rb2.id = db.create_bucket_if_not_exists(rb2.org_id, &rb2).unwrap();
+            b2.id = rb2.id.into();
 
             let mut points = vec![p1.clone(), p2.clone()];
-            db.get_or_create_series_ids_for_points(b.id, &mut points)
+            db.get_or_create_series_ids_for_points(b.id(), &mut points)
                 .unwrap();
             assert_eq!(points[0].series_id(), Some(1));
             assert_eq!(points[1].series_id(), Some(2));
 
             // now insert a new series and make sure it shows up
             let mut points = vec![p1.clone(), p3.clone()];
-            db.get_series_ids(b.id, &mut points).unwrap();
+            db.get_series_ids(rb.id, &mut points).unwrap();
             assert_eq!(points[0].series_id(), Some(1));
             assert_eq!(points[1].series_id(), None);
 
-            db.get_or_create_series_ids_for_points(b.id, &mut points)
+            db.get_or_create_series_ids_for_points(b.id(), &mut points)
                 .unwrap();
             assert_eq!(points[0].series_id(), Some(1));
             assert_eq!(points[1].series_id(), Some(3));
 
             let mut points = vec![p1.clone()];
-            db.get_series_ids(b2.id, &mut points).unwrap();
+            db.get_series_ids(rb2.id, &mut points).unwrap();
             assert_eq!(points[0].series_id(), None);
 
             // insert a series into the other org bucket
-            db.get_or_create_series_ids_for_points(b2.id, &mut points)
+            db.get_or_create_series_ids_for_points(b2.id(), &mut points)
                 .unwrap();
             assert_eq!(points[0].series_id(), Some(1));
         }
@@ -1232,11 +1317,11 @@ mod tests {
 
             // check the first org
             let mut points = vec![p4.clone()];
-            db.insert_series_without_ids(b.id, &mut points);
+            db.insert_series_without_ids(rb.id, &mut points);
             assert_eq!(points[0].series_id(), Some(4));
 
             let mut points = vec![p1.clone(), p2.clone(), p3.clone(), p4];
-            db.get_series_ids(b.id, &mut points).unwrap();
+            db.get_series_ids(rb.id, &mut points).unwrap();
             assert_eq!(points[0].series_id(), Some(1));
             assert_eq!(points[1].series_id(), Some(2));
             assert_eq!(points[2].series_id(), Some(3));
@@ -1244,11 +1329,11 @@ mod tests {
 
             // check the second org
             let mut points = vec![p2.clone()];
-            db.insert_series_without_ids(b2.id, &mut points);
+            db.insert_series_without_ids(rb2.id, &mut points);
             assert_eq!(points[0].series_id(), Some(2));
 
             let mut points = vec![p1, p2, p3];
-            db.get_series_ids(b2.id, &mut points).unwrap();
+            db.get_series_ids(rb2.id, &mut points).unwrap();
             assert_eq!(points[0].series_id(), Some(1));
             assert_eq!(points[1].series_id(), Some(2));
             assert_eq!(points[2].series_id(), None);
@@ -1257,24 +1342,26 @@ mod tests {
 
     #[test]
     fn series_metadata_indexing() {
-        let mut bucket = Bucket::new(1, "foo".to_string());
+        let mut rocks_bucket = RocksBucket::new(1, "foo".to_string());
+        let mut bucket: Bucket = rocks_bucket.clone().into();
         let db = test_database("series_metadata_indexing", true);
         let p1 = PointType::new_i64("cpu,host=b,region=west\tusage_system".to_string(), 1, 0);
         let p2 = PointType::new_i64("cpu,host=a,region=west\tusage_system".to_string(), 1, 0);
         let p3 = PointType::new_i64("cpu,host=a,region=west\tusage_user".to_string(), 1, 0);
         let p4 = PointType::new_i64("mem,host=b,region=west\tfree".to_string(), 1, 0);
 
-        bucket.id = db
-            .create_bucket_if_not_exists(bucket.org_id, &bucket)
+        rocks_bucket.id = db
+            .create_bucket_if_not_exists(rocks_bucket.org_id, &rocks_bucket)
             .unwrap();
+        bucket.id = rocks_bucket.id.into();
         let mut points = vec![p1, p2, p3, p4];
-        db.get_or_create_series_ids_for_points(bucket.id, &mut points)
+        db.get_or_create_series_ids_for_points(bucket.id(), &mut points)
             .unwrap();
 
-        let tag_keys = db.get_tag_keys(bucket.id, None);
+        let tag_keys = db.get_tag_keys(rocks_bucket.id, None);
         assert_eq!(tag_keys, vec!["_f", "_m", "host", "region"]);
 
-        let tag_values = db.get_tag_values(bucket.id, "host", None);
+        let tag_values = db.get_tag_values(rocks_bucket.id, "host", None);
         assert_eq!(tag_values, vec!["a", "b"]);
 
         // get all series
@@ -1282,7 +1369,7 @@ mod tests {
         // get series with measurement = mem
         let pred = parse_predicate(r#"_m = "cpu""#).unwrap();
         let series: Vec<SeriesFilter> = db
-            .read_series_matching(bucket.id, Some(&pred))
+            .read_series_matching(bucket.id(), Some(&pred))
             .unwrap()
             .collect();
         assert_eq!(
@@ -1312,7 +1399,7 @@ mod tests {
         // get series with host = a
         let pred = parse_predicate(r#"host = "a""#).unwrap();
         let series: Vec<SeriesFilter> = db
-            .read_series_matching(bucket.id, Some(&pred))
+            .read_series_matching(bucket.id(), Some(&pred))
             .unwrap()
             .collect();
         assert_eq!(
@@ -1336,7 +1423,7 @@ mod tests {
         // get series with measurement = cpu and host = b
         let pred = parse_predicate(r#"_m = "cpu" and host = "b""#).unwrap();
         let series: Vec<SeriesFilter> = db
-            .read_series_matching(bucket.id, Some(&pred))
+            .read_series_matching(bucket.id(), Some(&pred))
             .unwrap()
             .collect();
         assert_eq!(
@@ -1351,7 +1438,7 @@ mod tests {
 
         let pred = parse_predicate(r#"host = "a" OR _m = "mem""#).unwrap();
         let series: Vec<SeriesFilter> = db
-            .read_series_matching(bucket.id, Some(&pred))
+            .read_series_matching(bucket.id(), Some(&pred))
             .unwrap()
             .collect();
         assert_eq!(
@@ -1381,22 +1468,24 @@ mod tests {
 
     #[test]
     fn catch_rocksdb_iterator_segfault() {
-        let mut b1 = Bucket::new(1, "bucket1".to_string());
+        let mut rb1 = RocksBucket::new(1, "bucket1".to_string());
+        let mut b1: Bucket = rb1.clone().into();
         let db = test_database("catch_rocksdb_iterator_segfault", true);
 
         let p1 = PointType::new_i64("cpu,host=b,region=west\tusage_system".to_string(), 1, 1);
 
-        b1.id = db.create_bucket_if_not_exists(b1.org_id, &b1).unwrap();
+        rb1.id = db.create_bucket_if_not_exists(rb1.org_id, &rb1).unwrap();
+        b1.id = rb1.id.into();
 
         let mut points = vec![p1];
-        db.get_or_create_series_ids_for_points(b1.id, &mut points)
+        db.get_or_create_series_ids_for_points(b1.id(), &mut points)
             .unwrap();
-        db.write_points(b1.id, &points).unwrap();
+        db.write_points(rb1.id, &points).unwrap();
 
         // test that we'll only read from the bucket we wrote points into
         let range = TimestampRange { start: 1, end: 4 };
         let pred = parse_predicate(r#"_m = "cpu""#).unwrap();
-        let mut iter = db.read_series_matching(b1.id, Some(&pred)).unwrap();
+        let mut iter = db.read_series_matching(b1.id(), Some(&pred)).unwrap();
 
         let series_filter = iter.next().unwrap();
         assert_eq!(
@@ -1410,7 +1499,7 @@ mod tests {
         );
         assert_eq!(iter.next(), None);
         let mut points_iter = db
-            .read_i64_range(b1.id, series_filter.id, &range, 10)
+            .read_i64_range(b1.id(), series_filter.id, &range, 10)
             .unwrap();
         let points = points_iter.next().unwrap();
         assert_eq!(points, vec![ReadPoint { time: 1, value: 1 },]);
@@ -1419,8 +1508,10 @@ mod tests {
 
     #[test]
     fn write_and_read_points() {
-        let mut b1 = Bucket::new(1, "bucket1".to_string());
-        let mut b2 = Bucket::new(2, "bucket2".to_string());
+        let mut rb1 = RocksBucket::new(1, "bucket1".to_string());
+        let mut b1: Bucket = rb1.clone().into();
+        let mut rb2 = RocksBucket::new(2, "bucket2".to_string());
+        let mut b2: Bucket = rb2.clone().into();
         let db = test_database("write_and_read_points", true);
 
         let p1 = PointType::new_i64("cpu,host=b,region=west\tusage_system".to_string(), 1, 1);
@@ -1428,23 +1519,25 @@ mod tests {
         let p3 = PointType::new_i64("mem,host=b,region=west\tfree".to_string(), 1, 2);
         let p4 = PointType::new_i64("mem,host=b,region=west\tfree".to_string(), 1, 4);
 
-        b1.id = db.create_bucket_if_not_exists(b1.org_id, &b1).unwrap();
-        b2.id = db.create_bucket_if_not_exists(b2.org_id, &b2).unwrap();
+        rb1.id = db.create_bucket_if_not_exists(rb1.org_id, &rb1).unwrap();
+        b1.id = rb1.id.into();
+        rb2.id = db.create_bucket_if_not_exists(rb2.org_id, &rb2).unwrap();
+        b2.id = rb2.id.into();
 
         let mut b1_points = vec![p1.clone(), p2.clone()];
-        db.get_or_create_series_ids_for_points(b1.id, &mut b1_points)
+        db.get_or_create_series_ids_for_points(b1.id(), &mut b1_points)
             .unwrap();
-        db.write_points(b1.id, &b1_points).unwrap();
+        db.write_points(rb1.id, &b1_points).unwrap();
 
         let mut b2_points = vec![p1, p2, p3, p4];
-        db.get_or_create_series_ids_for_points(b2.id, &mut b2_points)
+        db.get_or_create_series_ids_for_points(b2.id(), &mut b2_points)
             .unwrap();
-        db.write_points(b2.id, &b2_points).unwrap();
+        db.write_points(rb2.id, &b2_points).unwrap();
 
         // test that we'll only read from the bucket we wrote points into
         let range = TimestampRange { start: 1, end: 4 };
         let pred = parse_predicate(r#"_m = "cpu" OR _m = "mem""#).unwrap();
-        let mut iter = db.read_series_matching(b1.id, Some(&pred)).unwrap();
+        let mut iter = db.read_series_matching(b1.id(), Some(&pred)).unwrap();
         let series_filter = iter.next().unwrap();
         assert_eq!(
             series_filter,
@@ -1457,7 +1550,7 @@ mod tests {
         );
         assert_eq!(iter.next(), None);
         let mut points_iter = db
-            .read_i64_range(b1.id, series_filter.id, &range, 10)
+            .read_i64_range(b1.id(), series_filter.id, &range, 10)
             .unwrap();
         let points = points_iter.next().unwrap();
         assert_eq!(
@@ -1471,7 +1564,7 @@ mod tests {
 
         // test that we'll read multiple series
         let pred = parse_predicate(r#"_m = "cpu" OR _m = "mem""#).unwrap();
-        let mut iter = db.read_series_matching(b2.id, Some(&pred)).unwrap();
+        let mut iter = db.read_series_matching(b2.id(), Some(&pred)).unwrap();
         let series_filter = iter.next().unwrap();
         assert_eq!(
             series_filter,
@@ -1483,7 +1576,7 @@ mod tests {
             }
         );
         let mut points_iter = db
-            .read_i64_range(b2.id, series_filter.id, &range, 10)
+            .read_i64_range(b2.id(), series_filter.id, &range, 10)
             .unwrap();
         let points = points_iter.next().unwrap();
         assert_eq!(
@@ -1505,7 +1598,7 @@ mod tests {
             }
         );
         let mut points_iter = db
-            .read_i64_range(b2.id, series_filter.id, &range, 10)
+            .read_i64_range(b2.id(), series_filter.id, &range, 10)
             .unwrap();
         let points = points_iter.next().unwrap();
         assert_eq!(
@@ -1518,7 +1611,7 @@ mod tests {
 
         // test that the batch size is honored
         let pred = parse_predicate(r#"host = "b""#).unwrap();
-        let mut iter = db.read_series_matching(b1.id, Some(&pred)).unwrap();
+        let mut iter = db.read_series_matching(b1.id(), Some(&pred)).unwrap();
         let series_filter = iter.next().unwrap();
         assert_eq!(
             series_filter,
@@ -1531,7 +1624,7 @@ mod tests {
         );
         assert_eq!(iter.next(), None);
         let mut points_iter = db
-            .read_i64_range(b1.id, series_filter.id, &range, 1)
+            .read_i64_range(b1.id(), series_filter.id, &range, 1)
             .unwrap();
         let points = points_iter.next().unwrap();
         assert_eq!(points, vec![ReadPoint { time: 1, value: 1 },]);
@@ -1541,7 +1634,7 @@ mod tests {
         // test that the time range is properly limiting
         let range = TimestampRange { start: 2, end: 3 };
         let pred = parse_predicate(r#"_m = "cpu" OR _m = "mem""#).unwrap();
-        let mut iter = db.read_series_matching(b2.id, Some(&pred)).unwrap();
+        let mut iter = db.read_series_matching(b2.id(), Some(&pred)).unwrap();
         let series_filter = iter.next().unwrap();
         assert_eq!(
             series_filter,
@@ -1553,7 +1646,7 @@ mod tests {
             }
         );
         let mut points_iter = db
-            .read_i64_range(b2.id, series_filter.id, &range, 10)
+            .read_i64_range(b2.id(), series_filter.id, &range, 10)
             .unwrap();
         let points = points_iter.next().unwrap();
         assert_eq!(points, vec![ReadPoint { time: 2, value: 1 },]);
@@ -1569,7 +1662,7 @@ mod tests {
             }
         );
         let mut points_iter = db
-            .read_i64_range(b2.id, series_filter.id, &range, 10)
+            .read_i64_range(b2.id(), series_filter.id, &range, 10)
             .unwrap();
         let points = points_iter.next().unwrap();
         assert_eq!(points, vec![ReadPoint { time: 2, value: 1 },]);
@@ -1577,23 +1670,25 @@ mod tests {
 
     #[test]
     fn write_and_read_float_values() {
-        let mut b1 = Bucket::new(1, "bucket1".to_string());
+        let mut rb1 = RocksBucket::new(1, "bucket1".to_string());
+        let mut b1: Bucket = rb1.clone().into();
         let db = test_database("write_and_read_float_values", true);
 
         let p1 = PointType::new_f64("cpu,host=b,region=west\tusage_system".to_string(), 1.0, 1);
         let p2 = PointType::new_f64("cpu,host=b,region=west\tusage_system".to_string(), 2.2, 2);
 
-        b1.id = db.create_bucket_if_not_exists(b1.org_id, &b1).unwrap();
+        rb1.id = db.create_bucket_if_not_exists(rb1.org_id, &rb1).unwrap();
+        b1.id = rb1.id.into();
 
         let mut points = vec![p1, p2];
-        db.get_or_create_series_ids_for_points(b1.id, &mut points)
+        db.get_or_create_series_ids_for_points(b1.id(), &mut points)
             .unwrap();
-        db.write_points_with_series_ids(b1.id, &points).unwrap();
+        db.write_points_with_series_ids(b1.id(), &points).unwrap();
 
         // test that we'll only read from the bucket we wrote points into
         let range = TimestampRange { start: 0, end: 4 };
         let pred = parse_predicate(r#"_m = "cpu""#).unwrap();
-        let mut iter = db.read_series_matching(b1.id, Some(&pred)).unwrap();
+        let mut iter = db.read_series_matching(b1.id(), Some(&pred)).unwrap();
         let series_filter = iter.next().unwrap();
         assert_eq!(
             series_filter,
@@ -1606,7 +1701,7 @@ mod tests {
         );
         assert_eq!(iter.next(), None);
         let mut points_iter = db
-            .read_f64_range(b1.id, series_filter.id, &range, 10)
+            .read_f64_range(b1.id(), series_filter.id, &range, 10)
             .unwrap();
         let points = points_iter.next().unwrap();
         assert_eq!(

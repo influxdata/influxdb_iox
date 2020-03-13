@@ -7,6 +7,7 @@ use delorean::delorean::Bucket;
 use delorean::delorean::{
     delorean_server::DeloreanServer, storage_server::StorageServer, TimestampRange,
 };
+use delorean::id::Id;
 use delorean::line_parser;
 use delorean::line_parser::index_pairs;
 use delorean::storage::database::Database;
@@ -39,8 +40,8 @@ const MAX_SIZE: usize = 1_048_576; // max write request size of 1MB
 
 #[derive(Deserialize)]
 struct WriteInfo {
-    org_id: u32,
-    bucket_name: String,
+    org: Id,
+    bucket: Id,
 }
 
 async fn write(req: hyper::Request<Body>, app: Arc<App>) -> Result<Option<Body>, ApplicationError> {
@@ -48,9 +49,13 @@ async fn write(req: hyper::Request<Body>, app: Arc<App>) -> Result<Option<Body>,
     let write_info: WriteInfo =
         serde_urlencoded::from_str(query).map_err(|_| StatusCode::BAD_REQUEST)?;
 
+    // Even though tools like `inch` and `storectl query` pass bucket IDs, treat them as
+    // `bucket_name` in delorean because RocksDB sets auto-incrementing IDs for buckets.
+    let bucket_name = write_info.bucket.to_string();
+
     let maybe_bucket = app
         .db
-        .get_bucket_by_name(write_info.org_id, &write_info.bucket_name)
+        .get_bucket_by_name(write_info.org, &bucket_name)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let bucket = match maybe_bucket {
@@ -58,19 +63,19 @@ async fn write(req: hyper::Request<Body>, app: Arc<App>) -> Result<Option<Body>,
         None => {
             // create this as the default bucket
             let b = Bucket {
-                org_id: write_info.org_id,
+                org_id: write_info.org.into(),
                 id: 0,
-                name: write_info.bucket_name.clone(),
+                name: bucket_name.clone(),
                 retention: "0".to_string(),
                 posting_list_rollover: 10_000,
                 index_levels: vec![],
             };
 
             app.db
-                .create_bucket_if_not_exists(write_info.org_id, &b)
+                .create_bucket_if_not_exists(write_info.org, &b)
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             app.db
-                .get_bucket_by_name(write_info.org_id, &write_info.bucket_name)
+                .get_bucket_by_name(write_info.org, &bucket_name)
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
                 .expect("Bucket should have just been created")
         }
@@ -96,7 +101,7 @@ async fn write(req: hyper::Request<Body>, app: Arc<App>) -> Result<Option<Body>,
     let mut points = line_parser::parse(body);
 
     app.db
-        .write_points(write_info.org_id, &bucket, &mut points)
+        .write_points(write_info.org, &bucket, &mut points)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(None)
@@ -104,8 +109,8 @@ async fn write(req: hyper::Request<Body>, app: Arc<App>) -> Result<Option<Body>,
 
 #[derive(Deserialize, Debug)]
 struct ReadInfo {
-    org_id: u32,
-    bucket_name: String,
+    org: Id,
+    bucket: Id,
     predicate: String,
     start: Option<String>,
     stop: Option<String>,
@@ -136,6 +141,10 @@ async fn read(req: hyper::Request<Body>, app: Arc<App>) -> Result<Option<Body>, 
     let read_info: ReadInfo =
         serde_urlencoded::from_str(query).map_err(|_| StatusCode::BAD_REQUEST)?;
 
+    // Even though tools like `inch` and `storectl query` pass bucket IDs, treat them as
+    // `bucket_name` in delorean because RocksDB sets auto-incrementing IDs for buckets.
+    let bucket_name = read_info.bucket.to_string();
+
     let predicate = parse_predicate(&read_info.predicate).map_err(|_| StatusCode::BAD_REQUEST)?;
 
     let now = std::time::SystemTime::now();
@@ -154,7 +163,7 @@ async fn read(req: hyper::Request<Body>, app: Arc<App>) -> Result<Option<Body>, 
 
     let maybe_bucket = app
         .db
-        .get_bucket_by_name(read_info.org_id, &read_info.bucket_name)
+        .get_bucket_by_name(read_info.org, &bucket_name)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let bucket = match maybe_bucket {
@@ -162,7 +171,7 @@ async fn read(req: hyper::Request<Body>, app: Arc<App>) -> Result<Option<Body>, 
         None => {
             return Err(ApplicationError::new(
                 StatusCode::NOT_FOUND,
-                &format!("bucket {} not found", read_info.bucket_name),
+                &format!("bucket {} not found", bucket_name),
             ));
         }
     };

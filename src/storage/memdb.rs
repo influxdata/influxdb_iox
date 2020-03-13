@@ -1,4 +1,5 @@
 use crate::delorean::{Node, Predicate, TimestampRange};
+use crate::id::Id;
 use crate::line_parser::{ParseError, Point, PointType};
 use crate::storage::inverted_index::{InvertedIndex, SeriesFilter};
 use crate::storage::predicate::{Evaluate, EvaluateVisitor};
@@ -18,8 +19,8 @@ use croaring::Treemap;
 #[derive(Default)]
 pub struct MemDB {
     default_ring_buffer_size: usize,
-    bucket_id_to_series_data: Arc<RwLock<HashMap<u32, Mutex<SeriesData>>>>,
-    bucket_id_to_series_map: Arc<RwLock<HashMap<u32, RwLock<SeriesMap>>>>,
+    bucket_id_to_series_data: Arc<RwLock<HashMap<Id, Mutex<SeriesData>>>>,
+    bucket_id_to_series_map: Arc<RwLock<HashMap<Id, RwLock<SeriesMap>>>>,
 }
 
 struct SeriesData {
@@ -237,7 +238,7 @@ impl MemDB {
 
     fn get_or_create_series_ids_for_points(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         points: &mut [PointType],
     ) -> Result<(), StorageError> {
         // first try to do everything with just a read lock
@@ -269,7 +270,7 @@ impl MemDB {
     // get_series_ids_for_points attempts to fill the series ids for all points in the passed in
     // collection using only a read lock. If no SeriesMap exists for the bucket, it will be inserted.
     // It will return true if all points have series ids filled in.
-    fn get_series_ids_for_points(&self, bucket_id: u32, points: &mut [PointType]) -> bool {
+    fn get_series_ids_for_points(&self, bucket_id: Id, points: &mut [PointType]) -> bool {
         let buckets = self.bucket_id_to_series_map.read().unwrap();
         match buckets.get(&bucket_id) {
             Some(b) => {
@@ -301,7 +302,7 @@ impl MemDB {
 
     fn get_tag_keys(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         _predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = String> + Send>, StorageError> {
         match self.bucket_id_to_series_map.read().unwrap().get(&bucket_id) {
@@ -317,7 +318,7 @@ impl MemDB {
 
     fn get_tag_values(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         tag_key: &str,
         _predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = String> + Send>, StorageError> {
@@ -337,7 +338,7 @@ impl MemDB {
 
     fn read_series_matching(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = SeriesFilter> + Send>, StorageError> {
         let pred = match predicate {
@@ -386,7 +387,7 @@ impl MemDB {
 
     fn write_points_with_series_ids(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         points: &[PointType],
     ) -> Result<(), StorageError> {
         let bucket_data = self.bucket_id_to_series_data.read().unwrap();
@@ -415,7 +416,7 @@ impl MemDB {
 
     fn read_range<T: 'static + Clone + FromSeries + Send>(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         series_id: u64,
         range: &TimestampRange,
         batch_size: usize,
@@ -506,7 +507,7 @@ fn evaluate_node(series_map: &SeriesMap, n: &Node) -> Result<Treemap, StorageErr
 impl InvertedIndex for MemDB {
     fn get_or_create_series_ids_for_points(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         points: &mut [PointType],
     ) -> Result<(), StorageError> {
         self.get_or_create_series_ids_for_points(bucket_id, points)
@@ -514,7 +515,7 @@ impl InvertedIndex for MemDB {
 
     fn read_series_matching(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = SeriesFilter> + Send>, StorageError> {
         self.read_series_matching(bucket_id, predicate)
@@ -522,7 +523,7 @@ impl InvertedIndex for MemDB {
 
     fn get_tag_keys(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = String> + Send>, StorageError> {
         self.get_tag_keys(bucket_id, predicate)
@@ -530,7 +531,7 @@ impl InvertedIndex for MemDB {
 
     fn get_tag_values(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         tag_key: &str,
         predicate: Option<&Predicate>,
     ) -> Result<Box<dyn Iterator<Item = String> + Send>, StorageError> {
@@ -541,7 +542,7 @@ impl InvertedIndex for MemDB {
 impl SeriesStore for MemDB {
     fn write_points_with_series_ids(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         points: &[PointType],
     ) -> Result<(), StorageError> {
         self.write_points_with_series_ids(bucket_id, points)
@@ -549,7 +550,7 @@ impl SeriesStore for MemDB {
 
     fn read_i64_range(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         series_id: u64,
         range: &TimestampRange,
         batch_size: usize,
@@ -559,7 +560,7 @@ impl SeriesStore for MemDB {
 
     fn read_f64_range(
         &self,
-        bucket_id: u32,
+        bucket_id: Id,
         series_id: u64,
         range: &TimestampRange,
         batch_size: usize,
