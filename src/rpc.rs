@@ -228,7 +228,7 @@ impl Storage for GrpcServer {
                         .map(|s| match s.as_ref() {
                             "_m" => MEASUREMENT_KEY_BYTES.to_vec(),
                             "_f" => FIELD_KEY_BYTES.to_vec(),
-                            other => other.as_bytes().to_vec(),
+                            _ => s.into_bytes(),
                         })
                         .collect();
                     tx.send(Ok(StringValuesResponse { values: tag_keys }))
