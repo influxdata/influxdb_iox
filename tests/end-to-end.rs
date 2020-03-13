@@ -376,7 +376,8 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     let f = assert_unwrap!(&frames[0], Data::Group, "in frame 0");
     assert_eq!(
         byte_vecs_to_strings(&f.tag_keys),
-        vec!["_field", "_measurement", "host", "region"]
+        vec!["_field", "_measurement", "host", "region"],
+        "in frame 0",
     );
     let partition_vals = byte_vecs_to_strings(&f.partition_key_vals);
     assert_eq!(partition_vals, vec!["us-east"], "in frame 0");
@@ -388,7 +389,8 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     let f = assert_unwrap!(&frames[2], Data::Group, "in frame 2");
     assert_eq!(
         byte_vecs_to_strings(&f.tag_keys),
-        vec!["_field", "_measurement", "host", "region"]
+        vec!["_field", "_measurement", "host", "region"],
+        "in frame 2",
     );
     let partition_vals = byte_vecs_to_strings(&f.partition_key_vals);
     assert_eq!(partition_vals, vec!["us-west"], "in frame 2");
@@ -404,7 +406,8 @@ cpu_load_short,server01,us-east,value,{},1234567.891011
     let f = assert_unwrap!(&frames[5], Data::Group, "in frame 5");
     assert_eq!(
         byte_vecs_to_strings(&f.tag_keys),
-        vec!["_field", "_measurement", "host"]
+        vec!["_field", "_measurement", "host"],
+        "in frame 5",
     );
     assert_eq!(f.partition_key_vals.len(), 1, "in frame 5");
     assert!(f.partition_key_vals[0].is_empty(), "in frame 5");
