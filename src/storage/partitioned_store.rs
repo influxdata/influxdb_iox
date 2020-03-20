@@ -526,4 +526,93 @@ mod tests {
             ],
         )
     }
+
+    use futures::executor;
+    use proptest::prelude::*;
+    use std::task::Poll;
+
+    /// Generates a vector of sorted arbitrary data of type `T`.
+    fn arb_sorted_data<T: Arbitrary + Ord>() -> impl Strategy<Value = Vec<T>> {
+        any::<Vec<T>>().prop_map(|mut d| {
+            d.sort();
+            d
+        })
+    }
+
+    /// Adds a small, arbitrary number of `Poll::Pending` values before
+    /// and after each existing sorted value.
+    fn arb_proto_stream<T: Arbitrary + Ord + Clone>() -> impl Strategy<Value = ProtoStream<T>> {
+        let max_pending_in_a_row = 10;
+
+        arb_sorted_data().prop_perturb(move |values, mut rng| {
+            let original = values.clone();
+
+            let mut poll_values: Vec<_> = values
+                .into_iter()
+                .flat_map(|v| {
+                    let n_pending = rng.gen_range(0, max_pending_in_a_row);
+                    let mut results = vec![Poll::Pending; n_pending];
+                    results.push(Poll::Ready(v));
+                    results
+                })
+                .collect();
+
+            let n_pending = rng.gen_range(0, max_pending_in_a_row);
+            poll_values.extend(vec![Poll::Pending; n_pending]);
+
+            ProtoStream {
+                original,
+                poll_values,
+            }
+        })
+    }
+
+    #[derive(Debug, Clone)]
+    struct ProtoStream<T> {
+        original: Vec<T>,
+        poll_values: Vec<Poll<T>>,
+    }
+
+    impl<T: 'static> ProtoStream<T> {
+        fn to_stream(self) -> (Vec<T>, impl Stream<Item = T>) {
+            let Self {
+                original,
+                mut poll_values,
+            } = self;
+
+            // Since we pop off the poll values for implementation
+            // simplicity, we reverse them first so the original
+            // values line up.
+            poll_values.reverse();
+
+            let mut exhausted = false;
+
+            (
+                original,
+                stream::poll_fn(move |ctx| {
+                    // Always schedule a wakeup as nothing else will!
+                    ctx.waker().wake_by_ref();
+
+                    match poll_values.pop() {
+                        Some(v) => v.map(Some),
+                        None if !exhausted => {
+                            // Always return a `Poll::Ready(None)` when all data has been returned.
+                            exhausted = true;
+                            Poll::Ready(None)
+                        }
+                        None => panic!("stream polled after it was exhausted"),
+                    }
+                }),
+            )
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_add(a in arb_proto_stream::<i32>()) {
+            let (values, stream) = a.to_stream();
+            let stream_vals: Vec<_> = executor::block_on_stream(stream).collect();
+            assert_eq!(values, stream_vals);
+        }
+    }
 }
