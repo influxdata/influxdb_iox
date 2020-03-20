@@ -624,11 +624,22 @@ mod tests {
 
     proptest! {
         #[test]
-        fn test_add(a in arb_proto_stream::<i32>()) {
-            let (values, stream) = a.to_stream();
-            let stream_vals: Vec<_> = executor::block_on_stream(stream).collect();
-            prop_assert_eq!(&values, &stream_vals);
-            prop_assert!(values.is_empty());
+        fn test_string_merge_stream(
+            a in arb_proto_stream::<String>(),
+            b in arb_proto_stream::<String>(),
+        ) {
+            let (a_values, a_stream) = a.to_stream();
+            let (b_values, b_stream) = b.to_stream();
+            let merger =
+                StringMergeStream::new(vec![a_stream.boxed(), b_stream.boxed()]);
+
+            let stream_vals: Vec<_> = executor::block_on_stream(merger).collect();
+
+            let mut expected_vals = a_values.clone();
+            expected_vals.extend(b_values);
+            expected_vals.sort();
+            expected_vals.dedup();
+            prop_assert_eq!(expected_vals, stream_vals);
         }
     }
 }
