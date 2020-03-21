@@ -531,35 +531,43 @@ mod tests {
     use proptest::prelude::*;
     use std::task::Poll;
 
-    /// Generates a vector of sorted arbitrary data of type `T`.
-    fn arb_sorted_data<T: Arbitrary + Ord>() -> impl Strategy<Value = Vec<T>> {
-        any::<Vec<T>>().prop_map(|mut d| {
-            d.sort();
-            d
-        })
+    /// Given a vector of optional values, put all the `Some` values in sorted order, leaving the
+    /// `None` values interspersed as they are.
+    fn sort_present_values<T: Ord>(d: &mut Vec<Option<T>>) {
+        let mut values = vec![];
+        let mut indices = vec![];
+
+        for (i, v) in d.iter_mut().enumerate() {
+            if let Some(v) = v.take() {
+                values.push(v);
+                indices.push(i);
+            }
+        }
+
+        values.sort();
+
+        for (v, i) in values.into_iter().zip(indices) {
+            d[i] = Some(v);
+        }
     }
 
-    /// Adds a small, arbitrary number of `Poll::Pending` values before
-    /// and after each existing sorted value.
+    /// Adds an arbitrary number of `Poll::Pending` values throughout the `Poll::Ready(Some(T))`
+    /// values returned by the stream.
     fn arb_proto_stream<T: Arbitrary + Ord + Clone>() -> impl Strategy<Value = ProtoStream<T>> {
-        let max_pending_in_a_row = 10;
+        // Generate a vector of optional values
+        any::<Vec<Option<T>>>().prop_map(|mut v| {
+            sort_present_values(&mut v);
 
-        arb_sorted_data().prop_perturb(move |values, mut rng| {
-            let original = values.clone();
-
-            let mut poll_values: Vec<_> = values
+            // `original` will contain the sorted present values only
+            let original = v.clone().into_iter().flatten().collect();
+            let poll_values = v
                 .into_iter()
-                .flat_map(|v| {
-                    let n_pending = rng.gen_range(0, max_pending_in_a_row);
-                    let mut results = vec![Poll::Pending; n_pending];
-                    results.push(Poll::Ready(v));
-                    results
+                .map(|v| match v {
+                    // Convert optional values to `Poll` values
+                    Some(v) => Poll::Ready(v),
+                    None => Poll::Pending,
                 })
                 .collect();
-
-            let n_pending = rng.gen_range(0, max_pending_in_a_row);
-            poll_values.extend(vec![Poll::Pending; n_pending]);
-
             ProtoStream {
                 original,
                 poll_values,
@@ -600,6 +608,8 @@ mod tests {
                             exhausted = true;
                             Poll::Ready(None)
                         }
+                        // A property of `ProtoStream`s is they're never polled after returning
+                        // `Poll::Ready(None)`.
                         None => panic!("stream polled after it was exhausted"),
                     }
                 }),
@@ -612,7 +622,8 @@ mod tests {
         fn test_add(a in arb_proto_stream::<i32>()) {
             let (values, stream) = a.to_stream();
             let stream_vals: Vec<_> = executor::block_on_stream(stream).collect();
-            assert_eq!(values, stream_vals);
+            prop_assert_eq!(&values, &stream_vals);
+            prop_assert!(values.is_empty());
         }
     }
 }
