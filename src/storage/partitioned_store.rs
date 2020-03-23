@@ -590,36 +590,37 @@ mod tests {
         fn to_stream(self) -> (Vec<T>, impl Stream<Item = T>) {
             let Self {
                 original,
-                mut poll_values,
+                poll_values,
             } = self;
 
-            // Since we pop off the poll values for implementation
-            // simplicity, we reverse them first so the original
-            // values line up.
-            poll_values.reverse();
-
-            let mut exhausted = false;
-
-            (
-                original,
-                stream::poll_fn(move |ctx| {
-                    // Always schedule a wakeup as nothing else will!
-                    ctx.waker().wake_by_ref();
-
-                    match poll_values.pop() {
-                        Some(v) => v.map(Some),
-                        None if !exhausted => {
-                            // Always return a `Poll::Ready(None)` when all data has been returned.
-                            exhausted = true;
-                            Poll::Ready(None)
-                        }
-                        // A property of `ProtoStream`s is they're never polled after returning
-                        // `Poll::Ready(None)`.
-                        None => panic!("stream polled after it was exhausted"),
-                    }
-                }),
-            )
+            (original, stream_test_double(poll_values))
         }
+    }
+
+    fn stream_test_double<T>(mut poll_values: Vec<Poll<T>>) -> impl Stream<Item = T> {
+        // Since we pop off the poll values for implementation
+        // simplicity, we reverse them first so the original
+        // values line up.
+        poll_values.reverse();
+
+        let mut exhausted = false;
+
+        stream::poll_fn(move |ctx| {
+            // Always schedule a wakeup as nothing else will!
+            ctx.waker().wake_by_ref();
+
+            match poll_values.pop() {
+                Some(v) => v.map(Some),
+                None if !exhausted => {
+                    // Always return a `Poll::Ready(None)` when all data has been returned.
+                    exhausted = true;
+                    Poll::Ready(None)
+                }
+                // A property of `ProtoStream`s is they're never polled after returning
+                // `Poll::Ready(None)`.
+                None => panic!("stream polled after it was exhausted"),
+            }
+        })
     }
 
     proptest! {
@@ -641,5 +642,29 @@ mod tests {
             expected_vals.dedup();
             prop_assert_eq!(expected_vals, stream_vals);
         }
+    }
+
+    // Unit tests generated from previous property test failures
+
+    #[test]
+    fn merge_two_empty_streams() {
+        let a = stream_test_double(vec![Poll::Pending]);
+        let b = stream_test_double(vec![Poll::Pending]);
+
+        let merger = StringMergeStream::new(vec![a.boxed(), b.boxed()]);
+
+        let stream_vals: Vec<_> = executor::block_on_stream(merger).collect();
+        assert!(stream_vals.is_empty());
+    }
+
+    #[test]
+    fn merge_one_empty_and_one_nonempty_stream() {
+        let a = stream_test_double(vec![]);
+        let b = stream_test_double(vec![Poll::Ready(String::from(""))]);
+
+        let merger = StringMergeStream::new(vec![a.boxed(), b.boxed()]);
+
+        let stream_vals: Vec<_> = executor::block_on_stream(merger).collect();
+        assert_eq!(stream_vals, vec![String::from("")]);
     }
 }
