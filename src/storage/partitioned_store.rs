@@ -580,6 +580,76 @@ mod tests {
         })
     }
 
+    fn arb_read_values_strategy() -> impl Strategy<Value = ReadValues> {
+        prop_oneof![
+            any::<Vec<(i64, i64)>>().prop_map(|points_and_times| {
+                ReadValues::I64(
+                    points_and_times
+                        .into_iter()
+                        .map(|(point, time)| ReadPoint { value: point, time })
+                        .collect(),
+                )
+            }),
+            any::<Vec<(f64, i64)>>().prop_map(|points_and_times| {
+                ReadValues::F64(
+                    points_and_times
+                        .into_iter()
+                        .map(|(point, time)| ReadPoint { value: point, time })
+                        .collect(),
+                )
+            }),
+        ]
+    }
+
+    fn arb_maybe_read_batch() -> impl Strategy<Value = Option<ReadBatch>> {
+        proptest::option::of(
+            (any::<String>(), arb_read_values_strategy())
+                .prop_map(|(key, values)| ReadBatch { key, values }),
+        )
+    }
+
+    fn arb_proto_stream_of_read_merge_strings() -> impl Strategy<Value = ProtoStream<ReadBatch>> {
+        prop::collection::vec(arb_maybe_read_batch(), 0..100).prop_map(|mut d| {
+            let mut values = vec![];
+            let mut indices = vec![];
+
+            for (i, v) in d.iter_mut().enumerate() {
+                if let Some(v) = v.take() {
+                    values.push(v);
+                    indices.push(i);
+                }
+            }
+
+            // Can't use sort_by_key or dedup_by_key here, see:
+            // https://stackoverflow.com/questions/47121985/why-cant-i-use-a-key-function-that-returns-a-reference-when-sorting-a-vector-wi
+            values.sort_by(|a, b| a.key.cmp(&b.key));
+
+            // Remove duplicates because this is an invariant upheld by the input streams.
+            // If this assumption changes, this code should be updated.
+            // Duplicates will become `None` values.
+            values.dedup_by(|a, b| a.key == b.key);
+
+            for (v, i) in values.into_iter().zip(indices) {
+                d[i] = Some(v);
+            }
+
+            // `original` will contain the sorted present values only
+            let original = d.clone().into_iter().flatten().collect();
+            let poll_values = d
+                .into_iter()
+                .map(|v| match v {
+                    // Convert optional values to `Poll` values
+                    Some(v) => Poll::Ready(v),
+                    None => Poll::Pending,
+                })
+                .collect();
+            ProtoStream {
+                original,
+                poll_values,
+            }
+        })
+    }
+
     #[derive(Debug, Clone)]
     struct ProtoStream<T> {
         original: Vec<T>,
@@ -640,6 +710,27 @@ mod tests {
             expected_vals.extend(b_values);
             expected_vals.sort();
             expected_vals.dedup();
+            prop_assert_eq!(expected_vals, stream_vals);
+        }
+
+        #[test]
+        fn test_read_merge_stream(
+            a in arb_proto_stream_of_read_merge_strings(),
+            b in arb_proto_stream_of_read_merge_strings(),
+        ) {
+            let (a_values, a_stream) = a.to_stream();
+            let (b_values, b_stream) = b.to_stream();
+            let merger =
+                ReadMergeStream::new(vec![a_stream.boxed(), b_stream.boxed()]);
+
+            let stream_vals: Vec<_> = executor::block_on_stream(merger).collect();
+
+            let mut expected_vals = a_values.clone();
+            expected_vals.extend(b_values);
+            // Can't use sort_by_key or dedup_by_key here, see:
+            // https://stackoverflow.com/questions/47121985/why-cant-i-use-a-key-function-that-returns-a-reference-when-sorting-a-vector-wi
+            expected_vals.sort_by(|a, b| a.key.cmp(&b.key));
+            expected_vals.dedup_by(|a, b| a.key == b.key);
             prop_assert_eq!(expected_vals, stream_vals);
         }
     }
