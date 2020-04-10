@@ -44,6 +44,10 @@ snafu = "0.6.2"
 either = "1.5.3"
 smallvec = "1.2.0"
 
+tremor-runtime = { git = "https://github.com/integer32llc/tremor-runtime" }
+tremor-influx = { git = "https://github.com/integer32llc/tremor-runtime" }
+simd-json = { version = "0.3" }
+
 [dev-dependencies]
 criterion = "0.3"
 reqwest = { version = "0.10.1", features = ["blocking"] }
