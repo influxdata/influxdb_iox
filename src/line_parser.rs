@@ -672,6 +672,31 @@ mod test {
         assert_eq!(vals[1].time(), 1234);
         assert_eq!(vals[1].i64_value().unwrap(), 5);
 
+        // Compare parsed data to tremor's line protocol and binflux parsers
+
+        // Note this is one `Value`, compared to two `PointType`s delorean parses
+        let expected: simd_json::value::borrowed::Value<'static> = json!({
+            "measurement": "foo",
+            "tags": {},
+            "fields": {
+                "asdf": 23.1,
+                "bar": 5,
+            },
+            "timestamp": 1234,
+        })
+        .into();
+
+        let tremor_influx: simd_json::value::borrowed::Value<'_> =
+            tremor_influx::decode(input, 0).unwrap().unwrap();
+        assert_eq!(tremor_influx, expected);
+
+        use tremor_runtime::codec::binflux::BInflux;
+
+        let binflux = BInflux::encode(&expected)?;
+        let binflux_parsed = BInflux::decode(&binflux)?;
+
+        assert_eq!(binflux_parsed, expected);
+
         Ok(())
     }
 
@@ -692,6 +717,23 @@ mod test {
 
         assert_eq!(vals[0].series(), "foo,tag1=1,tag2=2\tvalue");
 
+        let expected: simd_json::value::borrowed::Value<'static> = json!({
+            "measurement": "foo",
+            "tags": {
+                "tag2": "2", // note the tags aren't sorted
+                "tag1": "1",
+            },
+            "fields": {
+                "value": 1.0,
+            },
+            "timestamp": 123,
+        })
+        .into();
+
+        let tremor_influx: simd_json::value::borrowed::Value<'_> =
+            tremor_influx::decode(input, 0).unwrap().unwrap();
+        assert_eq!(tremor_influx, expected);
+
         Ok(())
     }
 
@@ -704,6 +746,23 @@ mod test {
             err.to_string(),
             r#"Must not contain duplicate tags, but "tag" was repeated"#
         );
+
+        // note that parsing duplicate tags succeeds
+        let expected: simd_json::value::borrowed::Value<'static> = json!({
+            "measurement": "foo",
+            "tags": {
+                "tag": "2", // note that tag=1 was thrown away
+            },
+            "fields": {
+                "value": 1.0,
+            },
+            "timestamp": 123,
+        })
+        .into();
+
+        let tremor_influx: simd_json::value::borrowed::Value<'_> =
+            tremor_influx::decode(input, 0).unwrap().unwrap();
+        assert_eq!(tremor_influx, expected);
 
         Ok(())
     }

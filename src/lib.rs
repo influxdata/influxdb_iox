@@ -1,6 +1,10 @@
 #![deny(rust_2018_idioms)]
 #![warn(clippy::explicit_iter_loop)]
 
+#[cfg(test)]
+#[macro_use]
+extern crate simd_json;
+
 use std::{error, fmt};
 
 pub mod encoders;
