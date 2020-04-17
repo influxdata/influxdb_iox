@@ -43,6 +43,7 @@ nom = "5.1.1"
 snafu = "0.6.2"
 either = "1.5.3"
 smallvec = "1.2.0"
+wal-rs = "1.0.2"
 
 [dev-dependencies]
 criterion = "0.3"

@@ -1,9 +1,12 @@
 use crate::delorean::{Bucket, Predicate, TimestampRange};
 use crate::id::Id;
-use crate::line_parser::PointType;
-use crate::storage::memdb::MemDB;
-use crate::storage::partitioned_store::{Partition, ReadBatch};
-use crate::storage::StorageError;
+use crate::line_parser::{self, PointType};
+use crate::storage::{
+    memdb::MemDB,
+    partitioned_store::{Partition, ReadBatch},
+    wal::DeloreanWal,
+    StorageError,
+};
 
 use futures::StreamExt;
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
@@ -99,6 +102,53 @@ impl Database {
         Database {
             organizations: RwLock::new(HashMap::new()),
         }
+    }
+
+    pub async fn restore(&self, wal: &DeloreanWal) -> Result<(), StorageError> {
+        let orgs_and_buckets = wal.orgs_and_buckets().await.map_err(|e| StorageError {
+            description: e.to_string(),
+        })?;
+
+        let mut orgs = self.organizations.write().await;
+
+        for (org_id, bucket_names_to_ids) in orgs_and_buckets {
+            let org = orgs
+                .entry(org_id)
+                .or_insert_with(|| RwLock::new(Organization::default()));
+
+            let mut org = org.write().await;
+
+            for (bucket_name, bucket_id) in bucket_names_to_ids {
+                let bucket = Bucket {
+                    org_id: org_id.into(),
+                    id: bucket_id.into(),
+                    name: bucket_name.clone(),
+                    retention: "0".to_string(),
+                    posting_list_rollover: 10_000,
+                    index_levels: vec![],
+                };
+                org.bucket_name_to_id
+                    .insert(bucket_name.to_string(), bucket_id);
+                org.bucket_data
+                    .insert(bucket_id, Arc::new(BucketData::new(bucket)));
+
+                let wal_data =
+                    wal.read_all(org_id, &bucket_name, bucket_id)
+                        .map_err(|e| StorageError {
+                            description: e.to_string(),
+                        })?;
+                for batch in wal_data {
+                    let data = std::str::from_utf8(&batch).unwrap();
+                    let mut points = line_parser::parse(data).expect("TODO: if we can't parse the data the first time, it's not going to parse from the WAL either");
+                    org.bucket_data
+                        .get(&bucket_id)
+                        .unwrap()
+                        .write_points(&mut points)
+                        .await?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub async fn write_points(

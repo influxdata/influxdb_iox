@@ -108,7 +108,17 @@ async fn write_data(
 
 #[tokio::test]
 async fn read_and_write_data() -> Result<()> {
-    let server = TestServer::new()?;
+    let _ = dotenv::dotenv(); // load .env file if present
+
+    let root = env::var_os("TEST_DELOREAN_DB_DIR").unwrap_or_else(|| env::temp_dir().into());
+
+    // The temporary directory **must** be first so that it is
+    // dropped after the database closes.
+    let dir = tempfile::Builder::new()
+        .prefix("delorean")
+        .tempdir_in(root)?;
+
+    let server = TestServer::new(&dir)?;
     server.wait_until_ready().await;
 
     let org_id_str = "0000111100001111";
@@ -174,6 +184,53 @@ cpu_load_short,host=server01,region=us-west value=0.000003 {}",
         ),
     )
     .await?;
+
+    let end_time = SystemTime::now();
+    let duration = end_time
+        .duration_since(start_time)
+        .expect("End time should have been after start time");
+    let seconds_ago = duration.as_secs() + 1;
+
+    let text = read_data(
+        &client,
+        "/read",
+        org_id_str,
+        bucket_id_str,
+        r#"host="server01""#,
+        seconds_ago,
+    )
+    .await?;
+
+    // TODO: make a more sustainable way to manage expected data for tests, such as using the
+    // insta crate to manage snapshots.
+    assert_eq!(
+        text,
+        format!(
+            "\
+_m,host,region,_f,_time,_value
+cpu_load_short,server01,us-west,value,{},0.64
+cpu_load_short,server01,us-west,value,{},0.000003
+
+_m,host,_f,_time,_value
+cpu_load_short,server01,value,{},27.99
+
+_m,host,region,_f,_time,_value
+cpu_load_short,server01,us-east,value,{},1234567.891011
+
+",
+            ns_since_epoch,
+            ns_since_epoch + 4,
+            ns_since_epoch + 1,
+            ns_since_epoch + 3,
+        )
+    );
+
+    // Test the WAL by killing the server
+    std::mem::drop(server);
+
+    // Then restart and check that the entries are restored from the WAL
+    let server = TestServer::new(&dir)?;
+    server.wait_until_ready().await;
 
     let end_time = SystemTime::now();
     let duration = end_time
@@ -429,32 +486,16 @@ fn tags_as_strings(tags: &[Tag]) -> Vec<(&str, &str)> {
 
 struct TestServer {
     server_process: Child,
-
-    // The temporary directory **must** be last so that it is
-    // dropped after the database closes.
-    #[allow(dead_code)]
-    dir: TempDir,
 }
 
 impl TestServer {
-    fn new() -> Result<Self> {
-        let _ = dotenv::dotenv(); // load .env file if present
-
-        let root = env::var_os("TEST_DELOREAN_DB_DIR").unwrap_or_else(|| env::temp_dir().into());
-
-        let dir = tempfile::Builder::new()
-            .prefix("delorean")
-            .tempdir_in(root)?;
-
+    fn new(dir: &TempDir) -> Result<Self> {
         let server_process = Command::cargo_bin("delorean")?
             .stdout(Stdio::null())
             .env("DELOREAN_DB_DIR", dir.path())
             .spawn()?;
 
-        Ok(Self {
-            dir,
-            server_process,
-        })
+        Ok(Self { server_process })
     }
 
     async fn wait_until_ready(&self) {

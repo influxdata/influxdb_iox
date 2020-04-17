@@ -41,11 +41,20 @@ impl Delorean for GrpcServer {
             .bucket
             .ok_or_else(|| Status::invalid_argument("missing bucket argument"))?;
 
-        self.app
+        let bucket_name = bucket.name.clone();
+
+        let bucket_id = self
+            .app
             .db
             .create_bucket_if_not_exists(org_id, bucket)
             .await
             .map_err(|err| Status::internal(format!("error creating bucket: {}", err)))?;
+
+        self.app
+            .wal
+            .create_bucket(org_id, &bucket_name, bucket_id)
+            .await
+            .map_err(|err| Status::internal(format!("error writing bucket to WAL: {}", err)))?;
 
         Ok(tonic::Response::new(CreateBucketResponse {}))
     }

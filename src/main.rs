@@ -12,6 +12,7 @@ use delorean::line_parser::index_pairs;
 use delorean::storage::database::Database;
 use delorean::storage::partitioned_store::ReadValues;
 use delorean::storage::predicate::parse_predicate;
+use delorean::storage::wal::DeloreanWal;
 use delorean::time::{parse_duration, time_as_i64_nanos};
 
 use std::env::VarError;
@@ -33,6 +34,7 @@ use crate::rpc::GrpcServer;
 
 pub struct App {
     db: Database,
+    wal: DeloreanWal,
 }
 
 const MAX_SIZE: usize = 1_048_576; // max write request size of 1MB
@@ -83,6 +85,15 @@ async fn write(req: hyper::Request<Body>, app: Arc<App>) -> Result<Option<Body>,
     }
     let body = body.freeze();
     let body = str::from_utf8(&body).unwrap();
+
+    app.wal
+        .write(write_info.org, &bucket_name, bucket_id, body.as_bytes())
+        .map_err(|e| {
+            ApplicationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error writing data to the WAL: {}", e),
+            )
+        })?;
 
     let mut points = line_parser::parse(body).expect("TODO: Unable to parse lines");
 
@@ -244,24 +255,36 @@ async fn create_bucket(
 
     let create_bucket_info: CreateBucketInfo =
         serde_urlencoded::from_str(body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let org_id = create_bucket_info.org;
     let bucket_name = create_bucket_info.bucket.to_string();
 
     let bucket = Bucket {
-        org_id: create_bucket_info.org.into(),
+        org_id: org_id.into(),
         id: 0,
-        name: bucket_name,
+        name: bucket_name.clone(),
         retention: "0".to_string(),
         posting_list_rollover: 10_000,
         index_levels: vec![],
     };
 
-    app.db
-        .create_bucket_if_not_exists(create_bucket_info.org, bucket)
+    let bucket_id = app
+        .db
+        .create_bucket_if_not_exists(org_id, bucket)
         .await
         .map_err(|err| {
             ApplicationError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("error creating bucket: {}", err),
+            )
+        })?;
+
+    app.wal
+        .create_bucket(org_id, &bucket_name, bucket_id)
+        .await
+        .map_err(|err| {
+            ApplicationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("error writing bucket to WAL: {}", err),
             )
         })?;
 
@@ -355,8 +378,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     };
 
+    let wal = DeloreanWal::new(&db_dir)?;
     let db = Database::new(&db_dir);
-    let state = Arc::new(App { db });
+    db.restore(&wal).await?;
+
+    let state = Arc::new(App { db, wal });
     let bind_addr: SocketAddr = match std::env::var("DELOREAN_BIND_ADDR") {
         Ok(addr) => addr
             .parse()
