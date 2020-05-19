@@ -13,14 +13,22 @@ fn main() -> Result<()> {
         .expect("Could not determine `OUT_DIR`")
         .into();
 
-    let status = Command::new("flatc")
+    let status_result = Command::new("flatc")
         .arg("--rust")
         .arg("-o")
         .arg(&out_dir)
         .arg("proto/delorean/wal.fbs")
-        .status()?;
-    if !status.success() {
-        panic!("`flatc` failed to compile the .fbs to Rust");
+        .status();
+
+    match status_result {
+        Result::Ok(status) => {
+            if !status.success() {
+                panic!("`flatc` failed to compile the .fbs to Rust");
+            }
+        }
+        Result::Err(err) => {
+            panic!("Could not execute `flatc`: {}", err);
+        }
     }
 
     Ok(())
