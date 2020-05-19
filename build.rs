@@ -21,14 +21,12 @@ fn main() -> Result<()> {
         .status();
 
     match status_result {
-        Result::Ok(status) => {
+       Ok(status) => {
             if !status.success() {
                 panic!("`flatc` failed to compile the .fbs to Rust");
             }
         }
-        Result::Err(err) => {
-            panic!("Could not execute `flatc`: {}", err);
-        }
+       Err(err) => panic!("Could not execute `flatc`: {}", err),
     }
 
     Ok(())
