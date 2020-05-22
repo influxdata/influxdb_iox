@@ -1,0 +1,22 @@
+[package]
+name = "delorean_storage_tool"
+version = "0.1.0"
+authors = ["Paul Dix <paul@pauldix.net>"]
+edition = "2018"
+
+[dependencies]
+# I get a build error when I use this one:
+# failed to run custom build command for `arrow-flight v0.17.0`
+#parquet = "0.17.0"
+parquet = { path = "/Users/alamb/Software/arrow/rust/parquet", version = "0.18.0-SNAPSHOT" }
+delorean_line_parser = { path = "../delorean_line_parser" }
+
+clap = "2.33.1"
+env_logger = "0.7.1"
+log = "0.4.8"
+snafu = "0.6.2"
+
+[[bin]]
+# (D)elorian (S)torage Tool
+name = "dstool"
+path = "src/dstool.rs"
