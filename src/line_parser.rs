@@ -6,7 +6,7 @@ use nom::{
     combinator::{map, opt, recognize},
     sequence::{preceded, separated_pair, terminated, tuple},
 };
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 use snafu::{ResultExt, Snafu};
 use std::{
     borrow::Cow,
@@ -79,8 +79,11 @@ type IResult<I, T, E = Error> = nom::IResult<I, T, E>;
 
 /// Represents a single typed point of timeseries data
 ///
-/// A Point consists of a series identifier (string that concatenates the
-/// measurement name, tag name=value pairs and field name) and a value
+/// A Point consists of a series identifier, a timestamp, and a value.
+///
+/// The series identifier is a string that concatenates the
+/// measurement name, tag name=value pairs and field name. These tags
+/// are unique and sorted.
 ///
 /// For example, a Point containing a f64 value representing
 /// `cpu,host=A,region=west usage_system=64.2 1590488773254420000` could
@@ -257,11 +260,6 @@ impl fmt::Display for EscapedStr<'_> {
 }
 
 impl<'a> EscapedStr<'a> {
-    fn new() -> EscapedStr<'a> {
-        let v = SmallVec::new();
-        EscapedStr::<'a>(v)
-    }
-
     fn is_escaped(&self) -> bool {
         self.0.len() > 1
     }
@@ -278,11 +276,8 @@ impl From<EscapedStr<'_>> for String {
 }
 
 impl<'a> From<&'a str> for EscapedStr<'a> {
-    /// Create an EscapedStr from a string slice
     fn from(other: &'a str) -> Self {
-        let mut s = EscapedStr::new();
-        s.0.push(other);
-        s
+        Self(smallvec![other])
     }
 }
 
@@ -304,11 +299,11 @@ type TagSet<'a> = SmallVec<[(EscapedStr<'a>, EscapedStr<'a>); 8]>;
 type FieldSet<'a> = SmallVec<[(EscapedStr<'a>, FieldValue); 4]>;
 
 #[derive(Debug)]
-/// Represents a single parsed line of lineprotocol data
+/// Represents a single parsed line of line protocol data
 ///
 /// For example, the data formatted in line protocol format
 /// `cpu,host=A,region=west usage_system=64.2 1590488773254420000` can
-/// be represented as a ParsedLine in the following way.
+/// be represented as a `ParsedLine` in the following way.
 ///
 /// TODO figure out how to encode this as an actual example code (too
 /// many of these structs are private). For now, just use quasi code
@@ -329,7 +324,6 @@ type FieldSet<'a> = SmallVec<[(EscapedStr<'a>, FieldValue); 4]>;
 ///     timestamp: Some(1590488773254420000)
 ///  }
 /// ```
-
 struct ParsedLine<'a> {
     series: Series<'a>,
     field_set: FieldSet<'a>,
@@ -412,7 +406,7 @@ impl<'a> Series<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-// Allowed field types for a ParsedLine
+/// Allowed field types for a `ParsedLine`
 enum FieldValue {
     I64(i64),
     F64(f64),
@@ -864,7 +858,7 @@ mod test {
     #[test]
     fn escaped_str_basic() -> Result {
         // Demonstrate how strings without any escapes are handled.
-        let es: EscapedStr = EscapedStr::from("Foo");
+        let es = EscapedStr::from("Foo");
         assert_eq!(es.to_string(), "Foo".to_string());
         assert!(!es.is_escaped(), "There are no escaped values");
         assert!(!es.ends_with("F"));
