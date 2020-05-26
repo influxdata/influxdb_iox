@@ -244,9 +244,10 @@ pub struct Pair {
     pub value: String,
 }
 
-/// Holds a string slice with some characters potentially escaped.
+/// Represents an sequence of effectively unescaped strings.
 ///
-/// TODO add examples of escaped and non escaped values
+/// If we had the input string `"a\nb"`, the `EscapedStr` will hold ["a", "b"].
+/// If we had `a\b`, this will also hold ["a", "b"].
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct EscapedStr<'a>(SmallVec<[&'a str; 1]>);
 
