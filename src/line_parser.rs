@@ -77,6 +77,25 @@ impl nom::error::ParseError<&str> for Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 type IResult<I, T, E = Error> = nom::IResult<I, T, E>;
 
+/// Represents a single typed point of timeseries data
+///
+/// A Point consists of a series identifier (string that concatenates the
+/// measurement name, tag name=value pairs and field name) and a value
+///
+/// For example, a Point containing a f64 value representing
+/// `cpu,host=A,region=west usage_system=64.2 1590488773254420000` could
+/// be represented as point like this:
+///
+/// ```
+/// use delorean::line_parser::Point;
+///
+/// let p = Point {
+///     series: "cpu,host=A,region=west\tusage_system".to_string(),
+///     series_id: None,
+///     value: 64.2,
+///     time: 1590488773254420000,
+/// };
+/// ```
 #[derive(Debug, PartialEq, Clone)]
 pub struct Point<T> {
     pub series: String,
@@ -222,6 +241,9 @@ pub struct Pair {
     pub value: String,
 }
 
+/// Holds a string slice with some characters potentially escaped.
+///
+/// TODO add examples of escaped and non escaped values
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct EscapedStr<'a>(SmallVec<[&'a str; 1]>);
 
@@ -235,6 +257,11 @@ impl fmt::Display for EscapedStr<'_> {
 }
 
 impl<'a> EscapedStr<'a> {
+    fn new() -> EscapedStr<'a> {
+        let v = SmallVec::new();
+        EscapedStr::<'a>(v)
+    }
+
     fn is_escaped(&self) -> bool {
         self.0.len() > 1
     }
@@ -247,6 +274,15 @@ impl<'a> EscapedStr<'a> {
 impl From<EscapedStr<'_>> for String {
     fn from(other: EscapedStr<'_>) -> Self {
         other.to_string()
+    }
+}
+
+impl<'a> From<&'a str> for EscapedStr<'a> {
+    /// Create an EscapedStr from a string slice
+    fn from(other: &'a str) -> Self {
+        let mut s = EscapedStr::new();
+        s.0.push(other);
+        s
     }
 }
 
@@ -268,12 +304,39 @@ type TagSet<'a> = SmallVec<[(EscapedStr<'a>, EscapedStr<'a>); 8]>;
 type FieldSet<'a> = SmallVec<[(EscapedStr<'a>, FieldValue); 4]>;
 
 #[derive(Debug)]
+/// Represents a single parsed line of lineprotocol data
+///
+/// For example, the data formatted in line protocol format
+/// `cpu,host=A,region=west usage_system=64.2 1590488773254420000` can
+/// be represented as a ParsedLine in the following way.
+///
+/// TODO figure out how to encode this as an actual example code (too
+/// many of these structs are private). For now, just use quasi code
+///
+/// ``` ignore
+/// ParsedLine {
+///     series: Series {
+///         raw_input: "cpu,host=A,region=west",
+///         measurement: EscapedStr(["cpu"]),
+///         tag_set: Some([
+///             (EscapedStr(["host"]), EscapedStr(["A"])),
+///             (EscapedStr(["region"]), EscapedStr(["west"]))
+///         ])
+///     },
+///     field_set: [
+///         (EscapedStr(["usage_system"]), F64(64.2))
+///     ],
+///     timestamp: Some(1590488773254420000)
+///  }
+/// ```
+
 struct ParsedLine<'a> {
     series: Series<'a>,
     field_set: FieldSet<'a>,
     timestamp: Option<i64>,
 }
 
+/// Represents a series identifier (measurement, tagset) for line protocol data
 #[derive(Debug)]
 struct Series<'a> {
     raw_input: &'a str,
@@ -348,7 +411,8 @@ impl<'a> Series<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
+// Allowed field types for a ParsedLine
 enum FieldValue {
     I64(i64),
     F64(f64),
@@ -792,9 +856,106 @@ fn map_fail<'a, R1, R2>(
 mod test {
     use super::*;
     use delorean_test_helpers::approximately_equal;
+    use std::convert::From;
 
     type Error = Box<dyn std::error::Error>;
     type Result<T = (), E = Error> = std::result::Result<T, E>;
+
+    #[test]
+    fn escaped_str_basic() -> Result {
+        // Demonstrate how strings without any escapes are handled.
+        let es: EscapedStr = EscapedStr::from("Foo");
+        assert_eq!(es.to_string(), "Foo".to_string());
+        assert!(!es.is_escaped(), "There are no escaped values");
+        assert!(!es.ends_with("F"));
+        assert!(!es.ends_with("z"));
+        assert!(!es.ends_with("zz"));
+        assert!(es.ends_with("o"));
+        assert!(es.ends_with("oo"));
+        assert!(es.ends_with("Foo"));
+        Ok(())
+    }
+
+    // TODO Add test / figure out how strings with escape strings are actually handled
+
+    #[test]
+    fn test_parsed_line_construction() -> Result {
+        // This test is mostly to document how to construct one of
+        // these structures.  I had this in the documentation as an
+        // example, but at the time of writing, too many structures
+        // needed to be declared as public to do so effectively.
+
+        let mut tag_set: TagSet = SmallVec::new();
+        tag_set.push((EscapedStr::from("host"), EscapedStr::from("A")));
+        tag_set.push((EscapedStr::from("region"), EscapedStr::from("west")));
+
+        let s = Series {
+            raw_input: "cpu,host=A,region=west",
+            measurement: EscapedStr::from("cpu"),
+            tag_set: Some(tag_set),
+        };
+
+        let mut field_set: FieldSet = SmallVec::new();
+        field_set.push((EscapedStr::from("usage_system"), FieldValue::F64(64.2)));
+
+        let _l = ParsedLine {
+            series: s,
+            field_set,
+            timestamp: Some(1_590_488_773_254_420_000),
+        };
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_line_basic() -> Result {
+        // Demonstrate parsing a line of data and retrieving the results
+        let input = "cpu,host=A,region=west usage_system=64.2 1590488773254420000";
+        let (next_slice, parsed_line) = parse_line(input).expect("parse failed");
+
+        // the entire input was consumed
+        assert_eq!(next_slice.len(), 0);
+
+        // The series were parsed correctly
+        assert_eq!(parsed_line.series.raw_input, "cpu,host=A,region=west");
+        assert_eq!(parsed_line.series.measurement, "cpu", "{:?}", parsed_line);
+
+        let tag_set = parsed_line.series.tag_set.expect("had no tags");
+        assert_eq!(tag_set.len(), 2);
+        assert_eq!(
+            (EscapedStr::from("host"), EscapedStr::from("A")),
+            tag_set[0]
+        );
+        assert_eq!(
+            (EscapedStr::from("region"), EscapedStr::from("west")),
+            tag_set[1]
+        );
+
+        // The fields were parsed correctly
+        let field_set = parsed_line.field_set;
+        assert_eq!(field_set.len(), 1);
+        assert_eq!(EscapedStr::from("usage_system"), field_set[0].0);
+        assert_eq!(FieldValue::F64(64.2), field_set[0].1);
+
+        assert_eq!(
+            parsed_line.timestamp.expect("had timestamp"),
+            1_590_488_773_254_420_000
+        );
+
+        Ok(())
+    }
+
+    // TODO: test that only one line is consumed
+
+    // TODO: test lines that have no timestamp, no tags, no fields, etc
+
+    #[test]
+    fn parse_line_empty() -> Result {
+        let input = "";
+        // can't parse this line
+        assert!(matches!(parse_line(input), Err(_)));
+        Ok(())
+    }
 
     #[test]
     fn parse_no_fields() -> Result {
