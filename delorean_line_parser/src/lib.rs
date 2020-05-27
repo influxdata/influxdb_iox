@@ -80,12 +80,9 @@ impl nom::error::ParseError<&str> for Error {
 
 /// Represents a single parsed line of line protocol data
 ///
-/// For example, the data formatted in line protocol format
-/// `cpu,host=A,region=west usage_system=64.2 1590488773254420000` can
-/// be represented as a `ParsedLine` in the following way.
-///
-/// TODO figure out how to encode this as an actual example code (too
-/// many of these structs are private). For now, just use quasi code
+/// For example, here is how to parse the follow line protocol data
+/// `cpu,host=A,region=west usage_system=64.2 1590488773254420000`
+///  into a `ParsedLine` in the following way.
 ///
 /// ```
 /// use delorean_line_parser::{ParsedLine, FieldValue};
@@ -98,25 +95,25 @@ impl nom::error::ParseError<&str> for Error {
 ///     .next()
 ///     .expect("Should have at least one line")
 ///     .expect("Should parse successfully");
-/// 
+///
 /// let ParsedLine {
 ///     series,
 ///     field_set,
 ///     timestamp,
 /// } = parsed_line;
-/// 
+///
 /// assert_eq!(series.measurement, "cpu");
-/// 
+///
 /// let tags = series.tag_set.unwrap();
 /// assert_eq!(tags[0].0, "host");
 /// assert_eq!(tags[0].1, "A");
 /// assert_eq!(tags[1].0, "region");
 /// assert_eq!(tags[1].1, "west");
-/// 
+///
 /// let field = &field_set[0];
 /// assert_eq!(field.0, "usage_system");
 /// assert_eq!(field.1, FieldValue::I64(64));
-/// 
+///
 /// assert_eq!(timestamp, Some(1590488773254420000));
 /// ```
 #[derive(Debug)]
@@ -693,44 +690,6 @@ mod test {
     }
 
     // TODO Add test / figure out how strings with escape strings are actually handled
-
-    #[test]
-    fn parse_line_end_to_end() -> Result {
-        // Demonstrate parsing a line of data and retrieving the results
-        let input = "cpu,host=A,region=west usage_system=64.2 1590488773254420000";
-        let (next_slice, parsed_line) = parse_line(input).expect("parse failed");
-
-        // the entire input was consumed
-        assert_eq!(next_slice.len(), 0);
-
-        // The series were parsed correctly
-        assert_eq!(parsed_line.series.raw_input, "cpu,host=A,region=west");
-        assert_eq!(parsed_line.series.measurement, "cpu", "{:?}", parsed_line);
-
-        let tag_set = parsed_line.series.tag_set.expect("had no tags");
-        assert_eq!(tag_set.len(), 2);
-        assert_eq!(
-            (EscapedStr::from("host"), EscapedStr::from("A")),
-            tag_set[0]
-        );
-        assert_eq!(
-            (EscapedStr::from("region"), EscapedStr::from("west")),
-            tag_set[1]
-        );
-
-        // The fields were parsed correctly
-        let field_set = parsed_line.field_set;
-        assert_eq!(field_set.len(), 1);
-        assert_eq!(EscapedStr::from("usage_system"), field_set[0].0);
-        assert_eq!(FieldValue::F64(64.2), field_set[0].1);
-
-        assert_eq!(
-            parsed_line.timestamp.expect("had timestamp"),
-            1_590_488_773_254_420_000
-        );
-
-        Ok(())
-    }
 
     fn parse(s: &str) -> Result<Vec<ParsedLine<'_>>, super::Error> {
         super::parse_lines(s).collect()
