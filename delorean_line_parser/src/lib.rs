@@ -80,9 +80,9 @@ impl nom::error::ParseError<&str> for Error {
 
 /// Represents a single parsed line of line protocol data
 ///
-/// For example, here is how to parse the follow line protocol data
+/// Here is an example of how to parse the line protocol data
 /// `cpu,host=A,region=west usage_system=64.2 1590488773254420000`
-///  into a `ParsedLine` in the following way.
+/// into a `ParsedLine`:
 ///
 /// ```
 /// use delorean_line_parser::{ParsedLine, FieldValue};
