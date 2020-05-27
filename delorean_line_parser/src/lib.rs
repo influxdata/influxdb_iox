@@ -196,7 +196,7 @@ pub enum FieldValue {
     F64(f64),
 }
 
-/// Represents an sequence of effectively unescaped strings.
+/// Represents a sequence of effectively unescaped strings.
 ///
 /// If we had the input string `"a\nb"`, the `EscapedStr` will hold ["a", "b"].
 /// If we had `a\b`, this will also hold ["a", "b"].
