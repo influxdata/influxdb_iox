@@ -17,7 +17,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Represents a single typed point of timeseries data
 ///
-/// A Point consists of a series identifier, a timestamp, and a value.
+/// A `Point<T>` consists of a series identifier, a timestamp, and a value.
 ///
 /// The series identifier is a string that concatenates the
 /// measurement name, tag name=value pairs and field name. These tags
