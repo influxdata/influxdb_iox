@@ -87,21 +87,37 @@ impl nom::error::ParseError<&str> for Error {
 /// TODO figure out how to encode this as an actual example code (too
 /// many of these structs are private). For now, just use quasi code
 ///
-/// ``` ignore
-/// ParsedLine {
-///     series: Series {
-///         raw_input: "cpu,host=A,region=west",
-///         measurement: EscapedStr(["cpu"]),
-///         tag_set: Some([
-///             (EscapedStr(["host"]), EscapedStr(["A"])),
-///             (EscapedStr(["region"]), EscapedStr(["west"]))
-///         ])
-///     },
-///     field_set: [
-///         (EscapedStr(["usage_system"]), F64(64.2))
-///     ],
-///     timestamp: Some(1590488773254420000)
-///  }
+/// ```
+/// use delorean_line_parser::{ParsedLine, FieldValue};
+///
+/// let mut parsed_lines =
+///     delorean_line_parser::parse_lines(
+///         "cpu,host=A,region=west usage_system=64i 1590488773254420000"
+///     );
+/// let parsed_line = parsed_lines
+///     .next()
+///     .expect("Should have at least one line")
+///     .expect("Should parse successfully");
+/// 
+/// let ParsedLine {
+///     series,
+///     field_set,
+///     timestamp,
+/// } = parsed_line;
+/// 
+/// assert_eq!(series.measurement, "cpu");
+/// 
+/// let tags = series.tag_set.unwrap();
+/// assert_eq!(tags[0].0, "host");
+/// assert_eq!(tags[0].1, "A");
+/// assert_eq!(tags[1].0, "region");
+/// assert_eq!(tags[1].1, "west");
+/// 
+/// let field = &field_set[0];
+/// assert_eq!(field.0, "usage_system");
+/// assert_eq!(field.1, FieldValue::I64(64));
+/// 
+/// assert_eq!(timestamp, Some(1590488773254420000));
 /// ```
 #[derive(Debug)]
 pub struct ParsedLine<'a> {
