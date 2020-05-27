@@ -25,7 +25,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 ///
 /// For example, a `Point<T>` containing an `f64` value representing
 /// `cpu,host=A,region=west usage_system=64.2 1590488773254420000` could
-/// be represented as point like this:
+/// be represented as a `Point<T>` like this:
 ///
 /// ```
 /// use delorean::line_parser::Point;
