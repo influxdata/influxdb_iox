@@ -20,12 +20,6 @@ debug = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# I get a build error when I use this one:
-# failed to run custom build command for `arrow-flight v0.17.0`
-#parquet = "0.17.0"
-parquet = { path = "/Users/alamb/Software/arrow/rust/parquet", version = "0.18.0-SNAPSHOT" }
-
-
 delorean_line_parser = { path = "delorean_line_parser" }
 delorean_wal = { path = "delorean_wal" }
 
