@@ -40,9 +40,7 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
     })?;
     info!("Read {} bytes from {}", buf.len(), input_filename);
 
-    Err(Error::NotYetImplemented {
-        feature_name: String::from("The actual conversion"),
-    })
+	unimplemented!("The actual conversion");
 }
 
 fn main() {
