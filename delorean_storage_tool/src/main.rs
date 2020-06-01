@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use log::{debug, info};
 
-use clap::{crate_version, crate_authors, App, Arg, SubCommand};
+use clap::{crate_authors, crate_version, App, Arg, SubCommand};
 use snafu::Snafu;
 
 #[derive(Debug, Snafu)]
