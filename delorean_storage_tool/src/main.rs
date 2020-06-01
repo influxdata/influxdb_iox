@@ -63,7 +63,7 @@ Examples:
                 .about("Convert one storage format to another")
                 .arg(
                     Arg::with_name("INPUT")
-                        .help("The input input filename to read from")
+                        .help("The input filename to read from")
                         .required(true)
                         .index(1),
                 )
