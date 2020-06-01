@@ -3,13 +3,11 @@ use std::sync::Arc;
 
 use log::{debug, info};
 
-use clap::{App, Arg, SubCommand};
+use clap::{crate_version, crate_authors, App, Arg, SubCommand};
 use snafu::Snafu;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display(r#"Feature is not yet implemented: {} :("#, feature_name))]
-    NotYetImplemented { feature_name: String },
     #[snafu(display(r#"IO Error: {} ({})"#, message, source))]
     IOError {
         message: String,
@@ -40,7 +38,7 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
     })?;
     info!("Read {} bytes from {}", buf.len(), input_filename);
 
-	unimplemented!("The actual conversion");
+    unimplemented!("The actual conversion");
 }
 
 fn main() {
@@ -53,8 +51,8 @@ Examples:
 "#;
 
     let matches = App::new(help)
-        .version("1.0")
-        .author("Andrew Lamb <alamb@influxdata.com>")
+        .version(crate_version!())
+        .author(crate_authors!())
         .about("Storage file manipulation and inspection utility")
         .subcommand(
             SubCommand::with_name("convert")
