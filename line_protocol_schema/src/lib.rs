@@ -7,25 +7,25 @@
 /// time), the schema only makes sense for a given set of rows (not
 /// all possible rows in that measurement).
 ///
-/// Line protocol Schema consists of a series of columns, each with a
+/// The line protocol schema consists of a series of columns, each with a
 /// specific type, indexed by 0.
 ///
 ///```
-/// use line_protocol_schema::{SchemaBuilder, LineProtocolType, ColumnDefinition};
+/// use line_protocol_schema::{SchemaBuilder, DataType, ColumnDefinition};
 /// let schema = SchemaBuilder::new(String::from("my_measurement"))
 ///     .tag("tag1")
-///     .field("field1", LineProtocolType::LPFloat)
-///     .field("field2", LineProtocolType::LPBoolean)
+///     .field("field1", DataType::Float)
+///     .field("field2", DataType::Boolean)
 ///     .tag("tag2")
 ///     .build();
 ///
 /// let cols = schema.get_col_defs();
 /// assert_eq!(cols.len(), 5);
-/// assert_eq!(cols[0], ColumnDefinition::new("tag1", 0, LineProtocolType::LPString));
-/// assert_eq!(cols[1], ColumnDefinition::new("tag2", 1, LineProtocolType::LPString));
-/// assert_eq!(cols[2], ColumnDefinition::new("field1", 2, LineProtocolType::LPFloat));
-/// assert_eq!(cols[3], ColumnDefinition::new("field2", 3, LineProtocolType::LPBoolean));
-/// assert_eq!(cols[4], ColumnDefinition::new("timestamp", 4, LineProtocolType::LPTimestamp));
+/// assert_eq!(cols[0], ColumnDefinition::new("tag1", 0, DataType::String));
+/// assert_eq!(cols[1], ColumnDefinition::new("tag2", 1, DataType::String));
+/// assert_eq!(cols[2], ColumnDefinition::new("field1", 2, DataType::Float));
+/// assert_eq!(cols[3], ColumnDefinition::new("field2", 3, DataType::Boolean));
+/// assert_eq!(cols[4], ColumnDefinition::new("timestamp", 4, DataType::Timestamp));
 /// ```
 use std::collections::HashMap;
 
@@ -37,9 +37,9 @@ pub struct Tag {
 }
 
 impl Tag {
-    pub fn new(name: String, idx: u32) -> Tag {
+    pub fn new(name: impl Into<String>, idx: u32) -> Tag {
         Tag {
-            tag_name: name,
+            tag_name: name.into(),
             column_index: idx,
         }
     }
@@ -48,32 +48,32 @@ impl Tag {
 #[derive(Debug, PartialEq, Clone, Copy)]
 /// Line Protocol Data Types from
 /// https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_tutorial/#data-types
-pub enum LineProtocolType {
+pub enum DataType {
     /// 64-bit floating point number (TDB if NULLs / Nans are allowed)
-    LPFloat,
+    Float,
     /// 64-bit signed integer
-    LPInteger,
+    Integer,
     /// UTF-8 encoded string
-    LPString,
+    String,
     /// true or false
-    LPBoolean,
+    Boolean,
     /// 64 bit timestamp "UNIX timestamps" representing nanosecods
     /// since the UNIX epoch (00:00:00 UTC on 1 January 1970).
-    LPTimestamp,
+    Timestamp,
 }
 
 /// Represents a specific Line Protocol Field name
 #[derive(Debug, PartialEq)]
 pub struct Field {
     pub field_name: String,
-    pub field_type: LineProtocolType,
+    pub field_type: DataType,
     column_index: u32,
 }
 
 impl Field {
-    pub fn new(field_name: String, field_type: LineProtocolType, column_index: u32) -> Field {
+    pub fn new(field_name: impl Into<String>, field_type: DataType, column_index: u32) -> Field {
         Field {
-            field_name,
+            field_name: field_name.into(),
             field_type,
             column_index,
         }
@@ -88,9 +88,9 @@ pub struct Timestamp {
 }
 
 impl Timestamp {
-    fn new(name: String, idx: u32) -> Timestamp {
+    fn new(name: impl Into<String>, idx: u32) -> Timestamp {
         Timestamp {
-            timestamp_name: name,
+            timestamp_name: name.into(),
             column_index: idx,
         }
     }
@@ -102,11 +102,11 @@ impl Timestamp {
 pub struct ColumnDefinition {
     pub column_name: String,
     pub column_index: u32,
-    pub column_type: LineProtocolType,
+    pub column_type: DataType,
 }
 
 impl ColumnDefinition {
-    pub fn new(name: &str, idx: u32, t: LineProtocolType) -> ColumnDefinition {
+    pub fn new(name: &str, idx: u32, t: DataType) -> ColumnDefinition {
         ColumnDefinition {
             column_name: name.to_string(),
             column_index: idx,
@@ -139,7 +139,7 @@ impl Schema {
             cols.push(ColumnDefinition {
                 column_name: tag_name.clone(),
                 column_index: tag.column_index,
-                column_type: LineProtocolType::LPString,
+                column_type: DataType::String,
             });
         }
         for (field_name, field) in self.fields.iter() {
@@ -152,7 +152,7 @@ impl Schema {
         cols.push(ColumnDefinition {
             column_name: self.timestamp.timestamp_name.clone(),
             column_index: self.timestamp.column_index,
-            column_type: LineProtocolType::LPTimestamp,
+            column_type: DataType::Timestamp,
         });
 
         cols.sort_by(|a, b| a.column_index.cmp(&b.column_index));
@@ -164,7 +164,7 @@ impl Schema {
 pub struct SchemaBuilder {
     measurement_name: String,
     tag_names: Vec<String>,
-    field_defs: Vec<(String, LineProtocolType)>,
+    field_defs: Vec<(String, DataType)>,
     timestamp_name: String,
 }
 
@@ -189,7 +189,7 @@ impl SchemaBuilder {
     }
 
     /// Add a new typed field to the schema. Field names can not be repeated
-    pub fn field(&mut self, field_name: &str, field_type: LineProtocolType) -> &mut Self {
+    pub fn field(&mut self, field_name: &str, field_type: DataType) -> &mut Self {
         // check for existing fields (TODO make this faster)
         match self
             .field_defs
@@ -256,8 +256,8 @@ mod schema_test {
         let mut builder = SchemaBuilder::new(String::from("my_measurement"));
         builder
             .tag("tag1")
-            .field("field1", LineProtocolType::LPFloat)
-            .field("field2", LineProtocolType::LPBoolean)
+            .field("field1", DataType::Float)
+            .field("field2", DataType::Boolean)
             .tag("tag2");
 
         let schema = builder.build();
@@ -274,11 +274,11 @@ mod schema_test {
         );
         assert_eq!(
             schema.fields.get("field1").unwrap(),
-            &Field::new(String::from("field1"), LineProtocolType::LPFloat, 2)
+            &Field::new(String::from("field1"), DataType::Float, 2)
         );
         assert_eq!(
             schema.fields.get("field2").unwrap(),
-            &Field::new(String::from("field2"), LineProtocolType::LPBoolean, 3)
+            &Field::new(String::from("field2"), DataType::Boolean, 3)
         );
         assert_eq!(
             schema.timestamp,
@@ -297,30 +297,30 @@ mod schema_test {
         assert_eq!(cols.len(), 2);
         assert_eq!(
             cols[0],
-            ColumnDefinition::new("tag1", 0, LineProtocolType::LPString)
+            ColumnDefinition::new("tag1", 0, DataType::String)
         );
         assert_eq!(
             cols[1],
-            ColumnDefinition::new("timestamp", 1, LineProtocolType::LPTimestamp)
+            ColumnDefinition::new("timestamp", 1, DataType::Timestamp)
         );
     }
 
     #[test]
     fn duplicate_field_name_same_type() {
         let schema = SchemaBuilder::new(String::from("my_measurement"))
-            .field("field1", LineProtocolType::LPFloat)
-            .field("field1", LineProtocolType::LPFloat)
+            .field("field1", DataType::Float)
+            .field("field1", DataType::Float)
             .build();
 
         let cols = schema.get_col_defs();
         assert_eq!(cols.len(), 2);
         assert_eq!(
             cols[0],
-            ColumnDefinition::new("field1", 0, LineProtocolType::LPFloat)
+            ColumnDefinition::new("field1", 0, DataType::Float)
         );
         assert_eq!(
             cols[1],
-            ColumnDefinition::new("timestamp", 1, LineProtocolType::LPTimestamp)
+            ColumnDefinition::new("timestamp", 1, DataType::Timestamp)
         );
     }
 
@@ -328,8 +328,8 @@ mod schema_test {
     #[should_panic]
     fn duplicate_field_name_different_type() {
         SchemaBuilder::new(String::from("my_measurement"))
-            .field("field1", LineProtocolType::LPFloat)
-            .field("field1", LineProtocolType::LPInteger)
+            .field("field1", DataType::Float)
+            .field("field1", DataType::Integer)
             .build();
         // TBD better error handling -- what should happen if there is
         // a new type seen for an existing field?
@@ -339,8 +339,8 @@ mod schema_test {
     fn get_col_defs() {
         let schema = SchemaBuilder::new(String::from("my_measurement"))
             .tag("tag1")
-            .field("field1", LineProtocolType::LPFloat)
-            .field("field2", LineProtocolType::LPBoolean)
+            .field("field1", DataType::Float)
+            .field("field2", DataType::Boolean)
             .tag("tag2")
             .build();
 
@@ -348,23 +348,23 @@ mod schema_test {
         assert_eq!(cols.len(), 5);
         assert_eq!(
             cols[0],
-            ColumnDefinition::new("tag1", 0, LineProtocolType::LPString)
+            ColumnDefinition::new("tag1", 0, DataType::String)
         );
         assert_eq!(
             cols[1],
-            ColumnDefinition::new("tag2", 1, LineProtocolType::LPString)
+            ColumnDefinition::new("tag2", 1, DataType::String)
         );
         assert_eq!(
             cols[2],
-            ColumnDefinition::new("field1", 2, LineProtocolType::LPFloat)
+            ColumnDefinition::new("field1", 2, DataType::Float)
         );
         assert_eq!(
             cols[3],
-            ColumnDefinition::new("field2", 3, LineProtocolType::LPBoolean)
+            ColumnDefinition::new("field2", 3, DataType::Boolean)
         );
         assert_eq!(
             cols[4],
-            ColumnDefinition::new("timestamp", 4, LineProtocolType::LPTimestamp)
+            ColumnDefinition::new("timestamp", 4, DataType::Timestamp)
         );
     }
 
@@ -376,7 +376,7 @@ mod schema_test {
         assert_eq!(cols.len(), 1);
         assert_eq!(
             cols[0],
-            ColumnDefinition::new("timestamp", 0, LineProtocolType::LPTimestamp)
+            ColumnDefinition::new("timestamp", 0, DataType::Timestamp)
         );
     }
 
@@ -385,22 +385,22 @@ mod schema_test {
         // Test that get_col_defs sorts its output
         let mut schema = SchemaBuilder::new(String::from("my_measurement"))
             .tag("tag1")
-            .field("field1", LineProtocolType::LPFloat)
+            .field("field1", DataType::Float)
             .build();
 
         let cols = schema.get_col_defs();
         assert_eq!(cols.len(), 3);
         assert_eq!(
             cols[0],
-            ColumnDefinition::new("tag1", 0, LineProtocolType::LPString)
+            ColumnDefinition::new("tag1", 0, DataType::String)
         );
         assert_eq!(
             cols[1],
-            ColumnDefinition::new("field1", 1, LineProtocolType::LPFloat)
+            ColumnDefinition::new("field1", 1, DataType::Float)
         );
         assert_eq!(
             cols[2],
-            ColumnDefinition::new("timestamp", 2, LineProtocolType::LPTimestamp)
+            ColumnDefinition::new("timestamp", 2, DataType::Timestamp)
         );
 
         // Now, if we somehow have changed how the indexes are
@@ -412,15 +412,15 @@ mod schema_test {
         assert_eq!(cols.len(), 3);
         assert_eq!(
             cols[0],
-            ColumnDefinition::new("timestamp", 0, LineProtocolType::LPTimestamp)
+            ColumnDefinition::new("timestamp", 0, DataType::Timestamp)
         );
         assert_eq!(
             cols[1],
-            ColumnDefinition::new("field1", 1, LineProtocolType::LPFloat)
+            ColumnDefinition::new("field1", 1, DataType::Float)
         );
         assert_eq!(
             cols[2],
-            ColumnDefinition::new("tag1", 2, LineProtocolType::LPString)
+            ColumnDefinition::new("tag1", 2, DataType::String)
         );
     }
 }
