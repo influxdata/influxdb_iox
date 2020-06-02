@@ -142,7 +142,7 @@ impl Schema {
             column_type: DataType::Timestamp,
         });
 
-        cols.sort_by(|a, b| a.column_index.cmp(&b.column_index));
+        cols.sort_by_key(|col| col.column_index);
         cols
     }
 }
