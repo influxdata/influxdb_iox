@@ -80,7 +80,6 @@ impl Field {
     }
 }
 
-
 /// Represents a column of the line protocol data (specifically how to
 /// find tag values and field values in a set of columns)
 #[derive(Debug, PartialEq)]
@@ -91,11 +90,15 @@ pub struct ColumnDefinition {
 }
 
 impl ColumnDefinition {
-    pub fn new(column_name: impl Into<String>, column_index: u32, column_type: DataType) -> ColumnDefinition {
+    pub fn new(
+        column_name: impl Into<String>,
+        column_index: u32,
+        column_type: DataType,
+    ) -> ColumnDefinition {
         ColumnDefinition {
             column_name: column_name.into(),
             column_index,
-            column_type
+            column_type,
         }
     }
 }
@@ -149,7 +152,7 @@ impl Schema {
 pub struct SchemaBuilder {
     measurement_name: String,
     tag_names: Vec<String>,
-    field_defs: Vec<(String, DataType)>
+    field_defs: Vec<(String, DataType)>,
 }
 
 impl SchemaBuilder {
@@ -210,7 +213,7 @@ impl SchemaBuilder {
                 .iter()
                 .map(|(name, typ)| (name.clone(), Field::new(name.clone(), *typ, indexer.next())))
                 .collect(),
-            timestamp_column_index : indexer.next(),
+            timestamp_column_index: indexer.next(),
         }
     }
 }
@@ -263,9 +266,7 @@ mod schema_test {
             schema.fields.get("field2").unwrap(),
             &Field::new(String::from("field2"), DataType::Boolean, 3)
         );
-        assert_eq!(
-            schema.timestamp_column_index, 4
-        );
+        assert_eq!(schema.timestamp_column_index, 4);
     }
 
     #[test]
@@ -277,10 +278,7 @@ mod schema_test {
 
         let cols = schema.get_col_defs();
         assert_eq!(cols.len(), 2);
-        assert_eq!(
-            cols[0],
-            ColumnDefinition::new("tag1", 0, DataType::String)
-        );
+        assert_eq!(cols[0], ColumnDefinition::new("tag1", 0, DataType::String));
         assert_eq!(
             cols[1],
             ColumnDefinition::new("timestamp", 1, DataType::Timestamp)
@@ -296,10 +294,7 @@ mod schema_test {
 
         let cols = schema.get_col_defs();
         assert_eq!(cols.len(), 2);
-        assert_eq!(
-            cols[0],
-            ColumnDefinition::new("field1", 0, DataType::Float)
-        );
+        assert_eq!(cols[0], ColumnDefinition::new("field1", 0, DataType::Float));
         assert_eq!(
             cols[1],
             ColumnDefinition::new("timestamp", 1, DataType::Timestamp)
@@ -328,18 +323,9 @@ mod schema_test {
 
         let cols = schema.get_col_defs();
         assert_eq!(cols.len(), 5);
-        assert_eq!(
-            cols[0],
-            ColumnDefinition::new("tag1", 0, DataType::String)
-        );
-        assert_eq!(
-            cols[1],
-            ColumnDefinition::new("tag2", 1, DataType::String)
-        );
-        assert_eq!(
-            cols[2],
-            ColumnDefinition::new("field1", 2, DataType::Float)
-        );
+        assert_eq!(cols[0], ColumnDefinition::new("tag1", 0, DataType::String));
+        assert_eq!(cols[1], ColumnDefinition::new("tag2", 1, DataType::String));
+        assert_eq!(cols[2], ColumnDefinition::new("field1", 2, DataType::Float));
         assert_eq!(
             cols[3],
             ColumnDefinition::new("field2", 3, DataType::Boolean)
@@ -372,14 +358,8 @@ mod schema_test {
 
         let cols = schema.get_col_defs();
         assert_eq!(cols.len(), 3);
-        assert_eq!(
-            cols[0],
-            ColumnDefinition::new("tag1", 0, DataType::String)
-        );
-        assert_eq!(
-            cols[1],
-            ColumnDefinition::new("field1", 1, DataType::Float)
-        );
+        assert_eq!(cols[0], ColumnDefinition::new("tag1", 0, DataType::String));
+        assert_eq!(cols[1], ColumnDefinition::new("field1", 1, DataType::Float));
         assert_eq!(
             cols[2],
             ColumnDefinition::new("timestamp", 2, DataType::Timestamp)
@@ -396,13 +376,7 @@ mod schema_test {
             cols[0],
             ColumnDefinition::new("timestamp", 0, DataType::Timestamp)
         );
-        assert_eq!(
-            cols[1],
-            ColumnDefinition::new("field1", 1, DataType::Float)
-        );
-        assert_eq!(
-            cols[2],
-            ColumnDefinition::new("tag1", 2, DataType::String)
-        );
+        assert_eq!(cols[1], ColumnDefinition::new("field1", 1, DataType::Float));
+        assert_eq!(cols[2], ColumnDefinition::new("tag1", 2, DataType::String));
     }
 }
