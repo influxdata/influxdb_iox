@@ -27,7 +27,7 @@
 /// assert_eq!(cols[3], ColumnDefinition::new("field2", 3, DataType::Boolean));
 /// assert_eq!(cols[4], ColumnDefinition::new("timestamp", 4, DataType::Timestamp));
 /// ```
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Represents a specific Line Protocol Tag name
 #[derive(Debug, PartialEq)]
@@ -107,8 +107,8 @@ impl ColumnDefinition {
 #[derive(Debug)]
 pub struct Schema {
     measurement: String,
-    tags: HashMap<String, Tag>,
-    fields: HashMap<String, Field>,
+    tags: BTreeMap<String, Tag>,
+    fields: BTreeMap<String, Field>,
     timestamp_column_index: u32,
 }
 
