@@ -198,40 +198,26 @@ impl SchemaBuilder {
 
     /// Create a new schema from a list of tag names and (field_name, type) pairs
     pub fn build(&mut self) -> Schema {
-        // assign column indexes to all columns
-        let mut indexer = IndexGenerator::new();
+        // assign column indexes to all columns, starting at 0
+        let mut indexer = 0..;
 
         Schema {
             measurement: self.measurement_name.to_string(),
             tags: self
                 .tag_names
                 .iter()
-                .map(|name| (name.clone(), Tag::new(name.clone(), indexer.next())))
+                .map(|name| (name.clone(), Tag::new(name.clone(), indexer.next().unwrap())))
                 .collect(),
             fields: self
                 .field_defs
                 .iter()
-                .map(|(name, typ)| (name.clone(), Field::new(name.clone(), *typ, indexer.next())))
+                .map(|(name, typ)| (name.clone(), Field::new(name.clone(), *typ, indexer.next().unwrap())))
                 .collect(),
-            timestamp_column_index: indexer.next(),
+            timestamp_column_index: indexer.next().unwrap(),
         }
     }
 }
 
-struct IndexGenerator {
-    val: u32,
-}
-impl IndexGenerator {
-    fn new() -> IndexGenerator {
-        IndexGenerator { val: 0 }
-    }
-
-    fn next(&mut self) -> u32 {
-        let t = self.val;
-        self.val += 1;
-        t
-    }
-}
 
 #[cfg(test)]
 mod test {
@@ -251,20 +237,20 @@ mod test {
         assert_eq!(schema.measurement, "my_measurement");
         assert_eq!(schema.tags.len(), 2);
         assert_eq!(
-            schema.tags.get("tag1").unwrap(),
-            &Tag::new(String::from("tag1"), 0)
+            schema.tags.get("tag1"),
+            Some(&Tag::new(String::from("tag1"), 0))
         );
         assert_eq!(
-            schema.tags.get("tag2").unwrap(),
-            &Tag::new(String::from("tag2"), 1)
+            schema.tags.get("tag2"),
+            Some(&Tag::new(String::from("tag2"), 1))
         );
         assert_eq!(
-            schema.fields.get("field1").unwrap(),
-            &Field::new(String::from("field1"), DataType::Float, 2)
+            schema.fields.get("field1"),
+            Some(&Field::new(String::from("field1"), DataType::Float, 2))
         );
         assert_eq!(
-            schema.fields.get("field2").unwrap(),
-            &Field::new(String::from("field2"), DataType::Boolean, 3)
+            schema.fields.get("field2"),
+            Some(&Field::new(String::from("field2"), DataType::Boolean, 3))
         );
         assert_eq!(schema.timestamp_column_index, 4);
     }
