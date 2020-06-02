@@ -183,6 +183,7 @@ impl SchemaBuilder {
         {
             Some((_, existing_type)) => {
                 if *existing_type != field_type {
+                    // TODO: return Result rather than panic here.
                     panic!("Field '{}' type changed. Previously it had type {:?} but attempted to set type {:?}",
                            field_name, existing_type, field_type);
                 }
@@ -233,7 +234,7 @@ impl IndexGenerator {
 }
 
 #[cfg(test)]
-mod schema_test {
+mod test {
     use super::*;
 
     #[test]
