@@ -103,10 +103,9 @@ impl ColumnDefinition {
     }
 }
 
-/// Represents the overall "schema" of a set of line protocol data
-/// records as an ordered list of columns. It records possible tag names and
-/// field names as well as in what order these columns appear
-/// set of columns)
+/// Represents the overall "schema" of line protocol data. See the
+/// module definition for more details and example of how to construct
+/// and access a `Schema` object;
 #[derive(Debug)]
 pub struct Schema {
     measurement: String,
