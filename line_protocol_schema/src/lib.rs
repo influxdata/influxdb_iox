@@ -80,21 +80,6 @@ impl Field {
     }
 }
 
-#[derive(Debug, PartialEq)]
-// Represents the timestamp value of a field of Line Protocol data
-pub struct Timestamp {
-    pub timestamp_name: String,
-    column_index: u32,
-}
-
-impl Timestamp {
-    fn new(name: impl Into<String>, idx: u32) -> Timestamp {
-        Timestamp {
-            timestamp_name: name.into(),
-            column_index: idx,
-        }
-    }
-}
 
 /// Represents a column of the line protocol data (specifically how to
 /// find tag values and field values in a set of columns)
@@ -124,7 +109,7 @@ pub struct Schema {
     measurement: String,
     tags: HashMap<String, Tag>,
     fields: HashMap<String, Field>,
-    timestamp: Timestamp,
+    timestamp_column_index: u32,
 }
 
 impl Schema {
@@ -150,8 +135,8 @@ impl Schema {
             });
         }
         cols.push(ColumnDefinition {
-            column_name: self.timestamp.timestamp_name.clone(),
-            column_index: self.timestamp.column_index,
+            column_name: String::from("timestamp"),
+            column_index: self.timestamp_column_index,
             column_type: DataType::Timestamp,
         });
 
@@ -164,8 +149,7 @@ impl Schema {
 pub struct SchemaBuilder {
     measurement_name: String,
     tag_names: Vec<String>,
-    field_defs: Vec<(String, DataType)>,
-    timestamp_name: String,
+    field_defs: Vec<(String, DataType)>
 }
 
 impl SchemaBuilder {
@@ -175,7 +159,6 @@ impl SchemaBuilder {
             measurement_name,
             tag_names: Vec::new(),
             field_defs: Vec::new(),
-            timestamp_name: "timestamp".to_string(),
         }
     }
 
@@ -227,7 +210,7 @@ impl SchemaBuilder {
                 .iter()
                 .map(|(name, typ)| (name.clone(), Field::new(name.clone(), *typ, indexer.next())))
                 .collect(),
-            timestamp: Timestamp::new(self.timestamp_name.to_string(), indexer.next()),
+            timestamp_column_index : indexer.next(),
         }
     }
 }
@@ -281,8 +264,7 @@ mod schema_test {
             &Field::new(String::from("field2"), DataType::Boolean, 3)
         );
         assert_eq!(
-            schema.timestamp,
-            Timestamp::new(String::from("timestamp"), 4)
+            schema.timestamp_column_index, 4
         );
     }
 
@@ -406,7 +388,7 @@ mod schema_test {
         // Now, if we somehow have changed how the indexes are
         // assigned, the columns should still appear in order
         schema.tags.get_mut("tag1").unwrap().column_index = 2;
-        schema.timestamp.column_index = 0;
+        schema.timestamp_column_index = 0;
 
         let cols = schema.get_col_defs();
         assert_eq!(cols.len(), 3);
