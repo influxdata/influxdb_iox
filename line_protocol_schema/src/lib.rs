@@ -206,18 +206,27 @@ impl SchemaBuilder {
             tags: self
                 .tag_names
                 .iter()
-                .map(|name| (name.clone(), Tag::new(name.clone(), indexer.next().unwrap())))
+                .map(|name| {
+                    (
+                        name.clone(),
+                        Tag::new(name.clone(), indexer.next().unwrap()),
+                    )
+                })
                 .collect(),
             fields: self
                 .field_defs
                 .iter()
-                .map(|(name, typ)| (name.clone(), Field::new(name.clone(), *typ, indexer.next().unwrap())))
+                .map(|(name, typ)| {
+                    (
+                        name.clone(),
+                        Field::new(name.clone(), *typ, indexer.next().unwrap()),
+                    )
+                })
                 .collect(),
             timestamp_column_index: indexer.next().unwrap(),
         }
     }
 }
-
 
 #[cfg(test)]
 mod test {
