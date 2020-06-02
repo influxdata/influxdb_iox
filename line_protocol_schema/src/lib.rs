@@ -37,10 +37,10 @@ pub struct Tag {
 }
 
 impl Tag {
-    pub fn new(name: impl Into<String>, idx: u32) -> Tag {
+    pub fn new(tag_name: impl Into<String>, column_index: u32) -> Tag {
         Tag {
-            tag_name: name.into(),
-            column_index: idx,
+            tag_name: tag_name.into(),
+            column_index,
         }
     }
 }
@@ -91,11 +91,11 @@ pub struct ColumnDefinition {
 }
 
 impl ColumnDefinition {
-    pub fn new(name: &str, idx: u32, t: DataType) -> ColumnDefinition {
+    pub fn new(column_name: impl Into<String>, column_index: u32, column_type: DataType) -> ColumnDefinition {
         ColumnDefinition {
-            column_name: name.to_string(),
-            column_index: idx,
-            column_type: t,
+            column_name: column_name.into(),
+            column_index,
+            column_type
         }
     }
 }
