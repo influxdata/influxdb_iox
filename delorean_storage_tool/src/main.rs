@@ -2,11 +2,14 @@
 #![warn(missing_debug_implementations, clippy::explicit_iter_loop)]
 
 use std::fs;
-
 use log::{debug, info, warn};
+
+use std::collections::{HashMap, HashSet};
 
 use clap::{crate_authors, crate_version, App, Arg, SubCommand};
 use snafu::Snafu;
+use delorean::storage::tsm::{TSMReader, InfluxID, IndexEntry};
+use delorean::storage::StorageError;
 
 use delorean_ingest::LineProtocolConverter;
 use delorean_line_parser::{parse_lines, ParsedLine};
@@ -62,12 +65,13 @@ impl From<DeloreanTableWriterError> for Error {
 enum ReturnCode {
     InternalError = 1,
     ConversionFailed = 2,
+    MetadataDumpFailed = 3,
 }
 
 static SCHEMA_SAMPLE_SIZE: usize = 5;
 
 fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
-    info!("dstool starting");
+    info!("dstool convert starting");
     debug!("Reading from input file {}", input_filename);
     debug!("Writing to output file {}", output_filename);
 
@@ -109,6 +113,161 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
     Ok(())
 }
 
+struct MeasurementMetadata {
+    // tag name --> list of seen tag values
+    tags : HashMap<String, HashSet<String>>,
+    // List of field names seen
+    fields: HashSet<String>,
+
+}
+
+impl MeasurementMetadata {
+    fn new() -> MeasurementMetadata {
+        MeasurementMetadata {
+            tags: HashMap::new(),
+            fields: HashSet::new(),
+        }
+    }
+
+    fn update_for_entry(&mut self, index_entry :&mut IndexEntry) {
+        let tagset = index_entry.tagset().expect("error decoding tagset");
+        for (tag_name, tag_value) in tagset {
+            let tag_entry = self.tags.entry(tag_name).or_insert(HashSet::new());
+            tag_entry.insert(tag_value);
+        }
+        let field_name = index_entry.field_key().expect("error decoding field name");
+        self.fields.insert(field_name);
+    }
+
+    fn print_report(&self, prefix: &str) {
+        for (tag_name, tag_values) in self.tags.iter() {
+            println!("{} tag {} = {:?}", prefix, tag_name, tag_values);
+        }
+        for field_name in self.fields.iter() {
+            println!("{} field {}", prefix, field_name);
+        }
+
+    }
+}
+
+// Represents stats for a single bucket
+struct BucketMetadata {
+    /// How many index entries have been seen
+    count : u64,
+
+    // Total 'records' (aka sum of the lengths of all timeseries)
+    total_records: u64,
+
+    // measurement ->
+    measurements: HashMap<String, MeasurementMetadata>
+}
+
+impl BucketMetadata {
+    fn new() -> BucketMetadata {
+        BucketMetadata {
+            count: 0,
+            total_records: 0,
+            measurements: HashMap::new(),
+        }
+    }
+
+    fn update_for_entry(&mut self, index_entry :&mut IndexEntry) {
+        self.count += 1;
+        self.total_records += index_entry.count as u64;
+        let measurement = index_entry.measurement().expect("error decoding measurement name");
+        let meta = self.measurements.entry(measurement).or_insert(MeasurementMetadata::new());
+        meta.update_for_entry(index_entry);
+    }
+
+    fn print_report(&self, prefix: &str) {
+        for (measurement, meta) in self.measurements.iter() {
+            println!("{}{}", prefix, measurement);
+            let indent = format!("{}  ", prefix);
+            meta.print_report(&indent);
+        }
+    }
+
+
+}
+
+struct TSMMetadataBuilder {
+
+    num_good_entries : u32,
+    num_bad_entries : u32,
+
+    // (org_id, bucket_id) --> Bucket Metadata
+    bucket_stats : HashMap<(InfluxID, InfluxID), BucketMetadata>
+}
+
+impl TSMMetadataBuilder {
+    fn new() -> TSMMetadataBuilder {
+        TSMMetadataBuilder {
+            num_good_entries : 0,
+            num_bad_entries : 0,
+            bucket_stats : HashMap::new(),
+        }
+    }
+
+    fn process_entry(&mut self, entry : &mut Result<IndexEntry, StorageError>) {
+        match entry {
+            Ok(index_entry) => {
+                self.num_good_entries += 1;
+                let key = (index_entry.org_id(), index_entry.bucket_id());
+                let stats = self.bucket_stats.entry(key).or_insert(BucketMetadata::new());
+                stats.update_for_entry(index_entry);
+            },
+            Err(e) => {
+                warn!("Ignoring entry decoding error {:?}", e);
+                self.num_bad_entries += 1;
+            },
+        }
+    }
+
+    fn print_report(&self) {
+        println!("TSM Metadata Report:");
+        println!("  Valid Index Entries: {}", self.num_good_entries);
+        if self.num_bad_entries > 0 {
+            println!("  Invalid Entries: {}", self.num_bad_entries);
+        }
+        println!("  Organizations/Bucket Stats:");
+        for (k, stats) in self.bucket_stats.iter() {
+            let (org_id, bucket_id) = k;
+            println!("    ({}, {}) {} index entries, {} total records",
+                     org_id, bucket_id, stats.count, stats.total_records);
+            println!("    Measurements:");
+            stats.print_report("      ");
+        }
+    }
+}
+
+fn dump_meta(input_filename: &str) -> Result<()> {
+    info!("dstool meta starting");
+    debug!("Reading from input file {}", input_filename);
+
+    // TODO: figure out the format in some intelligent way. Right now assume it is TSM.
+    let file = fs::File::open(input_filename).map_err(|e| {
+        let msg = format!("Error reading {}", input_filename);
+        Error::IOError {
+            message: msg,
+            source: Arc::new(e),
+        }
+    })?;
+
+    let mut reader = TSMReader::new(BufReader::new(file), 4_222_248);
+
+    let index = reader.index().expect("Error reading index");
+
+    let mut stats_builder = TSMMetadataBuilder::new();
+
+    for mut entry in index {
+        stats_builder.process_entry(&mut entry);
+    }
+
+    stats_builder.print_report();
+
+    Ok(())
+}
+
 fn main() {
     let help = r#"Delorean Storage Tool
 
@@ -139,6 +298,16 @@ Examples:
                         .index(2),
                 ),
         )
+        .subcommand(
+            SubCommand::with_name("meta")
+                .about("Print out metadata information about a storage file")
+                .arg(
+                    Arg::with_name("INPUT")
+                        .help("The input filename to read from")
+                        .required(true)
+                        .index(1),
+                )
+        )
         .arg(
             Arg::with_name("verbose")
                 .short("v")
@@ -165,6 +334,15 @@ Examples:
             Err(e) => {
                 eprintln!("Conversion failed: {}", e);
                 std::process::exit(ReturnCode::ConversionFailed as _)
+            }
+        }
+    } else if let Some(matches) = matches.subcommand_matches("meta") {
+        let input_filename = matches.value_of("INPUT").unwrap();
+        match dump_meta(&input_filename) {
+            Ok(()) => debug!("Metadata dump completed successfully"),
+            Err(e) => {
+                eprintln!("Metadata dump failed: {}", e);
+                std::process::exit(ReturnCode::MetadataDumpFailed as _)
             }
         }
     } else {
