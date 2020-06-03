@@ -709,6 +709,7 @@ mod test {
         assert!(es != "Foo\\");
         assert!(es != "Foo");
         assert!(es != "Fo");
+        assert!(es != "F");
         assert!(es != "");
 
         Ok(())
