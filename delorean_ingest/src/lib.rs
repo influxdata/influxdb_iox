@@ -1,6 +1,6 @@
 //! Library with code for (aspirationally) ingesting various data formats into Delorean
 use log::debug;
-use snafu::Snafu;
+use snafu::{OptionExt, Snafu};
 
 use delorean_line_parser::{FieldValue, ParsedLine};
 
@@ -19,9 +19,7 @@ pub enum Error {
 
     // Only a single line protocol measurement field is currently supported
     #[snafu(display(r#"More than one measurement not yet supported: {}"#, message))]
-    OnlyOneMeasurementSupported {
-        message: String
-    },
+    OnlyOneMeasurementSupported { message: String },
 }
 
 /// `LineProtocolConverter` are used to
@@ -44,21 +42,19 @@ impl LineProtocolConverter {
         lines: impl Iterator<Item = ParsedLine<'a>>,
     ) -> Result<LineProtocolConverter, Error> {
         let mut peekable_iter = lines.peekable();
-        let mut builder = match peekable_iter.peek().as_ref() {
-            Some(&parsed_line) => {
-                SchemaBuilder::new(&parsed_line.series.measurement)
-            }
-            None => {
-                return Err(Error::NeedsAtLeastOneLine)
-            }
-        };
+        let first_line = peekable_iter.peek().context(NeedsAtLeastOneLine)?;
+
+        let mut builder = SchemaBuilder::new(&first_line.series.measurement);
 
         for line in peekable_iter {
             let series = &line.series;
             if &series.measurement != builder.get_measurement_name() {
                 return Err(Error::OnlyOneMeasurementSupported {
-                    message: format!("Saw new measurement {}, had been using measurement {}",
-                                     builder.get_measurement_name(), series.measurement)
+                    message: format!(
+                        "Saw new measurement {}, had been using measurement {}",
+                        builder.get_measurement_name(),
+                        series.measurement
+                    ),
                 });
             }
             if let Some(tag_set) = &series.tag_set {
@@ -88,30 +84,25 @@ mod delorean_ingest_tests {
     use super::*;
     use line_protocol_schema::ColumnDefinition;
 
-    fn only_good_lines(data : &str) -> impl Iterator<Item=ParsedLine<'_>> {
+    fn only_good_lines(data: &str) -> impl Iterator<Item = ParsedLine<'_>> {
         delorean_line_parser::parse_lines(data).filter_map(|r| {
             assert!(r.is_ok());
             r.ok()
         })
     }
 
-
     #[test]
     fn no_lines() {
         let parsed_lines = only_good_lines("");
         let converter_result = LineProtocolConverter::new(parsed_lines);
 
-        assert!(matches!(
-            converter_result,
-            Err(Error::NeedsAtLeastOneLine)
-        ));
+        assert!(matches!(converter_result, Err(Error::NeedsAtLeastOneLine)));
     }
 
     #[test]
     fn one_line() {
-        let parsed_lines = only_good_lines(
-            "cpu,host=A,region=west usage_system=64i 1590488773254420000",
-        );
+        let parsed_lines =
+            only_good_lines("cpu,host=A,region=west usage_system=64i 1590488773254420000");
 
         let converter = LineProtocolConverter::new(parsed_lines).expect("conversion successful");
         assert_eq!(converter.schema.measurement(), "cpu");
@@ -274,7 +265,7 @@ mod delorean_ingest_tests {
         // Then the converter does not support it
         assert!(matches!(
             converter_result,
-            Err(Error::OnlyOneMeasurementSupported{message: _ })
+            Err(Error::OnlyOneMeasurementSupported { message: _ })
         ));
     }
 }
