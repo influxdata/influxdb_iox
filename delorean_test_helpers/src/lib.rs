@@ -2,7 +2,7 @@
 #![warn(missing_debug_implementations, clippy::explicit_iter_loop)]
 
 use std::{env, f64};
-use tempfile::TempDir;
+use tempfile::{NamedTempFile, TempDir, TempPath};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type Result<T = (), E = Error> = std::result::Result<T, E>;
@@ -25,4 +25,17 @@ pub fn tmp_dir() -> Result<TempDir> {
     Ok(tempfile::Builder::new()
         .prefix("delorean")
         .tempdir_in(root)?)
+}
+
+/// Return the path to a temporary file -- caller is responsible for
+/// removing the file created at this path
+pub fn tmp_path() -> TempPath {
+    NamedTempFile::new()
+        .expect("can't create temporary file")
+        .into_temp_path()
+}
+
+pub fn enable_logging() {
+    std::env::set_var("RUST_LOG", "debug");
+    env_logger::init();
 }
