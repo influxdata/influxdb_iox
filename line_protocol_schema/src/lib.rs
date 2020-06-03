@@ -33,14 +33,14 @@ use std::collections::BTreeMap;
 #[derive(Debug, PartialEq)]
 pub struct Tag {
     pub tag_name: String,
-    column_index: u32,
+    index: u32,
 }
 
 impl Tag {
-    pub fn new(tag_name: impl Into<String>, column_index: u32) -> Tag {
+    pub fn new(tag_name: impl Into<String>, index: u32) -> Tag {
         Tag {
             tag_name: tag_name.into(),
-            column_index,
+            index,
         }
     }
 }
@@ -67,15 +67,15 @@ pub enum DataType {
 pub struct Field {
     pub field_name: String,
     pub field_type: DataType,
-    column_index: u32,
+    index: u32,
 }
 
 impl Field {
-    pub fn new(field_name: impl Into<String>, field_type: DataType, column_index: u32) -> Field {
+    pub fn new(field_name: impl Into<String>, field_type: DataType, index: u32) -> Field {
         Field {
             field_name: field_name.into(),
             field_type,
-            column_index,
+            index,
         }
     }
 }
@@ -84,21 +84,21 @@ impl Field {
 /// find tag values and field values in a set of columns)
 #[derive(Debug, PartialEq)]
 pub struct ColumnDefinition {
-    pub column_name: String,
-    pub column_index: u32,
-    pub column_type: DataType,
+    pub name: String,
+    pub index: u32,
+    pub data_type: DataType,
 }
 
 impl ColumnDefinition {
     pub fn new(
-        column_name: impl Into<String>,
-        column_index: u32,
-        column_type: DataType,
+        name: impl Into<String>,
+        index: u32,
+        data_type: DataType,
     ) -> ColumnDefinition {
         ColumnDefinition {
-            column_name: column_name.into(),
-            column_index,
-            column_type,
+            name: name.into(),
+            index,
+            data_type,
         }
     }
 }
@@ -111,12 +111,12 @@ pub struct Schema {
     measurement: String,
     tags: BTreeMap<String, Tag>,
     fields: BTreeMap<String, Field>,
-    timestamp_column_index: u32,
+    timestamp_index: u32,
 }
 
 impl Schema {
-    // Return an Vec of ColumnDefinition's such that
-    // v[column_index].column_index == column_index for all columns
+    // Return a Vec of ColumnDefinition's such that
+    // v[idx].index == idx for all columns
     // (aka that the vec is in the same order as the columns of the schema
     // TODO : consider pre-computing this on schema directly.
     pub fn get_col_defs(&self) -> Vec<ColumnDefinition> {
@@ -124,25 +124,25 @@ impl Schema {
         cols.reserve(self.tags.len() + self.fields.len() + 1);
         for (tag_name, tag) in self.tags.iter() {
             cols.push(ColumnDefinition {
-                column_name: tag_name.clone(),
-                column_index: tag.column_index,
-                column_type: DataType::String,
+                name: tag_name.clone(),
+                index: tag.index,
+                data_type: DataType::String,
             });
         }
         for (field_name, field) in self.fields.iter() {
             cols.push(ColumnDefinition {
-                column_name: field_name.clone(),
-                column_index: field.column_index,
-                column_type: field.field_type,
+                name: field_name.clone(),
+                index: field.index,
+                data_type: field.field_type,
             });
         }
         cols.push(ColumnDefinition {
-            column_name: String::from("timestamp"),
-            column_index: self.timestamp_column_index,
-            column_type: DataType::Timestamp,
+            name: String::from("timestamp"),
+            index: self.timestamp_index,
+            data_type: DataType::Timestamp,
         });
 
-        cols.sort_by_key(|col| col.column_index);
+        cols.sort_by_key(|col| col.index);
         cols
     }
 }
@@ -174,7 +174,7 @@ impl SchemaBuilder {
     }
 
     /// Add a new typed field to the schema. Field names can not be repeated
-    pub fn field(&mut self, field_name: &str, field_type: DataType) -> &mut Self {
+    pub fn field(&mut self, field_name: &str, data_type: DataType) -> &mut Self {
         // check for existing fields (TODO make this faster)
         match self
             .field_defs
@@ -182,21 +182,21 @@ impl SchemaBuilder {
             .find(|(existing_name, _)| existing_name == field_name)
         {
             Some((_, existing_type)) => {
-                if *existing_type != field_type {
+                if *existing_type != data_type {
                     // TODO: return Result rather than panic here.
                     panic!("Field '{}' type changed. Previously it had type {:?} but attempted to set type {:?}",
-                           field_name, existing_type, field_type);
+                           field_name, existing_type, data_type);
                 }
             }
             None => {
-                let new_field_def = (field_name.to_string(), field_type);
+                let new_field_def = (field_name.to_string(), data_type);
                 self.field_defs.push(new_field_def);
             }
         }
         self
     }
 
-    /// Create a new schema from a list of tag names and (field_name, type) pairs
+    /// Create a new schema from a list of tag names and (field_name, data_type) pairs
     pub fn build(&mut self) -> Schema {
         // assign column indexes to all columns, starting at 0
         let mut indexer = 0..;
@@ -223,7 +223,7 @@ impl SchemaBuilder {
                     )
                 })
                 .collect(),
-            timestamp_column_index: indexer.next().unwrap(),
+            timestamp_index: indexer.next().unwrap(),
         }
     }
 }
@@ -261,7 +261,7 @@ mod test {
             schema.fields.get("field2"),
             Some(&Field::new(String::from("field2"), DataType::Boolean, 3))
         );
-        assert_eq!(schema.timestamp_column_index, 4);
+        assert_eq!(schema.timestamp_index, 4);
     }
 
     #[test]
@@ -362,8 +362,8 @@ mod test {
 
         // Now, if we somehow have changed how the indexes are
         // assigned, the columns should still appear in order
-        schema.tags.get_mut("tag1").unwrap().column_index = 2;
-        schema.timestamp_column_index = 0;
+        schema.tags.get_mut("tag1").unwrap().index = 2;
+        schema.timestamp_index = 0;
 
         let cols = schema.get_col_defs();
         assert_eq!(cols.len(), 3);
