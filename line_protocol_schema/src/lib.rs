@@ -10,7 +10,7 @@
 /// The line protocol schema consists of a series of columns, each with a
 /// specific type, indexed by 0.
 ///
-///```
+/// ```
 /// use line_protocol_schema::{SchemaBuilder, DataType, ColumnDefinition};
 /// let schema = SchemaBuilder::new(String::from("my_measurement"))
 ///     .tag("tag1")
@@ -32,14 +32,14 @@ use std::collections::BTreeMap;
 /// Represents a specific Line Protocol Tag name
 #[derive(Debug, PartialEq)]
 pub struct Tag {
-    pub tag_name: String,
+    pub name: String,
     index: u32,
 }
 
 impl Tag {
-    pub fn new(tag_name: impl Into<String>, index: u32) -> Tag {
+    pub fn new(name: impl Into<String>, index: u32) -> Tag {
         Tag {
-            tag_name: tag_name.into(),
+            name: name.into(),
             index,
         }
     }
@@ -65,16 +65,16 @@ pub enum DataType {
 /// Represents a specific Line Protocol Field name
 #[derive(Debug, PartialEq)]
 pub struct Field {
-    pub field_name: String,
-    pub field_type: DataType,
+    pub name: String,
+    pub data_type: DataType,
     index: u32,
 }
 
 impl Field {
-    pub fn new(field_name: impl Into<String>, field_type: DataType, index: u32) -> Field {
+    pub fn new(name: impl Into<String>, data_type: DataType, index: u32) -> Field {
         Field {
-            field_name: field_name.into(),
-            field_type,
+            name: name.into(),
+            data_type,
             index,
         }
     }
@@ -118,24 +118,19 @@ impl Schema {
     // Return a Vec of ColumnDefinition's such that
     // v[idx].index == idx for all columns
     // (aka that the vec is in the same order as the columns of the schema
-    // TODO : consider pre-computing this on schema directly.
+    // FIXME : consider pre-computing this on schema directly.
     pub fn get_col_defs(&self) -> Vec<ColumnDefinition> {
-        let mut cols = Vec::new();
-        cols.reserve(self.tags.len() + self.fields.len() + 1);
-        for (tag_name, tag) in self.tags.iter() {
-            cols.push(ColumnDefinition {
-                name: tag_name.clone(),
-                index: tag.index,
-                data_type: DataType::String,
-            });
-        }
-        for (field_name, field) in self.fields.iter() {
-            cols.push(ColumnDefinition {
-                name: field_name.clone(),
+        let mut cols = Vec::with_capacity(self.tags.len() + self.fields.len() + 1);
+        cols.extend(self.tags.iter().map(|(name, tag)| ColumnDefinition {
+            name: name.clone(),
+            index: tag.index,
+            data_type: DataType::String,
+        }));
+        cols.extend(self.fields.iter().map(|(name, field)| ColumnDefinition {
+                name: name.clone(),
                 index: field.index,
-                data_type: field.field_type,
-            });
-        }
+            data_type: field.data_type,
+        }));
         cols.push(ColumnDefinition {
             name: String::from("timestamp"),
             index: self.timestamp_index,
@@ -156,40 +151,40 @@ pub struct SchemaBuilder {
 
 impl SchemaBuilder {
     /// Begin building the schema for a named measurement
-    pub fn new(measurement_name: String) -> SchemaBuilder {
+    pub fn new(measurement_name: impl Into<String>) -> SchemaBuilder {
         SchemaBuilder {
-            measurement_name,
+            measurement_name: measurement_name.into(),
             tag_names: Vec::new(),
             field_defs: Vec::new(),
         }
     }
 
     /// Add a new tag name to the schema.
-    pub fn tag(&mut self, tag_name: &str) -> &mut Self {
-        // check for existing tag (TODO make this faster)
-        if self.tag_names.iter().find(|&s| s == tag_name).is_none() {
-            self.tag_names.push(tag_name.to_string());
+    pub fn tag(&mut self, name: &str) -> &mut Self {
+        // check for existing tag (FIXME make this faster)
+        if self.tag_names.iter().find(|&s| s == name).is_none() {
+            self.tag_names.push(name.to_string());
         }
         self
     }
 
     /// Add a new typed field to the schema. Field names can not be repeated
-    pub fn field(&mut self, field_name: &str, data_type: DataType) -> &mut Self {
-        // check for existing fields (TODO make this faster)
+    pub fn field(&mut self, name: &str, data_type: DataType) -> &mut Self {
+        // check for existing fields (FIXME make this faster)
         match self
             .field_defs
             .iter()
-            .find(|(existing_name, _)| existing_name == field_name)
+            .find(|(existing_name, _)| existing_name == name)
         {
             Some((_, existing_type)) => {
                 if *existing_type != data_type {
-                    // TODO: return Result rather than panic here.
+                    // FIXME: return Result rather than panic here.
                     panic!("Field '{}' type changed. Previously it had type {:?} but attempted to set type {:?}",
-                           field_name, existing_type, data_type);
+                           name, existing_type, data_type);
                 }
             }
             None => {
-                let new_field_def = (field_name.to_string(), data_type);
+                let new_field_def = (name.to_string(), data_type);
                 self.field_defs.push(new_field_def);
             }
         }
