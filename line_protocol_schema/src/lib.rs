@@ -156,7 +156,7 @@ impl SchemaBuilder {
     }
 
     /// Add a new tag name to the schema.
-    pub fn tag(&mut self, name: &str) -> &mut Self {
+    pub fn tag(mut self, name: &str) -> Self {
         // check for existing tag (FIXME make this faster)
         if self.tag_names.iter().find(|&s| s == name).is_none() {
             self.tag_names.push(name.to_string());
@@ -165,7 +165,7 @@ impl SchemaBuilder {
     }
 
     /// Add a new typed field to the schema. Field names can not be repeated
-    pub fn field(&mut self, name: &str, data_type: DataType) -> &mut Self {
+    pub fn field(mut self, name: &str, data_type: DataType) -> Self {
         // check for existing fields (FIXME make this faster)
         match self
             .field_defs
@@ -188,7 +188,7 @@ impl SchemaBuilder {
     }
 
     /// Create a new schema from a list of tag names and (field_name, data_type) pairs
-    pub fn build(&mut self) -> Schema {
+    pub fn build(self) -> Schema {
         // assign column indexes to all columns, starting at 0
         let mut indexer = 0..;
 
@@ -225,8 +225,7 @@ mod test {
 
     #[test]
     fn construct() {
-        let mut builder = SchemaBuilder::new(String::from("my_measurement"));
-        builder
+        let builder = SchemaBuilder::new(String::from("my_measurement"))
             .tag("tag1")
             .field("field1", DataType::Float)
             .field("field2", DataType::Boolean)
