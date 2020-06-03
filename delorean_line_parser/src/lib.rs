@@ -1324,6 +1324,11 @@ her"#,
     }
 
     #[test]
+    #[allow(clippy::op_ref)]
+    // Clippy disabled because it wascomplaining about uselessly
+    // taking references on both sides of the eq op but that actually
+    // invokes a different implementation of partial eq which I wanted
+    // to test.
     fn string_comparison() {
         let es = EscapedStr::from("foobar");
         let s = String::from("foobar");
