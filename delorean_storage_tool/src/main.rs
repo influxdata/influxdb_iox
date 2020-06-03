@@ -60,7 +60,6 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
         }
     });
 
-
     // The idea here is to use the first few parsed lines to deduce the schema
     let converter = match LineProtocolConverter::new(only_good_lines) {
         Ok(converter) => converter,
