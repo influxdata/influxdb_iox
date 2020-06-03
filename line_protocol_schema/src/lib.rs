@@ -90,11 +90,7 @@ pub struct ColumnDefinition {
 }
 
 impl ColumnDefinition {
-    pub fn new(
-        name: impl Into<String>,
-        index: u32,
-        data_type: DataType,
-    ) -> ColumnDefinition {
+    pub fn new(name: impl Into<String>, index: u32, data_type: DataType) -> ColumnDefinition {
         ColumnDefinition {
             name: name.into(),
             index,
@@ -127,8 +123,8 @@ impl Schema {
             data_type: DataType::String,
         }));
         cols.extend(self.fields.iter().map(|(name, field)| ColumnDefinition {
-                name: name.clone(),
-                index: field.index,
+            name: name.clone(),
+            index: field.index,
             data_type: field.data_type,
         }));
         cols.push(ColumnDefinition {
