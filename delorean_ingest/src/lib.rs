@@ -39,7 +39,7 @@ impl LineProtocolConverter {
     /// measurements).
     ///
     pub fn new<'a>(
-        lines: impl Iterator<Item = ParsedLine<'a>>,
+        lines: impl Iterator<Item = &'a ParsedLine<'a>>,
     ) -> Result<LineProtocolConverter, Error> {
         let mut peekable_iter = lines.peekable();
         let first_line = peekable_iter.peek().context(NeedsAtLeastOneLine)?;
