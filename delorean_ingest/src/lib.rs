@@ -38,9 +38,7 @@ impl LineProtocolConverter {
     /// that have the same schema (e.g. tag names, field names,
     /// measurements).
     ///
-    pub fn new(
-        lines: &[ParsedLine<'_>],
-    ) -> Result<LineProtocolConverter, Error> {
+    pub fn new(lines: &[ParsedLine<'_>]) -> Result<LineProtocolConverter, Error> {
         let mut peekable_iter = lines.iter().peekable();
         let first_line = peekable_iter.peek().context(NeedsAtLeastOneLine)?;
 
@@ -85,10 +83,12 @@ mod delorean_ingest_tests {
     use line_protocol_schema::ColumnDefinition;
 
     fn only_good_lines(data: &str) -> Vec<ParsedLine<'_>> {
-        delorean_line_parser::parse_lines(data).filter_map(|r| {
-            assert!(r.is_ok());
-            r.ok()
-        }).collect()
+        delorean_line_parser::parse_lines(data)
+            .filter_map(|r| {
+                assert!(r.is_ok());
+                r.ok()
+            })
+            .collect()
     }
 
     #[test]

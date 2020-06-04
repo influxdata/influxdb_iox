@@ -34,7 +34,7 @@ enum ReturnCode {
     ConversionFailed = 2,
 }
 
-static SCHEMA_SAMPLE_SIZE : usize = 5;
+static SCHEMA_SAMPLE_SIZE: usize = 5;
 
 fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
     info!("dstool starting");
@@ -62,10 +62,8 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
         }
     });
 
-    let schema_sample : Vec<ParsedLine> = only_good_lines
-        .by_ref()
-        .take(SCHEMA_SAMPLE_SIZE)
-        .collect();
+    let schema_sample: Vec<ParsedLine> =
+        only_good_lines.by_ref().take(SCHEMA_SAMPLE_SIZE).collect();
 
     // The idea here is to use the first few parsed lines to deduce the schema
     let converter = match LineProtocolConverter::new(&schema_sample) {
