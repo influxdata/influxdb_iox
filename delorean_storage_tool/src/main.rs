@@ -68,8 +68,7 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
         .collect();
 
     // The idea here is to use the first few parsed lines to deduce the schema
-    let sample_iter = schema_sample.iter();
-    let converter = match LineProtocolConverter::new(sample_iter) {
+    let converter = match LineProtocolConverter::new(&schema_sample) {
         Ok(converter) => converter,
         Err(e) => {
             let message = String::from("Error creating line protocol converter");
