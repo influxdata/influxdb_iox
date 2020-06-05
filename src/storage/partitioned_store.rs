@@ -1,6 +1,6 @@
 //! partitioned_store is an enum and set of helper functions and structs to define Partitions
 //! that store data. The helper funcs and structs merge results from multiple partitions together.
-use crate::delorean::{wal, Predicate, TimestampRange};
+use crate::generated_types::{wal, Predicate, TimestampRange};
 use crate::line_parser::{self, PointType};
 use crate::storage::{
     memdb::MemDB, remote_partition::RemotePartition, s3_partition::S3Partition, ReadPoint,

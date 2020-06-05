@@ -10,7 +10,7 @@ pub mod line_parser;
 pub mod storage;
 pub mod time;
 
-pub mod delorean {
+pub mod generated_types {
     // The generated code doesn't conform to these lints
     #![allow(
         unused_imports,
