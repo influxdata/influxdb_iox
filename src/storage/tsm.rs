@@ -718,7 +718,7 @@ mod tests {
         assert_eq!(parsed_key.field_key, String::from("sum"));
     }
 
-    /// This teset scans over the entire tsm contents and
+    /// This test scans over the entire tsm contents and
     /// ensures no errors are returned from the reader.
     fn walk_index_and_check_for_errors(tsm_gz_path: &str) {
         let file = File::open(tsm_gz_path);
@@ -731,31 +731,20 @@ mod tests {
         let mut reader = TSMReader::new(BufReader::new(r), data_len);
         let index = reader.index().unwrap();
 
-        let mut entries = Vec::new();
-
-        // Iterate over all the index entries and ensure no errors are reported.
-        for index_entry in index {
-            match index_entry {
-                Ok(mut entry) => {
-                    // Decode each part of the IndexEntry, but don't validate its value.
-                    entry.org_id();
-                    entry.bucket_id();
-                    let measurement = entry
-                        .measurement()
-                        .expect("error decoding measurement name");
-                    assert!(!measurement.is_empty());
-                    entry.tagset().expect("error decoding tagset");
-                    entry.field_key().expect("error decoding field key");
-
-                    entries.push(entry);
-                }
-                Err(e) => {
-                    panic!("Error decoding index entry {}", e);
-                }
-            }
+        let mut entries = index.collect::<Result<_, _>>().expect("Error decoding index entry");
+        for entry in &mut entries {
+            // Decode each part of the IndexEntry, but don't validate its value.
+            entry.org_id();
+            entry.bucket_id();
+            let measurement = entry
+                .measurement()
+                .expect("error decoding measurement name");
+            assert!(!measurement.is_empty());
+            entry.tagset().expect("error decoding tagset");
+            entry.field_key().expect("error decoding field key");
         }
 
-        // now walk each index entry and decodes the actual data
+        // now walk each index entry and decode the actual data
         let mut index = reader.index().expect("error getting index");
         for entry in entries {
             // TODO: enable when string block type decoding is supported:
@@ -767,16 +756,9 @@ mod tests {
                 eprintln!("Note: ignoring bool block, not implemented");
             } else {
                 // decode the data to check for errors
-                let block_data = index
+                index
                     .decode_block(&entry.block)
                     .expect("error decoding block data");
-                match block_data {
-                    BlockData::Float { ts: _, values: _ } => {}
-                    BlockData::Integer { ts: _, values: _ } => {}
-                    BlockData::Bool { ts: _, values: _ } => {}
-                    BlockData::Str { ts: _, values: _ } => {}
-                    BlockData::Unsigned { ts: _, values: _ } => {}
-                }
             }
         }
     }
