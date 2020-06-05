@@ -142,13 +142,9 @@ impl LineProtocolConverter {
             for (field_name, field_value) in &line.field_set {
                 let field_name_str = field_name.to_string();
                 if let Some(packer) = packer_map.get_mut(&field_name_str) {
-                    match field_value {
-                        delorean_line_parser::FieldValue::F64(f) => {
-                            packer.pack_f64(Some(*f));
-                        }
-                        delorean_line_parser::FieldValue::I64(i) => {
-                            packer.pack_i64(Some(*i));
-                        }
+                    match *field_value {
+                        FieldValue::F64(f) => {packer.pack_f64(Some(f))}
+                        FieldValue::I64(i) => { packer.pack_i64(Some(i))}
                     }
                 } else {
                     panic!(
@@ -165,7 +161,7 @@ impl LineProtocolConverter {
             }
 
             // Now, go over all packers and add missing values if needed
-            for (_, packer) in packer_map.iter_mut() {
+            for (_, packer) in packer_map.values_mut() {
                 if packer.len() < starting_len + 1 {
                     assert_eq!(packer.len(), starting_len, "packer should be unchanged");
                     packer.pack_none();
