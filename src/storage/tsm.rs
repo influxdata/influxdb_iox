@@ -24,9 +24,10 @@ use std::u64;
 /// # let mut decoder = gzip::Decoder::new(file.unwrap()).unwrap();
 /// # let mut buf = Vec::new();
 /// # decoder.read_to_end(&mut buf).unwrap();
+/// # let data_len = buf.len();
 /// # let r = Cursor::new(buf);
 ///
-/// let mut reader = TSMReader::new(BufReader::new(r), 4_222_248);
+/// let mut reader = TSMReader::new(BufReader::new(r), data_len);
 /// let mut index = reader.index().unwrap();
 ///
 /// // index allows you to access each index entry, and each block for each
@@ -631,9 +632,10 @@ mod tests {
         let mut decoder = gzip::Decoder::new(file.unwrap()).unwrap();
         let mut buf = Vec::new();
         decoder.read_to_end(&mut buf).unwrap();
+        let data_len = buf.len();
         let r = Cursor::new(buf);
 
-        let mut reader = TSMReader::new(BufReader::new(r), 4_222_248);
+        let mut reader = TSMReader::new(BufReader::new(r), data_len);
         let mut index = reader.index().unwrap();
 
         let mut blocks = vec![];
@@ -678,34 +680,6 @@ mod tests {
     }
 
     #[test]
-    fn decode_tsm_blocks_cpu_usage() {
-        // Test a different file
-        let file = File::open("tests/fixtures/cpu_usage.tsm.gz");
-        let mut decoder = gzip::Decoder::new(file.unwrap()).unwrap();
-        let mut buf = Vec::new();
-        decoder.read_to_end(&mut buf).unwrap();
-        let r = Cursor::new(buf);
-
-        let mut reader = TSMReader::new(BufReader::new(r), 4_222_248);
-        let index = reader.index().unwrap();
-
-        // Iterate over all the index entries and ensure no errors are reported.
-        for index_entry in index {
-            match index_entry {
-                Ok(mut entry) => {
-                    assert!(entry.org_id() != InfluxID(0));
-                    assert!(entry.bucket_id() != InfluxID(0));
-                    // TODO: iterate over the rest of the file and
-                    // make sure there are no errors reported.
-                }
-                Err(e) => {
-                    panic!("Error decoding index entry {}", e);
-                }
-            }
-        }
-    }
-
-    #[test]
     fn influx_id() {
         let id = InfluxID::new_str("20aa9b0").unwrap();
         assert_eq!(id, InfluxID(34_253_232));
@@ -742,5 +716,79 @@ mod tests {
         ];
         assert_eq!(parsed_key.tagset, exp_tagset);
         assert_eq!(parsed_key.field_key, String::from("sum"));
+    }
+
+    /// This code simply scans over the entire tsm contents and
+    /// ensures no errors are returned from the reader.
+    fn walk_index_and_check_for_errors(tsm_gz_path: &str) {
+        let file = File::open(tsm_gz_path);
+        let mut decoder = gzip::Decoder::new(file.unwrap()).unwrap();
+        let mut buf = Vec::new();
+        decoder.read_to_end(&mut buf).unwrap();
+        let data_len = buf.len();
+        let r = Cursor::new(buf);
+
+        let mut reader = TSMReader::new(BufReader::new(r), data_len);
+        let index = reader.index().unwrap();
+
+        let mut entries = Vec::new();
+
+        // Iterate over all the index entries and ensure no errors are reported.
+        for index_entry in index {
+            match index_entry {
+                Ok(mut entry) => {
+                    // Ensure we can decode the index's entries
+                    // without error (doesn't check values)
+                    entry.org_id();
+                    entry.bucket_id();
+                    let measurement = entry
+                        .measurement()
+                        .expect("error decoding measurement name");
+                    assert!(measurement.len() > 0);
+                    entry.tagset().expect("error decoding tagset");
+                    entry.field_key().expect("error decoding field key");
+
+                    entries.push(entry);
+                }
+                Err(e) => {
+                    panic!("Error decoding index entry {}", e);
+                }
+            }
+        }
+
+        // now walk the actual block data
+        let mut index = reader.index().expect("error getting index");
+        for entry in entries {
+            // TODO: enable when string block type decoding is supported:
+            if entry.block_type == BOOL_BLOCKTYPE_MARKER {
+                eprintln!("Note: ignoring bool block, not implemented");
+            } else if entry.block_type == STRING_BLOCKTYPE_MARKER {
+                eprintln!("Note: ignoring string block, not implemented");
+            } else if entry.block_type == U64_BLOCKTYPE_MARKER {
+                eprintln!("Note: ignoring bool block, not implemented");
+            } else {
+                // decode the data to check for errors
+                let block_data = index
+                    .decode_block(&entry.block)
+                    .expect("error decoding block data");
+                match block_data {
+                    BlockData::Float { ts: _, values: _ } => {}
+                    BlockData::Integer { ts: _, values: _ } => {}
+                    BlockData::Bool { ts: _, values: _ } => {}
+                    BlockData::Str { ts: _, values: _ } => {}
+                    BlockData::Unsigned { ts: _, values: _ } => {}
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn check_tsm_cpu_usage() {
+        walk_index_and_check_for_errors("tests/fixtures/cpu_usage.tsm.gz");
+    }
+
+    #[test]
+    fn check_tsm_000000000000005_000000002() {
+        walk_index_and_check_for_errors("tests/fixtures/000000000000005-000000002.tsm.gz");
     }
 }
