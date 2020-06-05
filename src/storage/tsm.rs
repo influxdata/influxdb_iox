@@ -678,6 +678,34 @@ mod tests {
     }
 
     #[test]
+    fn decode_tsm_blocks_cpu_usage() {
+        // Test a different file
+        let file = File::open("tests/fixtures/cpu_usage.tsm.gz");
+        let mut decoder = gzip::Decoder::new(file.unwrap()).unwrap();
+        let mut buf = Vec::new();
+        decoder.read_to_end(&mut buf).unwrap();
+        let r = Cursor::new(buf);
+
+        let mut reader = TSMReader::new(BufReader::new(r), 4_222_248);
+        let index = reader.index().unwrap();
+
+        // Iterate over all the index entries and ensure no errors are reported.
+        for index_entry in index {
+            match index_entry {
+                Ok(mut entry) => {
+                    assert!(entry.org_id() != InfluxID(0));
+                    assert!(entry.bucket_id() != InfluxID(0));
+                    // TODO: iterate over the rest of the file and
+                    // make sure there are no errors reported.
+                }
+                Err(e) => {
+                    panic!("Error decoding index entry {}", e);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn influx_id() {
         let id = InfluxID::new_str("20aa9b0").unwrap();
         assert_eq!(id, InfluxID(34_253_232));
