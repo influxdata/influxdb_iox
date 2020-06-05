@@ -90,10 +90,10 @@ impl LineProtocolConverter {
         let mut packers: Vec<Packer> = Vec::new();
 
         let col_defs = self.schema.get_col_defs();
-        for (idx, col_def) in col_defs.iter().enumerate() {
+        let mut packers: Vec<_> = col_defs.iter().enumerate().map(|(idx, col_def)|) {
             debug!("  Column definition [{}] = {:?}", idx, col_def);
-            packers.push(Packer::new(col_def.data_type));
-        }
+            Packer::new(col_def.data_type)
+        }).collect();
 
         // map col_name -> Packer;
         let mut packer_map: HashMap<&String, &mut Packer> = col_defs
@@ -110,7 +110,7 @@ impl LineProtocolConverter {
 
             // all packers should be the same size
             let starting_len = packer_map
-                .get_mut(timestamp_col_name)
+                .get(timestamp_col_name)
                 .expect("should always have timestamp column")
                 .len();
             assert!(
