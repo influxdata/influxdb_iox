@@ -718,7 +718,7 @@ mod tests {
         assert_eq!(parsed_key.field_key, String::from("sum"));
     }
 
-    /// This code simply scans over the entire tsm contents and
+    /// This teset scans over the entire tsm contents and
     /// ensures no errors are returned from the reader.
     fn walk_index_and_check_for_errors(tsm_gz_path: &str) {
         let file = File::open(tsm_gz_path);
@@ -737,8 +737,7 @@ mod tests {
         for index_entry in index {
             match index_entry {
                 Ok(mut entry) => {
-                    // Ensure we can decode the index's entries
-                    // without error (doesn't check values)
+                    // Decode each part of the IndexEntry, but don't validate its value.
                     entry.org_id();
                     entry.bucket_id();
                     let measurement = entry
@@ -756,7 +755,7 @@ mod tests {
             }
         }
 
-        // now walk the actual block data
+        // now walk each index entry and decodes the actual data
         let mut index = reader.index().expect("error getting index");
         for entry in entries {
             // TODO: enable when string block type decoding is supported:
