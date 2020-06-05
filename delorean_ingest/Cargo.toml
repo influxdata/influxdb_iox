@@ -15,4 +15,4 @@ delorean_table = { path = "../delorean_table" }
 line_protocol_schema = { path = "../line_protocol_schema" }
 
 [dev-dependencies]
-assert_approx_eq = "1.1.0"
+delorean_test_helpers ={ path = "../delorean_test_helpers" }

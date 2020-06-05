@@ -195,7 +195,7 @@ impl LineProtocolConverter {
 #[cfg(test)]
 mod delorean_ingest_tests {
     use super::*;
-    use assert_approx_eq::assert_approx_eq;
+    use delorean_test_helpers::approximately_equal;
     use line_protocol_schema::ColumnDefinition;
 
     fn only_good_lines(data: &str) -> Vec<ParsedLine<'_>> {
@@ -489,13 +489,13 @@ mod delorean_ingest_tests {
 
         // float_field values
         let float_field_packer = &packers[2];
-        assert_approx_eq!(get_float_val(float_field_packer, 0), 100.0);
-        assert_approx_eq!(get_float_val(float_field_packer, 1), 101.0);
-        assert_approx_eq!(get_float_val(float_field_packer, 2), 102.0);
-        assert_approx_eq!(get_float_val(float_field_packer, 3), 103.0);
+        assert!(approximately_equal(get_float_val(float_field_packer, 0), 100.0));
+        assert!(approximately_equal(get_float_val(float_field_packer, 1), 101.0));
+        assert!(approximately_equal(get_float_val(float_field_packer, 2), 102.0));
+        assert!(approximately_equal(get_float_val(float_field_packer, 3), 103.0));
         assert!(float_field_packer.is_null(4));
-        assert_approx_eq!(get_float_val(float_field_packer, 5), 104.0);
-        assert_approx_eq!(get_float_val(float_field_packer, 6), 105.0);
+        assert!(approximately_equal(get_float_val(float_field_packer, 5), 104.0));
+        assert!(approximately_equal(get_float_val(float_field_packer, 6), 105.0));
 
         // timestamp values
         let timestamp_packer = &packers[3];

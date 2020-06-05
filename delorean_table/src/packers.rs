@@ -280,7 +280,7 @@ impl Packer {
 #[cfg(test)]
 mod test {
     use super::*;
-    use assert_approx_eq::assert_approx_eq;
+    use delorean_test_helpers::approximately_equal;
     use line_protocol_schema::DataType;
 
     #[test]
@@ -325,8 +325,8 @@ mod test {
         packer.pack_none();
         packer.pack_f64(Some(4.56));
         assert_eq!(packer.len(), 4);
-        assert_approx_eq!(packer.as_float_packer().values[0], 1.23);
-        assert_approx_eq!(packer.as_float_packer().values[3], 4.56);
+        assert!(approximately_equal(packer.as_float_packer().values[0], 1.23));
+        assert!(approximately_equal(packer.as_float_packer().values[3], 4.56));
         assert_eq!(packer.as_float_packer().def_levels, vec![1, 0, 0, 1]);
         assert_eq!(packer.as_float_packer().rep_levels, vec![1, 1, 1, 1]);
 
