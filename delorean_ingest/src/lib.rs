@@ -3,7 +3,7 @@
 use log::debug;
 use snafu::{OptionExt, Snafu};
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use delorean_line_parser::{FieldValue, ParsedLine};
 use delorean_table::packers::Packer;
@@ -87,16 +87,14 @@ impl LineProtocolConverter {
     /// FIXME: the plan is to switch from `Packer` to something based
     /// on Apache Arrow.
     pub fn pack_lines<'a>(&self, lines: impl Iterator<Item = ParsedLine<'a>>) -> Vec<Packer> {
-        let mut packers: Vec<Packer> = Vec::new();
-
         let col_defs = self.schema.get_col_defs();
-        for (idx, col_def) in col_defs.iter().enumerate() {
+        let mut packers : Vec<Packer> = col_defs.iter().enumerate().map(|(idx, col_def)| {
             debug!("  Column definition [{}] = {:?}", idx, col_def);
-            packers.push(Packer::new(col_def.data_type));
-        }
+            Packer::new(col_def.data_type)
+        }).collect();
 
         // map col_name -> Packer;
-        let mut packer_map: HashMap<&String, &mut Packer> = col_defs
+        let mut packer_map: BTreeMap<&String, &mut Packer> = col_defs
             .iter()
             .map(|x| &x.name)
             .zip(packers.iter_mut())
