@@ -731,7 +731,9 @@ mod tests {
         let mut reader = TSMReader::new(BufReader::new(r), data_len);
         let index = reader.index().unwrap();
 
-        let mut entries = index.collect::<Result<_, _>>().expect("Error decoding index entry");
+        let mut entries = index
+            .collect::<Result<Vec<IndexEntry>, _>>()
+            .expect("Error decoding index entry");
         for entry in &mut entries {
             // Decode each part of the IndexEntry, but don't validate its value.
             entry.org_id();
