@@ -108,7 +108,7 @@ impl Partition {
                     let entry = entry?;
                     let bytes = entry.as_data();
 
-                    let entry = flatbuffers::get_root::<wal::Entry>(&bytes);
+                    let entry = flatbuffers::get_root::<wal::Entry<'_>>(&bytes);
 
                     if let Some(entry_type) = entry.entry_type() {
                         if let Some(write) = entry_type.write() {
@@ -334,7 +334,7 @@ enum WalFormat {
     Unknown,
 }
 
-fn points_to_flatbuffer(points: &[PointType]) -> flatbuffers::FlatBufferBuilder {
+fn points_to_flatbuffer(points: &[PointType]) -> flatbuffers::FlatBufferBuilder<'_> {
     let mut builder = flatbuffers::FlatBufferBuilder::new_with_capacity(1024);
 
     let point_offsets: Vec<_> = points
@@ -410,7 +410,7 @@ fn points_to_flatbuffer(points: &[PointType]) -> flatbuffers::FlatBufferBuilder 
 }
 
 impl From<wal::Point<'_>> for PointType {
-    fn from(other: wal::Point) -> Self {
+    fn from(other: wal::Point<'_>) -> Self {
         let key = other
             .key()
             .expect("Key should have been deserialized from flatbuffer")

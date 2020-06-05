@@ -1,5 +1,4 @@
 #![deny(rust_2018_idioms)]
-#![allow(elided_lifetimes_in_paths)] // https://github.com/rust-lang/rust/issues/71957
 #![warn(clippy::explicit_iter_loop)]
 
 use std::{error, fmt};
