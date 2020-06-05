@@ -743,7 +743,7 @@ mod tests {
                     let measurement = entry
                         .measurement()
                         .expect("error decoding measurement name");
-                    assert!(measurement.len() > 0);
+                    assert!(!measurement.is_empty());
                     entry.tagset().expect("error decoding tagset");
                     entry.field_key().expect("error decoding field key");
 
