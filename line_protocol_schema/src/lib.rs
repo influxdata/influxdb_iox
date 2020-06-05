@@ -119,12 +119,13 @@ impl Schema {
         &self.measurement
     }
 
+    /// Return true if `col_def` holds values for a Tag (as opposed to Field or Timestamp)
     pub fn is_tag(&self, col_def: &ColumnDefinition) -> bool {
         self.tags.contains_key(&col_def.name)
     }
 
     /// Return the name of the column used to store timestamps
-    pub fn timestamp(&self) -> &String {
+    pub fn timestamp(&self) -> &str {
         &self.timestamp_name
     }
 

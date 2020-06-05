@@ -108,7 +108,7 @@ impl LineProtocolConverter {
 
             // all packers should be the same size
             let starting_len = packer_map
-                .get_mut(timestamp_col_name)
+                .get(timestamp_col_name)
                 .expect("should always have timestamp column")
                 .len();
             assert!(
