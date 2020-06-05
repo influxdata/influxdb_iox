@@ -161,7 +161,7 @@ impl LineProtocolConverter {
             }
 
             // Now, go over all packers and add missing values if needed
-            for (_, packer) in packer_map.values_mut() {
+            for packer in packer_map.values_mut() {
                 if packer.len() < starting_len + 1 {
                     assert_eq!(packer.len(), starting_len, "packer should be unchanged");
                     packer.pack_none();

@@ -125,7 +125,7 @@ impl Schema {
     }
 
     /// Return the name of the column used to store timestamps
-    pub fn timestamp(&self) -> &str {
+    pub fn timestamp(&self) -> &String {
         &self.timestamp_name
     }
 
