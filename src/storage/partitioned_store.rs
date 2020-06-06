@@ -1,6 +1,6 @@
 //! partitioned_store is an enum and set of helper functions and structs to define Partitions
 //! that store data. The helper funcs and structs merge results from multiple partitions together.
-use crate::delorean::{wal, Predicate, TimestampRange};
+use crate::generated_types::{wal, Predicate, TimestampRange};
 use crate::line_parser::{self, PointType};
 use crate::storage::{
     memdb::MemDB, remote_partition::RemotePartition, s3_partition::S3Partition, ReadPoint,
@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     collections::BTreeMap,
+    fmt,
     io::Write,
     mem,
     path::PathBuf,
@@ -26,7 +27,7 @@ use std::{
 };
 use tokio::task;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum PartitionStore {
     MemDB(Box<MemDB>),
     S3(Box<S3Partition>),
@@ -44,11 +45,13 @@ pub enum PartitionStore {
 /// remote partition.
 ///
 /// A Partition may optionally have a write-ahead log.
+#[derive(Debug)]
 pub struct Partition {
     store: PartitionStore,
     wal_details: Option<WalDetails>,
 }
 
+#[derive(Debug)]
 struct WalDetails {
     wal: Wal<mpsc::Sender<delorean_wal::Result<()>>>,
     metadata: WalMetadata,
@@ -108,7 +111,7 @@ impl Partition {
                     let entry = entry?;
                     let bytes = entry.as_data();
 
-                    let entry = flatbuffers::get_root::<wal::Entry>(&bytes);
+                    let entry = flatbuffers::get_root::<wal::Entry<'_>>(&bytes);
 
                     if let Some(entry_type) = entry.entry_type() {
                         if let Some(write) = entry_type.write() {
@@ -334,7 +337,7 @@ enum WalFormat {
     Unknown,
 }
 
-fn points_to_flatbuffer(points: &[PointType]) -> flatbuffers::FlatBufferBuilder {
+fn points_to_flatbuffer(points: &[PointType]) -> flatbuffers::FlatBufferBuilder<'_> {
     let mut builder = flatbuffers::FlatBufferBuilder::new_with_capacity(1024);
 
     let point_offsets: Vec<_> = points
@@ -410,7 +413,7 @@ fn points_to_flatbuffer(points: &[PointType]) -> flatbuffers::FlatBufferBuilder 
 }
 
 impl From<wal::Point<'_>> for PointType {
-    fn from(other: wal::Point) -> Self {
+    fn from(other: wal::Point<'_>) -> Self {
         let key = other
             .key()
             .expect("Key should have been deserialized from flatbuffer")
@@ -440,6 +443,7 @@ impl From<wal::Point<'_>> for PointType {
 /// StringMergeStream will do a merge sort with deduplication of multiple streams of Strings. This
 /// is used for combining results from multiple partitions for calls to get measurements, tag keys,
 /// tag values, or field keys. It assumes the incoming streams are in sorted order with no duplicates.
+#[derive(Debug)]
 pub struct StringMergeStream<'a> {
     states: Vec<StreamState<'a, String>>,
     drained: bool,
@@ -448,6 +452,18 @@ pub struct StringMergeStream<'a> {
 struct StreamState<'a, T> {
     stream: BoxStream<'a, T>,
     next: Poll<Option<T>>,
+}
+
+impl<T> fmt::Debug for StreamState<'_, T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("streamstate")
+            .field("stream", &"<no information>")
+            .field("next", &self.next)
+            .finish()
+    }
 }
 
 impl StringMergeStream<'_> {
@@ -537,6 +553,7 @@ impl Stream for StringMergeStream<'_> {
 /// always of the same type for a given key, and that those values are in time sorted order. A
 /// stream can have multiple batches with the same key, as long as the values across those batches
 /// are in time sorted order (ascending).
+#[derive(Debug)]
 pub struct ReadMergeStream<'a> {
     states: Vec<StreamState<'a, ReadBatch>>,
     drained: bool,

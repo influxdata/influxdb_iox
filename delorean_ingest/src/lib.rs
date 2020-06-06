@@ -1,3 +1,6 @@
+#![deny(rust_2018_idioms)]
+#![warn(missing_debug_implementations, clippy::explicit_iter_loop)]
+
 //! Library with code for (aspirationally) ingesting various data formats into Delorean
 //! TODO move this to delorean/src/ingest/line_protocol.rs?
 use log::debug;
@@ -10,6 +13,7 @@ use delorean_table::packers::Packer;
 use line_protocol_schema::{DataType, Schema, SchemaBuilder};
 
 /// Handles converting raw line protocol `ParsedLine` structures into Delorean format.
+#[derive(Debug)]
 pub struct LineProtocolConverter {
     // Schema is used in tests and will be used to actually convert data shortly
     schema: Schema,
@@ -88,10 +92,14 @@ impl LineProtocolConverter {
     /// on Apache Arrow.
     pub fn pack_lines<'a>(&self, lines: impl Iterator<Item = ParsedLine<'a>>) -> Vec<Packer> {
         let col_defs = self.schema.get_col_defs();
-        let mut packers : Vec<Packer> = col_defs.iter().enumerate().map(|(idx, col_def)| {
-            debug!("  Column definition [{}] = {:?}", idx, col_def);
-            Packer::new(col_def.data_type)
-        }).collect();
+        let mut packers: Vec<Packer> = col_defs
+            .iter()
+            .enumerate()
+            .map(|(idx, col_def)| {
+                debug!("  Column definition [{}] = {:?}", idx, col_def);
+                Packer::new(col_def.data_type)
+            })
+            .collect();
 
         // map col_name -> Packer;
         let mut packer_map: BTreeMap<&String, &mut Packer> = col_defs
@@ -143,8 +151,8 @@ impl LineProtocolConverter {
                 let field_name_str = field_name.to_string();
                 if let Some(packer) = packer_map.get_mut(&field_name_str) {
                     match *field_value {
-                        FieldValue::F64(f) => {packer.pack_f64(Some(f))}
-                        FieldValue::I64(i) => { packer.pack_i64(Some(i))}
+                        FieldValue::F64(f) => packer.pack_f64(Some(f)),
+                        FieldValue::I64(i) => packer.pack_i64(Some(i)),
                     }
                 } else {
                     panic!(
@@ -483,13 +491,31 @@ mod delorean_ingest_tests {
 
         // float_field values
         let float_field_packer = &packers[2];
-        assert!(approximately_equal(get_float_val(float_field_packer, 0), 100.0));
-        assert!(approximately_equal(get_float_val(float_field_packer, 1), 101.0));
-        assert!(approximately_equal(get_float_val(float_field_packer, 2), 102.0));
-        assert!(approximately_equal(get_float_val(float_field_packer, 3), 103.0));
+        assert!(approximately_equal(
+            get_float_val(float_field_packer, 0),
+            100.0
+        ));
+        assert!(approximately_equal(
+            get_float_val(float_field_packer, 1),
+            101.0
+        ));
+        assert!(approximately_equal(
+            get_float_val(float_field_packer, 2),
+            102.0
+        ));
+        assert!(approximately_equal(
+            get_float_val(float_field_packer, 3),
+            103.0
+        ));
         assert!(float_field_packer.is_null(4));
-        assert!(approximately_equal(get_float_val(float_field_packer, 5), 104.0));
-        assert!(approximately_equal(get_float_val(float_field_packer, 6), 105.0));
+        assert!(approximately_equal(
+            get_float_val(float_field_packer, 5),
+            104.0
+        ));
+        assert!(approximately_equal(
+            get_float_val(float_field_packer, 6),
+            105.0
+        ));
 
         // timestamp values
         let timestamp_packer = &packers[3];

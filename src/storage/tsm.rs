@@ -14,7 +14,7 @@ use std::u64;
 /// Iterating over the TSM index.
 ///
 /// ```
-/// # use crate::delorean::storage::tsm::*;
+/// # use delorean::storage::tsm::*;
 /// # use libflate::gzip;
 /// # use std::fs::File;
 /// # use std::io::BufReader;
@@ -24,9 +24,10 @@ use std::u64;
 /// # let mut decoder = gzip::Decoder::new(file.unwrap()).unwrap();
 /// # let mut buf = Vec::new();
 /// # decoder.read_to_end(&mut buf).unwrap();
+/// # let data_len = buf.len();
 /// # let r = Cursor::new(buf);
 ///
-/// let mut reader = TSMReader::new(BufReader::new(r), 4_222_248);
+/// let mut reader = TSMReader::new(BufReader::new(r), data_len);
 /// let mut index = reader.index().unwrap();
 ///
 /// // index allows you to access each index entry, and each block for each
@@ -47,7 +48,7 @@ use std::u64;
 /// Decoding a block.
 ///
 /// ```
-/// # use crate::delorean::storage::tsm::*;
+/// # use delorean::storage::tsm::*;
 /// # use libflate::gzip;
 /// # use std::fs::File;
 /// # use std::io::BufReader;
@@ -79,6 +80,7 @@ use std::u64;
 /// }
 /// ```
 ///
+#[derive(Debug)]
 pub struct TSMReader<R>
 where
     R: BufRead + Seek,
@@ -114,6 +116,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct Index<R>
 where
     R: BufRead + Seek,
@@ -309,7 +312,7 @@ impl<R: BufRead + Seek> Iterator for Index<R> {
 }
 
 /// `IndexEntry` provides lazy accessors for components of the entry.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct IndexEntry {
     key: Vec<u8>,
     parsed_key: Option<ParsedTSMKey>,
@@ -406,7 +409,7 @@ impl IndexEntry {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct ParsedTSMKey {
     measurement: String,
     tagset: Vec<(String, String)>,
@@ -483,7 +486,7 @@ fn parse_tsm_key(mut key: Vec<u8>) -> Result<ParsedTSMKey, StorageError> {
 }
 
 /// `Block` holds information about location and time range of a block of data.
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 #[allow(dead_code)]
 pub struct Block {
     min_time: i64,
@@ -497,6 +500,7 @@ const MAX_BLOCK_VALUES: usize = 1000;
 
 /// `BlockData` describes the various types of block data that can be held within
 /// a TSM file.
+#[derive(Debug)]
 pub enum BlockData {
     Float { ts: Vec<i64>, values: Vec<f64> },
     Integer { ts: Vec<i64>, values: Vec<i64> },
@@ -631,9 +635,10 @@ mod tests {
         let mut decoder = gzip::Decoder::new(file.unwrap()).unwrap();
         let mut buf = Vec::new();
         decoder.read_to_end(&mut buf).unwrap();
+        let data_len = buf.len();
         let r = Cursor::new(buf);
 
-        let mut reader = TSMReader::new(BufReader::new(r), 4_222_248);
+        let mut reader = TSMReader::new(BufReader::new(r), data_len);
         let mut index = reader.index().unwrap();
 
         let mut blocks = vec![];
@@ -714,5 +719,62 @@ mod tests {
         ];
         assert_eq!(parsed_key.tagset, exp_tagset);
         assert_eq!(parsed_key.field_key, String::from("sum"));
+    }
+
+    /// This test scans over the entire tsm contents and
+    /// ensures no errors are returned from the reader.
+    fn walk_index_and_check_for_errors(tsm_gz_path: &str) {
+        let file = File::open(tsm_gz_path);
+        let mut decoder = gzip::Decoder::new(file.unwrap()).unwrap();
+        let mut buf = Vec::new();
+        decoder.read_to_end(&mut buf).unwrap();
+        let data_len = buf.len();
+        let r = Cursor::new(buf);
+
+        let mut reader = TSMReader::new(BufReader::new(r), data_len);
+        let index = reader.index().unwrap();
+
+        let mut entries = index
+            .collect::<Result<Vec<IndexEntry>, _>>()
+            .expect("Error decoding index entry");
+        for entry in &mut entries {
+            // Decode each part of the IndexEntry, but don't validate its value.
+            entry.org_id();
+            entry.bucket_id();
+            let measurement = entry
+                .measurement()
+                .expect("error decoding measurement name");
+            assert!(!measurement.is_empty());
+            entry.tagset().expect("error decoding tagset");
+            entry.field_key().expect("error decoding field key");
+        }
+
+        // now walk each index entry and decode the actual data
+        let mut index = reader.index().expect("error getting index");
+        for entry in entries {
+            // TODO: enable when string block type decoding is supported:
+            if entry.block_type == BOOL_BLOCKTYPE_MARKER {
+                eprintln!("Note: ignoring bool block, not implemented");
+            } else if entry.block_type == STRING_BLOCKTYPE_MARKER {
+                eprintln!("Note: ignoring string block, not implemented");
+            } else if entry.block_type == U64_BLOCKTYPE_MARKER {
+                eprintln!("Note: ignoring bool block, not implemented");
+            } else {
+                // decode the data to check for errors
+                index
+                    .decode_block(&entry.block)
+                    .expect("error decoding block data");
+            }
+        }
+    }
+
+    #[test]
+    fn check_tsm_cpu_usage() {
+        walk_index_and_check_for_errors("tests/fixtures/cpu_usage.tsm.gz");
+    }
+
+    #[test]
+    fn check_tsm_000000000000005_000000002() {
+        walk_index_and_check_for_errors("tests/fixtures/000000000000005-000000002.tsm.gz");
     }
 }
