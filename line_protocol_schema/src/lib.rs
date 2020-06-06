@@ -394,7 +394,7 @@ mod test {
 
     #[test]
     fn is_tag() {
-        let schema = SchemaBuilder::new(String::from("my_measurement"))
+        let schema = SchemaBuilder::new("my_measurement")
             .tag("tag1")
             .field("field1", DataType::Float)
             .build();
