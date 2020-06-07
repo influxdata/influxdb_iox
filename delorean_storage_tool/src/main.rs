@@ -1,66 +1,22 @@
 #![deny(rust_2018_idioms)]
 #![warn(missing_debug_implementations, clippy::explicit_iter_loop)]
 
-use std::fs;
 use log::{debug, info, warn};
-
-use std::collections::{HashMap, HashSet};
+use std::fs;
 
 use clap::{crate_authors, crate_version, App, Arg, SubCommand};
-use snafu::Snafu;
-use delorean::storage::tsm::{TSMReader, InfluxID, IndexEntry};
-use delorean::storage::StorageError;
 
 use delorean_ingest::LineProtocolConverter;
 use delorean_line_parser::{parse_lines, ParsedLine};
-use delorean_parquet::writer::{DeloreanTableWriter, Error as DeloreanTableWriterError};
+use delorean_parquet::writer::DeloreanTableWriter;
 
-#[derive(Debug, Snafu)]
-pub enum Error {
-    #[snafu(display(r#"IO Error: {} ({})"#, message, source))]
-    IO {
-        message: String,
-        source: std::io::Error,
-    },
-    Parsing {
-        source: delorean_line_parser::Error,
-    },
-    Conversion {
-        source: delorean_ingest::Error,
-    },
-    Writing {
-        source: DeloreanTableWriterError,
-    },
-}
+mod error;
+mod file_meta;
+mod input;
 
-type Result<T, E = Error> = std::result::Result<T, E>;
+use error::{Error, Result};
 
-impl From<std::io::Error> for Error {
-    fn from(other: std::io::Error) -> Self {
-        Error::IO {
-            message: String::from("io error"),
-            source: other,
-        }
-    }
-}
-
-impl From<delorean_line_parser::Error> for Error {
-    fn from(other: delorean_line_parser::Error) -> Self {
-        Error::Parsing { source: other }
-    }
-}
-
-impl From<delorean_ingest::Error> for Error {
-    fn from(other: delorean_ingest::Error) -> Self {
-        Error::Conversion { source: other }
-    }
-}
-
-impl From<DeloreanTableWriterError> for Error {
-    fn from(other: DeloreanTableWriterError) -> Self {
-        Error::Writing { source: other }
-    }
-}
+use file_meta::dump_meta;
 
 enum ReturnCode {
     InternalError = 1,
@@ -101,7 +57,10 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
     debug!("Using schema deduced from sample: {:?}", converter.schema());
 
     info!("Schema deduced. Writing output to {} ...", output_filename);
-    let output_file = fs::File::create(output_filename)?;
+    let output_file = fs::File::create(output_filename).map_err(|e| Error::IO {
+        message: String::from("Error creating output file"),
+        source: e,
+    })?;
 
     let mut writer = DeloreanTableWriter::new(converter.schema(), output_file)?;
 
@@ -110,161 +69,6 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
     writer.write_batch(&converter.pack_lines(only_good_lines))?;
     writer.close()?;
     info!("Completing writing {} successfully", output_filename);
-    Ok(())
-}
-
-#[derive(Debug, Default)]
-struct MeasurementMetadata {
-    /// tag name --> list of seen tag values
-    tags: HashMap<String, HashSet<String>>,
-    /// List of field names seen
-    fields: HashSet<String>,
-}
-
-impl MeasurementMetadata {
-    fn new() -> MeasurementMetadata {
-        Self::default()
-    }
-
-    fn update_for_entry(&mut self, index_entry :&mut IndexEntry) {
-        let tagset = index_entry.tagset().expect("error decoding tagset");
-        for (tag_name, tag_value) in tagset {
-            let tag_entry = self.tags.entry(tag_name).or_default();
-            tag_entry.insert(tag_value);
-        }
-        let field_name = index_entry.field_key().expect("error decoding field name");
-        self.fields.insert(field_name);
-    }
-
-    fn print_report(&self, prefix: &str) {
-        for (tag_name, tag_values) in &self.tags {
-            println!("{} tag {} = {:?}", prefix, tag_name, tag_values);
-        }
-        for field_name in &self.fields {
-            println!("{} field {}", prefix, field_name);
-        }
-
-    }
-}
-
-/// Represents stats for a single bucket
-#[derive(Debug, Default)]
-struct BucketMetadata {
-    /// How many index entries have been seen
-    count : u64,
-
-    // Total 'records' (aka sum of the lengths of all timeseries)
-    total_records: u64,
-
-    // measurement ->
-    measurements: HashMap<String, MeasurementMetadata>
-}
-
-impl BucketMetadata {
-    fn new() -> BucketMetadata {
-        Self::default()
-    }
-
-    fn update_for_entry(&mut self, index_entry :&mut IndexEntry) {
-        self.count += 1;
-        self.total_records += u64::from(index_entry.count);
-        let measurement = index_entry.measurement().expect("error decoding measurement name");
-        let meta = self.measurements.entry(measurement).or_default();
-        meta.update_for_entry(index_entry);
-    }
-
-    fn print_report(&self, prefix: &str) {
-        for (measurement, meta) in self.measurements.iter() {
-            println!("{}{}", prefix, measurement);
-            let indent = format!("{}  ", prefix);
-            meta.print_report(&indent);
-        }
-    }
-
-
-}
-
-#[derive(Debug, Default)]
-struct TSMMetadataBuilder {
-
-    num_good_entries : u32,
-    num_bad_entries : u32,
-
-    // (org_id, bucket_id) --> Bucket Metadata
-    bucket_stats : HashMap<(InfluxID, InfluxID), BucketMetadata>
-}
-
-impl TSMMetadataBuilder {
-    fn new() -> TSMMetadataBuilder {
-        Self::default()
-    }
-
-    fn process_entry(&mut self, entry : &mut Result<IndexEntry, StorageError>) {
-        match entry {
-            Ok(index_entry) => {
-                self.num_good_entries += 1;
-                let key = (index_entry.org_id(), index_entry.bucket_id());
-                let stats = self.bucket_stats.entry(key).or_default();
-                stats.update_for_entry(index_entry);
-            },
-            Err(e) => {
-                warn!("Ignoring entry decoding error {:?}", e);
-                self.num_bad_entries += 1;
-            },
-        }
-    }
-
-    fn print_report(&self) {
-        println!("TSM Metadata Report:");
-        println!("  Valid Index Entries: {}", self.num_good_entries);
-        if self.num_bad_entries > 0 {
-            println!("  Invalid Entries: {}", self.num_bad_entries);
-        }
-        println!("  Organizations/Bucket Stats:");
-        for (k, stats) in self.bucket_stats.iter() {
-            let (org_id, bucket_id) = k;
-            println!("    ({}, {}) {} index entries, {} total records",
-                     org_id, bucket_id, stats.count, stats.total_records);
-            println!("    Measurements:");
-            stats.print_report("      ");
-        }
-    }
-}
-
-fn dump_meta(input_filename: &str) -> Result<()> {
-    info!("dstool meta starting");
-    debug!("Reading from input file {}", input_filename);
-
-    // TODO: figure out the format in some intelligent way. Right now assume it is TSM.
-    let file = fs::File::open(input_filename).map_err(|e| {
-        let msg = format!("Error reading {}", input_filename);
-        Error::IOError {
-            message: msg,
-            source: Arc::new(e),
-        }
-    })?;
-
-    let file_size = file.metadata()
-        .map_err(|e| {
-            let message = format!("Error reading metadata for {}", input_filename);
-            Error::IOError {
-                message,
-                source: Arc::new(e),
-            }
-        })?.len();
-
-    let mut reader = TSMReader::new(BufReader::new(file), file_size as usize);
-
-    let index = reader.index().expect("Error reading index");
-
-    let mut stats_builder = TSMMetadataBuilder::new();
-
-    for mut entry in index {
-        stats_builder.process_entry(&mut entry);
-    }
-
-    stats_builder.print_report();
-
     Ok(())
 }
 
@@ -306,7 +110,7 @@ Examples:
                         .help("The input filename to read from")
                         .required(true)
                         .index(1),
-                )
+                ),
         )
         .arg(
             Arg::with_name("verbose")

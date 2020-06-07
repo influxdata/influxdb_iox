@@ -654,6 +654,7 @@ dependencies = [
  "delorean_parquet",
  "delorean_test_helpers",
  "env_logger",
+ "libflate",
  "log 0.4.8",
  "predicates",
  "snafu",
