@@ -93,9 +93,7 @@ impl ParquetWriter {
                     )?;
                     debug!("Wrote {} rows of bool data", n);
                 }
-                Int32ColumnWriter(_) => {
-                    unreachable!("ParquetWriter does not support INT32 data")
-                }
+                Int32ColumnWriter(_) => unreachable!("ParquetWriter does not support INT32 data"),
                 Int64ColumnWriter(ref mut w) => {
                     let int_packer = packer.as_int_packer();
                     let n = w.write_batch(
@@ -105,9 +103,7 @@ impl ParquetWriter {
                     )?;
                     debug!("Wrote {} rows of int64 data", n);
                 }
-                Int96ColumnWriter(_) => {
-                    unreachable!("ParquetWriter does not support INT96 data")
-                }
+                Int96ColumnWriter(_) => unreachable!("ParquetWriter does not support INT96 data"),
                 FloatColumnWriter(_) => {
                     unreachable!("ParquetWriter does not support FLOAT (32-bit float) data")
                 }
