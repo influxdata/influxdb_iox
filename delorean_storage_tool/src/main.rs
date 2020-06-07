@@ -113,26 +113,23 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Default)]
 struct MeasurementMetadata {
-    // tag name --> list of seen tag values
-    tags : HashMap<String, HashSet<String>>,
-    // List of field names seen
+    /// tag name --> list of seen tag values
+    tags: HashMap<String, HashSet<String>>,
+    /// List of field names seen
     fields: HashSet<String>,
-
 }
 
 impl MeasurementMetadata {
     fn new() -> MeasurementMetadata {
-        MeasurementMetadata {
-            tags: HashMap::new(),
-            fields: HashSet::new(),
-        }
+        Self::default()
     }
 
     fn update_for_entry(&mut self, index_entry :&mut IndexEntry) {
         let tagset = index_entry.tagset().expect("error decoding tagset");
         for (tag_name, tag_value) in tagset {
-            let tag_entry = self.tags.entry(tag_name).or_insert(HashSet::new());
+            let tag_entry = self.tags.entry(tag_name).or_default();
             tag_entry.insert(tag_value);
         }
         let field_name = index_entry.field_key().expect("error decoding field name");
@@ -140,17 +137,18 @@ impl MeasurementMetadata {
     }
 
     fn print_report(&self, prefix: &str) {
-        for (tag_name, tag_values) in self.tags.iter() {
+        for (tag_name, tag_values) in &self.tags {
             println!("{} tag {} = {:?}", prefix, tag_name, tag_values);
         }
-        for field_name in self.fields.iter() {
+        for field_name in &self.fields {
             println!("{} field {}", prefix, field_name);
         }
 
     }
 }
 
-// Represents stats for a single bucket
+/// Represents stats for a single bucket
+#[derive(Debug, Default)]
 struct BucketMetadata {
     /// How many index entries have been seen
     count : u64,
@@ -164,18 +162,14 @@ struct BucketMetadata {
 
 impl BucketMetadata {
     fn new() -> BucketMetadata {
-        BucketMetadata {
-            count: 0,
-            total_records: 0,
-            measurements: HashMap::new(),
-        }
+        Self::default()
     }
 
     fn update_for_entry(&mut self, index_entry :&mut IndexEntry) {
         self.count += 1;
-        self.total_records += index_entry.count as u64;
+        self.total_records += u64::from(index_entry.count);
         let measurement = index_entry.measurement().expect("error decoding measurement name");
-        let meta = self.measurements.entry(measurement).or_insert(MeasurementMetadata::new());
+        let meta = self.measurements.entry(measurement).or_default();
         meta.update_for_entry(index_entry);
     }
 
@@ -190,6 +184,7 @@ impl BucketMetadata {
 
 }
 
+#[derive(Debug, Default)]
 struct TSMMetadataBuilder {
 
     num_good_entries : u32,
@@ -201,11 +196,7 @@ struct TSMMetadataBuilder {
 
 impl TSMMetadataBuilder {
     fn new() -> TSMMetadataBuilder {
-        TSMMetadataBuilder {
-            num_good_entries : 0,
-            num_bad_entries : 0,
-            bucket_stats : HashMap::new(),
-        }
+        Self::default()
     }
 
     fn process_entry(&mut self, entry : &mut Result<IndexEntry, StorageError>) {
@@ -213,7 +204,7 @@ impl TSMMetadataBuilder {
             Ok(index_entry) => {
                 self.num_good_entries += 1;
                 let key = (index_entry.org_id(), index_entry.bucket_id());
-                let stats = self.bucket_stats.entry(key).or_insert(BucketMetadata::new());
+                let stats = self.bucket_stats.entry(key).or_default();
                 stats.update_for_entry(index_entry);
             },
             Err(e) => {
