@@ -45,10 +45,10 @@ impl ParquetWriter {
         schema: &line_protocol_schema::Schema,
         file: std::fs::File,
     ) -> Result<ParquetWriter, Error> {
-        let parquet_schema = convert_to_parquet_schema(&schema)?;
         let writer_props = create_writer_props(&schema);
+        let parquet_schema = convert_to_parquet_schema(&schema)?;
 
-        match SerializedFileWriter::new(file, parquet_schema.clone(), Rc::new(writer_props)) {
+        match SerializedFileWriter::new(file, parquet_schema.clone(), writer_props) {
             Ok(file_writer) => {
                 let parquet_writer = ParquetWriter {
                     parquet_schema,
@@ -212,7 +212,7 @@ fn convert_to_parquet_schema(
 
 /// Create the parquet writer properties (which defines the encoding
 /// and compression for each column) for a given line protocol schema.
-fn create_writer_props(schema: &line_protocol_schema::Schema) -> WriterProperties {
+fn create_writer_props(schema: &line_protocol_schema::Schema) -> Rc<WriterProperties> {
     let mut builder = WriterProperties::builder();
 
     // TODO: Maybe tweak more of these settings for maximum performance.
@@ -275,10 +275,11 @@ fn create_writer_props(schema: &line_protocol_schema::Schema) -> WriterPropertie
     // parquet file does not appear to have statistics enabled.
     // TODO: file a clear bug in the parquet JIRA project
     eprintln!("WARNING WARNING -- statistics generation does not appear to be working");
-    builder
+    let props = builder
         .set_statistics_enabled(true)
         .set_created_by("Delorean".to_string())
-        .build()
+        .build();
+    Rc::new(props)
 }
 
 #[cfg(test)]
