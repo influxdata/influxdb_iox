@@ -253,7 +253,16 @@ fn dump_meta(input_filename: &str) -> Result<()> {
         }
     })?;
 
-    let mut reader = TSMReader::new(BufReader::new(file), 4_222_248);
+    let file_size = file.metadata()
+        .map_err(|e| {
+            let message = format!("Error reading metadata for {}", input_filename);
+            Error::IOError {
+                message,
+                source: Arc::new(e),
+            }
+        })?.len();
+
+    let mut reader = TSMReader::new(BufReader::new(file), file_size as usize);
 
     let index = reader.index().expect("Error reading index");
 

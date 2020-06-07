@@ -509,7 +509,7 @@ pub enum BlockData {
     Unsigned { ts: Vec<i64>, values: Vec<u64> },
 }
 
-#[derive(Copy, Clone, Debug, Hash, Eq)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 /// `InfluxID` represents an InfluxDB ID used in InfluxDB 2.x to represent
 /// organization and bucket identifiers.
 pub struct InfluxID(u64);
