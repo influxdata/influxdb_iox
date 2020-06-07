@@ -94,7 +94,7 @@ impl ParquetWriter {
                     debug!("Wrote {} rows of bool data", n);
                 }
                 Int32ColumnWriter(_) => {
-                    unreachable!("Line protcol data doesn't contain INT32 data")
+                    unreachable!("ParquetWriter does not support INT32 data")
                 }
                 Int64ColumnWriter(ref mut w) => {
                     let int_packer = packer.as_int_packer();
@@ -106,10 +106,10 @@ impl ParquetWriter {
                     debug!("Wrote {} rows of int64 data", n);
                 }
                 Int96ColumnWriter(_) => {
-                    unreachable!("Line protcol data doesn't contain INT96 data")
+                    unreachable!("ParquetWriter does not support INT96 data")
                 }
                 FloatColumnWriter(_) => {
-                    unreachable!("Line protcol data doesn't contain FLOAT (32-bit float) data")
+                    unreachable!("ParquetWriter does not support FLOAT (32-bit float) data")
                 }
                 DoubleColumnWriter(ref mut w) => {
                     let float_packer = packer.as_float_packer();
@@ -130,7 +130,7 @@ impl ParquetWriter {
                     debug!("Wrote {} rows of byte data", n);
                 }
                 FixedLenByteArrayColumnWriter(_) => {
-                    unreachable!("Line protcol data doesn't contain FIXED_LEN_BYTE_ARRAY data");
+                    unreachable!("ParquetWriter does not support FIXED_LEN_BYTE_ARRAY data");
                 }
             };
             debug!("Closing column writer for {}", column_number);
