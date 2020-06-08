@@ -117,7 +117,7 @@ mod dstool_tests {
 
     #[test]
     fn meta_000000000000005_000000002_tsm() {
-        let input_tsm = uncompress_gz("../tests/fixtures/000000000000005-000000002.tsm.gz", "tsm");
+        let input_tsm = uncompress_gz("../tests/fixtures/000000000000005-000000002.tsm.gz", ".tsm");
         let mut cmd = Command::cargo_bin("dstool").unwrap();
         let assert = cmd
             .arg("meta")
@@ -152,7 +152,7 @@ mod dstool_tests {
 
     #[test]
     fn meta_cpu_usage_tsm() {
-        let input_tsm = uncompress_gz("../tests/fixtures/cpu_usage.tsm.gz", "tsm");
+        let input_tsm = uncompress_gz("../tests/fixtures/cpu_usage.tsm.gz", ".tsm");
         let mut cmd = Command::cargo_bin("dstool").unwrap();
         let assert = cmd
             .arg("meta")

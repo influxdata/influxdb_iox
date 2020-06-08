@@ -124,7 +124,7 @@ impl InputReader {
 
     // Create a new input reader suitable for reading from
     // `input_name` and figures out the file input type based on
-    // heuristics
+    // heuristics (ahem, the filename extension)
     pub fn new(input_name: &str) -> Result<InputReader> {
         let path = Path::new(input_name);
 
