@@ -1,6 +1,5 @@
 mod dstool_tests {
     use assert_cmd::Command;
-    use delorean_test_helpers;
     use predicates::prelude::*;
 
     #[test]
