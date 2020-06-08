@@ -29,12 +29,12 @@ mod dstool_tests {
         let assert = cmd
             .arg("convert")
             .arg("../tests/fixtures/lineproto/temperature.lp")
-            .arg(parquet_filename_string)
+            .arg(&parquet_filename_string)
             .assert();
 
         let expected_success_string = format!(
             "Completing writing {} successfully",
-            parquet_path.to_string_lossy()
+            parquet_filename_string
         );
 
         assert
