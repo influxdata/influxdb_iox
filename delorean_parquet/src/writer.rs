@@ -6,10 +6,11 @@ use snafu::Snafu;
 
 use parquet::{
     basic::{Compression, Encoding, LogicalType, Repetition, Type as PhysicalType},
-    schema::{printer, types::ColumnPath, types::Type},
-};
-use parquet::{
     errors::ParquetError,
+    schema::{
+        printer,
+        types::{ColumnPath, Type},
+    },
     file::{
         properties::WriterProperties,
         reader::TryClone,
