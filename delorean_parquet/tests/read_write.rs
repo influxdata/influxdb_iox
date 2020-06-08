@@ -53,7 +53,8 @@ fn test_write_parquet_data() {
     let output_path = delorean_test_helpers::tempfile::Builder::new()
         .prefix("delorean_parquet_e2e")
         .suffix(".parquet")
-        .tempfile().expect("error creating temp file")
+        .tempfile()
+        .expect("error creating temp file")
         .into_temp_path();
     let output_file = fs::File::create(&output_path).expect("can't open temp file for writing");
 

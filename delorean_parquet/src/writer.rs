@@ -2,19 +2,19 @@
 use std::rc::Rc;
 
 use log::debug;
-use snafu::Snafu;
+use snafu::{ResultExt, Snafu};
 
 use parquet::{
     basic::{Compression, Encoding, LogicalType, Repetition, Type as PhysicalType},
     errors::ParquetError,
-    schema::{
-        printer,
-        types::{ColumnPath, Type},
-    },
     file::{
         properties::WriterProperties,
         reader::TryClone,
         writer::{FileWriter, SerializedFileWriter},
+    },
+    schema::{
+        printer,
+        types::{ColumnPath, Type},
     },
 };
 use std::io::{Seek, Write};
@@ -23,16 +23,13 @@ use delorean_table::packers::Packer;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display(r#"Error from parquet library: {}"#, source))]
-    ParquetLibraryError { source: ParquetError },
+    #[snafu(display(r#"{}, underlying parqet error {}"#, message, source))]
+    ParquetLibraryError {
+        message: String,
+        source: ParquetError,
+    },
     #[snafu(display(r#"{}"#, message))]
     MismatchedColumns { message: String },
-}
-
-impl From<ParquetError> for Error {
-    fn from(other: ParquetError) -> Self {
-        Error::ParquetLibraryError { source: other }
-    }
 }
 
 /// A `DeloreanTableWriter` is used for writing batches of rows
@@ -96,20 +93,20 @@ where
         let writer_props = create_writer_props(&schema);
         let parquet_schema = convert_to_parquet_schema(&schema)?;
 
-        match SerializedFileWriter::new(writer, parquet_schema.clone(), writer_props) {
-            Ok(file_writer) => {
-                let parquet_writer = DeloreanTableWriter {
-                    parquet_schema,
-                    file_writer,
-                };
-                debug!(
-                    "ParqutWriter created for schema: {}",
-                    parquet_schema_as_string(&parquet_writer.parquet_schema)
-                );
-                Ok(parquet_writer)
-            }
-            Err(e) => Err(Error::ParquetLibraryError { source: e }),
-        }
+        let file_writer = SerializedFileWriter::new(writer, parquet_schema.clone(), writer_props)
+            .context(ParquetLibraryError {
+            message: String::from("Error trying to create a SerializedFileWriter"),
+        })?;
+
+        let parquet_writer = DeloreanTableWriter {
+            parquet_schema,
+            file_writer,
+        };
+        debug!(
+            "ParqutWriter created for schema: {}",
+            parquet_schema_as_string(&parquet_writer.parquet_schema)
+        );
+        Ok(parquet_writer)
     }
 
     /// Writes a batch of packed data to the output file in a single
@@ -118,11 +115,22 @@ where
     /// TODO: better control of column chunks
     pub fn write_batch(&mut self, packers: &[Packer]) -> Result<(), Error> {
         // now write out the data
-        let mut row_group_writer = self.file_writer.next_row_group()?;
+        let mut row_group_writer =
+            self.file_writer
+                .next_row_group()
+                .context(ParquetLibraryError {
+                    message: String::from("Error creating next row group writer"),
+                })?;
 
         use parquet::column::writer::ColumnWriter::*;
         let mut column_number = 0;
-        while let Some(mut col_writer) = row_group_writer.next_column()? {
+        while let Some(mut col_writer) =
+            row_group_writer
+                .next_column()
+                .context(ParquetLibraryError {
+                    message: String::from("Can't create the next row_group_writer"),
+                })?
+        {
             let packer = match packers.get(column_number) {
                 Some(packer) => packer,
                 None => {
@@ -134,21 +142,29 @@ where
             match col_writer {
                 BoolColumnWriter(ref mut w) => {
                     let bool_packer = packer.as_bool_packer();
-                    let n = w.write_batch(
-                        &bool_packer.values,
-                        Some(&bool_packer.def_levels),
-                        Some(&bool_packer.rep_levels),
-                    )?;
+                    let n = w
+                        .write_batch(
+                            &bool_packer.values,
+                            Some(&bool_packer.def_levels),
+                            Some(&bool_packer.rep_levels),
+                        )
+                        .context(ParquetLibraryError {
+                            message: String::from("Can't write_batch with bool values"),
+                        })?;
                     debug!("Wrote {} rows of bool data", n);
                 }
                 Int32ColumnWriter(_) => unreachable!("ParquetWriter does not support INT32 data"),
                 Int64ColumnWriter(ref mut w) => {
                     let int_packer = packer.as_int_packer();
-                    let n = w.write_batch(
-                        &int_packer.values,
-                        Some(&int_packer.def_levels),
-                        Some(&int_packer.rep_levels),
-                    )?;
+                    let n = w
+                        .write_batch(
+                            &int_packer.values,
+                            Some(&int_packer.def_levels),
+                            Some(&int_packer.rep_levels),
+                        )
+                        .context(ParquetLibraryError {
+                            message: String::from("Can't write_batch with int64 values"),
+                        })?;
                     debug!("Wrote {} rows of int64 data", n);
                 }
                 Int96ColumnWriter(_) => unreachable!("ParquetWriter does not support INT96 data"),
@@ -157,20 +173,28 @@ where
                 }
                 DoubleColumnWriter(ref mut w) => {
                     let float_packer = packer.as_float_packer();
-                    let n = w.write_batch(
-                        &float_packer.values,
-                        Some(&float_packer.def_levels),
-                        Some(&float_packer.rep_levels),
-                    )?;
+                    let n = w
+                        .write_batch(
+                            &float_packer.values,
+                            Some(&float_packer.def_levels),
+                            Some(&float_packer.rep_levels),
+                        )
+                        .context(ParquetLibraryError {
+                            message: String::from("Can't write_batch with f64 values"),
+                        })?;
                     debug!("Wrote {} rows of f64 data", n);
                 }
                 ByteArrayColumnWriter(ref mut w) => {
                     let string_packer = packer.as_string_packer();
-                    let n = w.write_batch(
-                        &string_packer.values,
-                        Some(&string_packer.def_levels),
-                        Some(&string_packer.rep_levels),
-                    )?;
+                    let n = w
+                        .write_batch(
+                            &string_packer.values,
+                            Some(&string_packer.def_levels),
+                            Some(&string_packer.rep_levels),
+                        )
+                        .context(ParquetLibraryError {
+                            message: String::from("Can't write_batch with byte array values"),
+                        })?;
                     debug!("Wrote {} rows of byte data", n);
                 }
                 FixedLenByteArrayColumnWriter(_) => {
@@ -178,16 +202,26 @@ where
                 }
             };
             debug!("Closing column writer for {}", column_number);
-            row_group_writer.close_column(col_writer)?;
+            row_group_writer
+                .close_column(col_writer)
+                .context(ParquetLibraryError {
+                    message: String::from("Can't close column writer"),
+                })?;
             column_number += 1;
         }
-        self.file_writer.close_row_group(row_group_writer)?;
+        self.file_writer
+            .close_row_group(row_group_writer)
+            .context(ParquetLibraryError {
+                message: String::from("Can't close row group writer"),
+            })?;
         Ok(())
     }
 
     /// Closes this writer, and finalizes the underlying parquet file
     pub fn close(&mut self) -> Result<(), Error> {
-        self.file_writer.close()?;
+        self.file_writer.close().context(ParquetLibraryError {
+            message: String::from("Can't close file writer"),
+        })?;
         Ok(())
     }
 }
@@ -237,7 +271,11 @@ fn convert_to_parquet_schema(
             parquet_column_builder = parquet_column_builder.with_logical_type(t);
         }
 
-        let parquet_column_type = parquet_column_builder.build()?;
+        let parquet_column_type = parquet_column_builder
+            .build()
+            .context(ParquetLibraryError {
+                message: String::from("Can't create parquet column type"),
+            })?;
         debug!(
             "Using parquet type {} for column {:?}",
             parquet_schema_as_string(&parquet_column_type),
@@ -249,7 +287,10 @@ fn convert_to_parquet_schema(
 
     let parquet_schema = Type::group_type_builder(&schema.measurement())
         .with_fields(&mut parquet_columns)
-        .build()?;
+        .build()
+        .context(ParquetLibraryError {
+            message: String::from("Can't create top level parquet schema"),
+        })?;
 
     Ok(Rc::new(parquet_schema))
 }
