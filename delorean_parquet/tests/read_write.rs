@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use delorean_parquet::writer::ParquetWriter;
+    use delorean_parquet::writer::DeloreanTableWriter;
     use delorean_table::packers::Packer;
     use line_protocol_schema::DataType;
     use std::fs;
@@ -56,7 +56,7 @@ mod tests {
         let output_file = fs::File::create(&output_path).expect("can't open temp file for writing");
 
         let mut parquet_writer =
-            ParquetWriter::new(&schema, output_file).expect("can't create parquet writer");
+            DeloreanTableWriter::new(&schema, output_file).expect("can't create parquet writer");
         parquet_writer
             .write_batch(&packers)
             .expect("can't write batch");

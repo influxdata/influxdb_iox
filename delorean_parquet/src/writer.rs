@@ -12,9 +12,11 @@ use parquet::{
     errors::ParquetError,
     file::{
         properties::WriterProperties,
+        reader::TryClone,
         writer::{FileWriter, SerializedFileWriter},
     },
 };
+use std::io::{Write, Seek};
 
 use delorean_table::packers::Packer;
 
@@ -32,25 +34,66 @@ impl From<ParquetError> for Error {
     }
 }
 
-pub struct ParquetWriter {
+/// A `DeloreanTableWriter` is used for writing batches of rows
+/// represented using the structures in `delorian_table` to parquet files.
+pub struct DeloreanTableWriter<W>
+where W:  Write + Seek + TryClone {
     parquet_schema: Rc<parquet::schema::types::Type>,
-    file_writer: SerializedFileWriter<std::fs::File>,
+    file_writer: SerializedFileWriter<W>,
 }
 
-impl ParquetWriter {
-    /// Creates a new ParquetWriter suitable for writing data for a
-    /// single measurement that conforms to the specified line
-    /// protocol schema.
-    pub fn new(
+impl <W: 'static> DeloreanTableWriter<W>
+where W:  Write + Seek + TryClone {
+    /// Create a new TableWriter that writes its rows to something
+    /// that implements the trait (e.g. std::File). For example:
+    ///
+    /// ```
+    /// # use std::fs;
+    /// # use line_protocol_schema;
+    /// # use line_protocol_schema::DataType;
+    /// # use delorean_table::packers::Packer;
+    /// # use delorean_parquet::writer::DeloreanTableWriter;
+    ///
+    /// let schema = line_protocol_schema::SchemaBuilder::new("measurement_name")
+    ///      .tag("tag1")
+    ///      .field("field1", line_protocol_schema::DataType::Integer)
+    ///      .build();
+    ///
+    /// let mut packers = vec![
+    ///     Packer::new(DataType::String),  // 0: tag1
+    ///     Packer::new(DataType::Integer), // 1: field1
+    ///     Packer::new(DataType::Integer), // 2: timestamp
+    /// ];
+    ///
+    /// packers[0].pack_str(Some("tag1")); // tag1 val
+    /// packers[1].pack_i64(Some(100));    // field1 val
+    /// packers[2].pack_none();            // no timestamp
+    ///
+    /// // Write to '/tmp/example.parquet'
+    /// let mut output_file_name = std::env::temp_dir();
+    /// output_file_name.push("example.parquet");
+    /// let output_file = fs::File::create(output_file_name.as_path()).unwrap();
+    ///
+    /// let mut parquet_writer = DeloreanTableWriter::new(&schema, output_file).unwrap();
+    ///
+    /// // write the actual data to parquet
+    /// parquet_writer.write_batch(&packers).unwrap();
+    ///
+    /// // Closing the writer closes the data and the file
+    /// parquet_writer.close().unwrap();
+    ///
+    /// # std::fs::remove_file(output_file_name);
+    /// ```
+    pub fn new (
         schema: &line_protocol_schema::Schema,
-        file: std::fs::File,
-    ) -> Result<ParquetWriter, Error> {
+        writer: W,
+    ) -> Result<DeloreanTableWriter<W>, Error> {
         let writer_props = create_writer_props(&schema);
         let parquet_schema = convert_to_parquet_schema(&schema)?;
 
-        match SerializedFileWriter::new(file, parquet_schema.clone(), writer_props) {
+        match SerializedFileWriter::new(writer, parquet_schema.clone(), writer_props) {
             Ok(file_writer) => {
-                let parquet_writer = ParquetWriter {
+                let parquet_writer = DeloreanTableWriter {
                     parquet_schema,
                     file_writer,
                 };
