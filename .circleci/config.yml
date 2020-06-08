@@ -90,8 +90,7 @@ workflows:
     jobs:
       - fmt
       - lint
-      - build
-      - test:
+      - build:
           requires:
             - fmt
             - lint
