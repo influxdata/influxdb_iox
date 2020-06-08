@@ -10,7 +10,7 @@ use snafu::Snafu;
 
 use delorean_ingest::LineProtocolConverter;
 use delorean_line_parser::{parse_lines, ParsedLine};
-use delorean_parquet::writer::{Error as ParquetWriterError, ParquetWriter};
+use delorean_parquet::writer::{DeloreanTableWriter, Error as DeloreanTableWriterError};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -26,7 +26,7 @@ pub enum Error {
         source: delorean_ingest::Error,
     },
     Writing {
-        source: ParquetWriterError,
+        source: DeloreanTableWriterError,
     },
 }
 
@@ -53,8 +53,8 @@ impl From<delorean_ingest::Error> for Error {
     }
 }
 
-impl From<ParquetWriterError> for Error {
-    fn from(other: ParquetWriterError) -> Self {
+impl From<DeloreanTableWriterError> for Error {
+    fn from(other: DeloreanTableWriterError) -> Self {
         Error::Writing { source: other }
     }
 }
@@ -99,7 +99,7 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
     info!("Schema deduced. Writing output to {} ...", output_filename);
     let output_file = fs::File::create(output_filename)?;
 
-    let mut writer = ParquetWriter::new(converter.schema(), output_file)?;
+    let mut writer = DeloreanTableWriter::new(converter.schema(), output_file)?;
 
     // Write the sample and then the remaining lines
     writer.write_batch(&converter.pack_lines(schema_sample.into_iter()))?;

@@ -16,7 +16,7 @@ use parquet::{
         writer::{FileWriter, SerializedFileWriter},
     },
 };
-use std::io::{Write, Seek};
+use std::io::{Seek, Write};
 
 use delorean_table::packers::Packer;
 
@@ -37,13 +37,17 @@ impl From<ParquetError> for Error {
 /// A `DeloreanTableWriter` is used for writing batches of rows
 /// represented using the structures in `delorian_table` to parquet files.
 pub struct DeloreanTableWriter<W>
-where W:  Write + Seek + TryClone {
+where
+    W: Write + Seek + TryClone,
+{
     parquet_schema: Rc<parquet::schema::types::Type>,
     file_writer: SerializedFileWriter<W>,
 }
 
-impl <W: 'static> DeloreanTableWriter<W>
-where W:  Write + Seek + TryClone {
+impl<W: 'static> DeloreanTableWriter<W>
+where
+    W: Write + Seek + TryClone,
+{
     /// Create a new TableWriter that writes its rows to something
     /// that implements the trait (e.g. std::File). For example:
     ///
@@ -84,7 +88,7 @@ where W:  Write + Seek + TryClone {
     ///
     /// # std::fs::remove_file(output_file_name);
     /// ```
-    pub fn new (
+    pub fn new(
         schema: &line_protocol_schema::Schema,
         writer: W,
     ) -> Result<DeloreanTableWriter<W>, Error> {
