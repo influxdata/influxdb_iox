@@ -93,6 +93,10 @@ workflows:
       - build
       - test:
           requires:
+            - fmt
+            - lint
+      - test:
+          requires:
             - build
 
   ci_image:
