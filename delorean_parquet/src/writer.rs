@@ -23,7 +23,7 @@ use delorean_table::packers::Packer;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display(r#" Error from parquet library: {}"#, source))]
+    #[snafu(display(r#"Error from parquet library: {}"#, source))]
     ParquetLibraryError { source: ParquetError },
     #[snafu(display(r#"{}"#, message))]
     MismatchedColumns { message: String },
@@ -36,7 +36,7 @@ impl From<ParquetError> for Error {
 }
 
 /// A `DeloreanTableWriter` is used for writing batches of rows
-/// represented using the structures in `delorian_table` to parquet files.
+/// represented using the structures in `delorean_table` to parquet files.
 pub struct DeloreanTableWriter<W>
 where
     W: Write + Seek + TryClone,
@@ -272,24 +272,12 @@ fn create_writer_props(schema: &line_protocol_schema::Schema) -> Rc<WriterProper
         let col_path = ColumnPath::from(col_def.name.clone());
 
         match col_def.data_type {
-            line_protocol_schema::DataType::Boolean => {
+            data_type @ line_protocol_schema::DataType::Boolean
+            | data_type @ line_protocol_schema::DataType::Float
+            | data_type @ line_protocol_schema::DataType::Integer => {
                 debug!(
-                    "Setting encoding of DataType::Boolean col {} to RLE",
-                    col_path
-                );
-                builder = builder.set_column_encoding(col_path, Encoding::RLE);
-            }
-            line_protocol_schema::DataType::Float => {
-                debug!(
-                    "Setting encoding of DataType::Float col {} to RLE",
-                    col_path
-                );
-                builder = builder.set_column_encoding(col_path, Encoding::RLE);
-            }
-            line_protocol_schema::DataType::Integer => {
-                debug!(
-                    "Setting encoding of DataType::Integer col {} to RLE",
-                    col_path
+                    "Setting encoding of {:?} col {} to RLE",
+                    data_type, col_path
                 );
                 builder = builder.set_column_encoding(col_path, Encoding::RLE);
             }
