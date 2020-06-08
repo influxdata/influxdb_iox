@@ -90,8 +90,14 @@ workflows:
     jobs:
       - fmt
       - lint
-      - test
-      - build
+      build:
+        requires:
+          - fmt
+          - lint
+      test:
+        reqires:
+          - build
+
   ci_image:
     triggers:
       - schedule:
