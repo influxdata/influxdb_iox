@@ -60,6 +60,8 @@ jobs:
           name: Cargo test
           command: cargo test --workspace
       - cache_save
+    reqires:
+      - build
   build:
     docker:
       - image: quay.io/influxdb/rust:ci
@@ -71,6 +73,9 @@ jobs:
           name: Cargo build
           command: cargo build --workspace
       - cache_save
+      requires:
+        - fmt
+        - lint
   ci_image:
     machine: true
     steps:
@@ -90,13 +95,8 @@ workflows:
     jobs:
       - fmt
       - lint
-      build:
-        requires:
-          - fmt
-          - lint
-      test:
-        reqires:
-          - build
+      - build
+      - test
 
   ci_image:
     triggers:
