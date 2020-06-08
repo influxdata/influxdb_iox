@@ -1,6 +1,6 @@
 mod dstool_tests {
     use assert_cmd::Command;
-    use delorean_test_helpers::tmp_path;
+    use delorean_test_helpers::NamedTempPath;
     use predicates::prelude::*;
 
     #[test]

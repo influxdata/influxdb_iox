@@ -50,7 +50,11 @@ fn test_write_parquet_data() {
     packers[5].pack_i64(Some(910000000000));
 
     // write the data out to the parquet file
-    let output_path = delorean_test_helpers::tmp_path();
+    let output_path = delorean_test_helpers::tempfile::Builder::new()
+        .prefix("delorean_parquet_e2e")
+        .suffix(".parquet")
+        .tempfile().expect("error creating temp file")
+        .into_temp_path();
     let output_file = fs::File::create(&output_path).expect("can't open temp file for writing");
 
     let mut parquet_writer =

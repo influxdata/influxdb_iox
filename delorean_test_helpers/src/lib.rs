@@ -2,7 +2,7 @@
 #![warn(missing_debug_implementations, clippy::explicit_iter_loop)]
 
 use std::{env, f64};
-use tempfile::{NamedTempFile, TempDir, TempPath};
+pub use tempfile;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type Result<T = (), E = Error> = std::result::Result<T, E>;
@@ -17,7 +17,7 @@ pub fn all_approximately_equal(f1: &[f64], f2: &[f64]) -> bool {
     f1.len() == f2.len() && f1.iter().zip(f2).all(|(&a, &b)| approximately_equal(a, b))
 }
 
-pub fn tmp_dir() -> Result<TempDir> {
+pub fn tmp_dir() -> Result<tempfile::TempDir> {
     let _ = dotenv::dotenv();
 
     let root = env::var_os("TEST_DELOREAN_DB_DIR").unwrap_or_else(|| env::temp_dir().into());
@@ -25,14 +25,6 @@ pub fn tmp_dir() -> Result<TempDir> {
     Ok(tempfile::Builder::new()
         .prefix("delorean")
         .tempdir_in(root)?)
-}
-
-/// Return the path to a temporary file -- caller is responsible for
-/// removing the file created at this path
-pub fn tmp_path() -> TempPath {
-    NamedTempFile::new()
-        .expect("can't create temporary file")
-        .into_temp_path()
 }
 
 pub fn enable_logging() {
