@@ -60,7 +60,7 @@ jobs:
           name: Cargo test
           command: cargo test --workspace
       - cache_save
-    reqires:
+    requires:
       - build
   build:
     docker:
