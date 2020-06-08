@@ -296,7 +296,7 @@ fn convert_to_parquet_schema(
 }
 
 /// Create the parquet writer properties (which defines the encoding
-/// and compression for each column) for a given line protocol schema.
+/// and compression for each column) for a given schema.
 fn create_writer_props(schema: &line_protocol_schema::Schema) -> Rc<WriterProperties> {
     let mut builder = WriterProperties::builder();
 
