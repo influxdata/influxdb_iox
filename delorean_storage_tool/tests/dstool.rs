@@ -1,6 +1,6 @@
 mod dstool_tests {
     use assert_cmd::Command;
-    use delorean_test_helpers::NamedTempPath;
+    use delorean_test_helpers;
     use predicates::prelude::*;
 
     #[test]
@@ -23,7 +23,12 @@ mod dstool_tests {
     fn convert_good_input_filename() {
         let mut cmd = Command::cargo_bin("dstool").unwrap();
 
-        let parquet_path = tmp_path();
+        let parquet_path = delorean_test_helpers::tempfile::Builder::new()
+            .prefix("dstool_e2e")
+            .suffix(".parquet")
+            .tempfile()
+            .expect("error creating temp file")
+            .into_temp_path();
         let parquet_filename_string = parquet_path.to_string_lossy().to_string();
 
         let assert = cmd
