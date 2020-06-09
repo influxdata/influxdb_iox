@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use delorean_line_parser::{FieldValue, ParsedLine};
 use delorean_table::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError, Packer};
-use line_protocol_schema::{DataType, Schema, SchemaBuilder};
+use delorean_table_schema::{DataType, Schema, SchemaBuilder};
 
 #[derive(Snafu, Debug)]
 pub enum Error {
@@ -233,8 +233,8 @@ impl LineProtocolConverter {
 mod delorean_ingest_tests {
     use super::*;
     use delorean_table::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError};
+    use delorean_table_schema::ColumnDefinition;
     use delorean_test_helpers::approximately_equal;
-    use line_protocol_schema::ColumnDefinition;
 
     struct NoOpWriter {}
 
