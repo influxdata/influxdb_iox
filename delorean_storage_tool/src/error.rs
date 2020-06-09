@@ -18,55 +18,35 @@ pub enum Error {
     },
 
     #[snafu(display("Not implemented: {}", operation_name))]
-    NotImplemented {
-        operation_name: String,
-    },
-
+    NotImplemented { operation_name: String },
 
     #[snafu(display("Unknown input type: {} for {}", details, input_name))]
-    UnknownInputType {
-        details: String,
-        input_name : String,
-    },
-
+    UnknownInputType { details: String, input_name: String },
 
     #[snafu(display("Can't convert filename to utf-8, : {}", input_name))]
-    FileNameDecode {
-        input_name : String,
-    },
-
+    FileNameDecode { input_name: String },
 
     #[snafu(display("Can't read gzip data : {}", input_name))]
     ReadingGzip {
-        input_name : String,
-        source: std::io::Error
+        input_name: String,
+        source: std::io::Error,
     },
 
     #[snafu(context(false))]
     #[snafu(display("Error converting data {}", source))]
-    Conversion {
-        source: delorean_ingest::Error,
-    },
+    Conversion { source: delorean_ingest::Error },
 
     #[snafu(display("Error creating a table writer {}", source))]
-    UnableToCreateTableWriter {
-        source: DeloreanTableWriterError,
-    },
+    UnableToCreateTableWriter { source: DeloreanTableWriterError },
 
     #[snafu(display("Error writing the sample schema {}", source))]
-    UnableToWriteSchemaSample {
-        source: DeloreanTableWriterError,
-    },
+    UnableToWriteSchemaSample { source: DeloreanTableWriterError },
 
     #[snafu(display("Error writing remaining lines {}", source))]
-    UnableToWriteGoodLines {
-        source: DeloreanTableWriterError,
-    },
+    UnableToWriteGoodLines { source: DeloreanTableWriterError },
 
     #[snafu(display("Error while closing the table writer {}", source))]
-    UnableToCloseTableWriter {
-        source: DeloreanTableWriterError,
-    },
+    UnableToCloseTableWriter { source: DeloreanTableWriterError },
 
     #[snafu(display(r#"Error reading TSM data: {}"#, source))]
     TSM { source: StorageError },

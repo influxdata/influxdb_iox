@@ -135,10 +135,12 @@ impl InputReader {
             .extension()
             .ok_or(Error::UnknownInputType {
                 details: String::from("No extension"),
-                input_name: path.display().to_string()
+                input_name: path.display().to_string(),
             })?
             .to_str()
-            .ok_or(Error::FileNameDecode {input_name: path.display().to_string()})?;
+            .ok_or(Error::FileNameDecode {
+                input_name: path.display().to_string(),
+            })?;
 
         match ext {
             "tsm" => Ok(InputReader::FileInputType(FileInputReader::new(
@@ -156,26 +158,29 @@ impl InputReader {
                     .extension()
                     .ok_or(Error::UnknownInputType {
                         details: String::from("No extension before .gz"),
-                        input_name: path.display().to_string()
+                        input_name: path.display().to_string(),
                     })?
                     .to_str()
                     .ok_or(Error::FileNameDecode {
-                        input_name: path.display().to_string()
+                        input_name: path.display().to_string(),
                     })?;
 
                 let file = File::open(input_name).map_err(|e| Error::UnableToReadInput {
                     name: input_name.to_string(),
                     source: e,
                 })?;
-                let mut decoder = gzip::Decoder::new(file).map_err(|gzip_err| Error::UnableToReadInput {
-                    name: input_name.to_string(),
-                    source: gzip_err,
-                })?;
+                let mut decoder =
+                    gzip::Decoder::new(file).map_err(|gzip_err| Error::UnableToReadInput {
+                        name: input_name.to_string(),
+                        source: gzip_err,
+                    })?;
                 let mut buffer = Vec::new();
-                decoder.read_to_end(&mut buffer).map_err(|e| Error::ReadingGzip {
-                    input_name: input_name.to_string(),
-                    source: e,
-                })?;
+                decoder
+                    .read_to_end(&mut buffer)
+                    .map_err(|e| Error::ReadingGzip {
+                        input_name: input_name.to_string(),
+                        source: e,
+                    })?;
 
                 match stem_ext {
                     "tsm" => Ok(InputReader::MemoryInputType(MemoryInputReader::new(
@@ -188,7 +193,7 @@ impl InputReader {
                     ))),
                     _ => Err(Error::UnknownInputType {
                         details: String::from("Unknown input extension before .gz"),
-                        input_name: input_name.to_string()
+                        input_name: input_name.to_string(),
                     }),
                 }
             }

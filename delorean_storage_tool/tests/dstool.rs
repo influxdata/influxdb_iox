@@ -64,7 +64,21 @@ mod dstool_tests {
             .code(3)
             .stderr(predicate::str::contains("Metadata dump failed"))
             .stderr(predicate::str::contains(
-                "Can not determine input file type: (No extension on non_existent_input)",
+                "Metadata dump failed: Unknown input type: No extension for non_existent_input",
+            ));
+    }
+
+    #[test]
+    fn meta_non_existent_input_filename() {
+        let mut cmd = Command::cargo_bin("dstool").unwrap();
+        let assert = cmd.arg("meta").arg("non_existent_input.tsm").assert();
+
+        assert
+            .failure()
+            .code(3)
+            .stderr(predicate::str::contains("Metadata dump failed"))
+            .stderr(predicate::str::contains(
+                "Metadata dump failed: Error reading non_existent_input.tsm",
             ));
     }
 
@@ -78,7 +92,7 @@ mod dstool_tests {
             .code(3)
             .stderr(predicate::str::contains("Metadata dump failed"))
             .stderr(predicate::str::contains(
-                "Can not determine input file type: (No extension before .gz on non_existent_input.gz)",
+                "Metadata dump failed: Unknown input type: No extension before .gz for non_existent_input.gz",
             ));
     }
 
