@@ -62,6 +62,7 @@ where
     /// # use std::fs;
     /// # use line_protocol_schema;
     /// # use line_protocol_schema::DataType;
+    /// # use delorean_table::DeloreanTableWriter;
     /// # use delorean_table::packers::Packer;
     /// # use delorean_parquet::writer::DeloreanParquetTableWriter;
     ///
