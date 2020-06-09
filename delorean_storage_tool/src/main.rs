@@ -11,7 +11,7 @@ use std::fs;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Error reading {}", name.display()))]
+    #[snafu(display("Error reading {} ({})", name.display(), source))]
     UnableToReadInput {
         name: std::path::PathBuf,
         source: std::io::Error,
