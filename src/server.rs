@@ -1,6 +1,6 @@
 #![deny(rust_2018_idioms)]
 
-use log::{debug, info};
+use log::{debug, info, warn};
 
 use delorean::generated_types::{
     delorean_server::DeloreanServer, storage_server::StorageServer, Bucket, TimestampRange,
@@ -14,6 +14,7 @@ use delorean::storage::predicate::parse_predicate;
 use delorean::time::{parse_duration, time_as_i64_nanos};
 
 use std::env::VarError;
+use std::fs;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -336,6 +337,19 @@ impl From<StatusCode> for ApplicationError {
     }
 }
 
+fn warn_if_db_dir_does_not_exists(path: &std::path::Path) {
+    match fs::metadata(path) {
+        Ok(metadata) => {
+            if metadata.is_file() {
+                warn!("{:?} seems to be a file, not a directory as needed", path);
+            }
+        }
+        Err(e) => {
+            warn!("Can't read db_dir {:?}: {}", path, e);
+        }
+    }
+}
+
 #[tokio::main]
 /// Main entrypoint of the Delorean server loop
 pub async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -347,12 +361,16 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // default database path is $HOME/.delorean
             let mut path = dirs::home_dir().unwrap();
             path.push(".delorean/");
+            warn_if_db_dir_does_not_exists(&path);
+
             path.into_os_string().into_string().unwrap()
         }
     };
+    debug!("Delorean Server using database directory: {:?}", db_dir);
 
     let db = Database::new(&db_dir);
     db.restore_from_wal().await?;
+
     let state = Arc::new(App { db });
     let bind_addr: SocketAddr = match std::env::var("DELOREAN_BIND_ADDR") {
         Ok(addr) => addr
