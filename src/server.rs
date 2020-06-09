@@ -17,7 +17,7 @@ use std::env::VarError;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{env, fmt, str};
+use std::{fmt, str};
 
 use bytes::BytesMut;
 use csv::Writer;
@@ -340,9 +340,6 @@ impl From<StatusCode> for ApplicationError {
 /// Main entrypoint of the Delorean server loop
 pub async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     dotenv::dotenv().ok();
-
-    env::set_var("RUST_LOG", "delorean=debug,hyper=info");
-    env_logger::init();
 
     let db_dir = match std::env::var("DELOREAN_DB_DIR") {
         Ok(val) => val,

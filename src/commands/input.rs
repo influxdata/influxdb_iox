@@ -5,20 +5,23 @@ use std::io;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use crate::error::{Error, Result};
+use crate::commands::error::{Error, Result};
 
+#[derive(Debug)]
 pub enum FileType {
     LineProtocol,
     TSM,
 }
 
 // Interface for interacting with streams
+#[derive(Debug)]
 pub enum InputReader {
     FileInputType(FileInputReader),
     MemoryInputType(MemoryInputReader),
 }
 
 // Contains a (file backed) reader to read raw uncompressed bytes
+#[derive(Debug)]
 pub struct FileInputReader {
     file_type: FileType,
     file_size: usize,
@@ -26,6 +29,7 @@ pub struct FileInputReader {
 }
 
 // Contains an in-memory reader...
+#[derive(Debug)]
 pub struct MemoryInputReader {
     file_type: FileType,
     file_size: usize,
@@ -120,6 +124,10 @@ impl InputReader {
             InputReader::FileInputType(file_input_reader) => file_input_reader.file_size,
             InputReader::MemoryInputType(memory_input_reader) => memory_input_reader.file_size,
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     // Create a new input reader suitable for reading from

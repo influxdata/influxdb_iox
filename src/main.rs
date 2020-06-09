@@ -4,19 +4,20 @@ use log::{debug, warn};
 
 use clap::{crate_authors, crate_version, App, Arg, SubCommand};
 
-//mod commands;
-//mod server;
-//mod rpc;
-
-use delorean::command::file_meta::dump_meta;
-use delorean::command::convert::convert;
+pub mod commands {
+    pub mod convert;
+    pub mod error;
+    pub mod file_meta;
+    pub mod input;
+}
+mod rpc;
+mod server;
 
 enum ReturnCode {
     ConversionFailed = 2,
     MetadataDumpFailed = 3,
     ServerExitedAbnormally = 4,
 }
-
 
 fn main() {
     let help = r#"Delorean server and command line tools
@@ -66,10 +67,7 @@ Examples:
                         .index(1),
                 ),
         )
-        .subcommand(
-            SubCommand::with_name("server")
-                .about("Runs in server mode (default)")
-        )
+        .subcommand(SubCommand::with_name("server").about("Runs in server mode (default)"))
         .arg(
             Arg::with_name("verbose")
                 .short("v")
@@ -77,6 +75,9 @@ Examples:
                 .help("Enables verbose output"),
         )
         .get_matches();
+
+    // TODO: do we want to setup different logging levels for different components?
+    // env::set_var("RUST_LOG", "delorean=debug,hyper=info");
 
     if matches.is_present("verbose") {
         std::env::set_var("RUST_LOG", "debug");
@@ -91,7 +92,7 @@ Examples:
         // could have used an 'if let' to conditionally get the value)
         let input_filename = matches.value_of("INPUT").unwrap();
         let output_filename = matches.value_of("OUTPUT").unwrap();
-        match convert(&input_filename, &output_filename) {
+        match commands::convert::convert(&input_filename, &output_filename) {
             Ok(()) => debug!("Conversion completed successfully"),
             Err(e) => {
                 eprintln!("Conversion failed: {}", e);
@@ -100,7 +101,7 @@ Examples:
         }
     } else if let Some(matches) = matches.subcommand_matches("meta") {
         let input_filename = matches.value_of("INPUT").unwrap();
-        match dump_meta(&input_filename) {
+        match commands::file_meta::dump_meta(&input_filename) {
             Ok(()) => debug!("Metadata dump completed successfully"),
             Err(e) => {
                 eprintln!("Metadata dump failed: {}", e);

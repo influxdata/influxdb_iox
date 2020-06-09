@@ -1,5 +1,5 @@
+use log::{debug, info, warn};
 use std::fs;
-use log::{debug, warn};
 
 use delorean_ingest::LineProtocolConverter;
 use delorean_line_parser::{parse_lines, ParsedLine};
@@ -47,7 +47,7 @@ impl DeloreanTableWriterSource for ParquetWriterSource {
     }
 }
 
-fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
+pub fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
     info!("dstool convert starting");
     debug!("Reading from input file {}", input_filename);
     debug!("Writing to output file {}", output_filename);
