@@ -86,35 +86,36 @@ Examples:
     }
     env_logger::init();
 
-    if let Some(matches) = matches.subcommand_matches("convert") {
-        // clap says Calling .unwrap() is safe here because "INPUT"
-        // and "OUTPUT" are required (if "INPUT" wasn't required we
-        // could have used an 'if let' to conditionally get the value)
-        let input_filename = matches.value_of("INPUT").unwrap();
-        let output_filename = matches.value_of("OUTPUT").unwrap();
-        match commands::convert::convert(&input_filename, &output_filename) {
-            Ok(()) => debug!("Conversion completed successfully"),
-            Err(e) => {
-                eprintln!("Conversion failed: {}", e);
-                std::process::exit(ReturnCode::ConversionFailed as _)
+    match matches.subcommand() {
+        ("convert", Some(sub_matches)) => {
+            let input_filename = sub_matches.value_of("INPUT").unwrap();
+            let output_filename = sub_matches.value_of("OUTPUT").unwrap();
+            match commands::convert::convert(&input_filename, &output_filename) {
+                Ok(()) => debug!("Conversion completed successfully"),
+                Err(e) => {
+                    eprintln!("Conversion failed: {}", e);
+                    std::process::exit(ReturnCode::ConversionFailed as _)
+                }
             }
         }
-    } else if let Some(matches) = matches.subcommand_matches("meta") {
-        let input_filename = matches.value_of("INPUT").unwrap();
-        match commands::file_meta::dump_meta(&input_filename) {
-            Ok(()) => debug!("Metadata dump completed successfully"),
-            Err(e) => {
-                eprintln!("Metadata dump failed: {}", e);
-                std::process::exit(ReturnCode::MetadataDumpFailed as _)
+        ("meta", Some(sub_matches)) => {
+            let input_filename = sub_matches.value_of("INPUT").unwrap();
+            match commands::file_meta::dump_meta(&input_filename) {
+                Ok(()) => debug!("Metadata dump completed successfully"),
+                Err(e) => {
+                    eprintln!("Metadata dump failed: {}", e);
+                    std::process::exit(ReturnCode::MetadataDumpFailed as _)
+                }
             }
         }
-    } else {
-        println!("Staring delorean server...");
-        match server::main() {
-            Ok(()) => eprintln!("Shutdown OK"),
-            Err(e) => {
-                warn!("Server shutdown with error: {:?}", e);
-                std::process::exit(ReturnCode::ServerExitedAbnormally as _);
+        ("server", Some(_)) | (_, _) => {
+            println!("Staring delorean server...");
+            match server::main() {
+                Ok(()) => eprintln!("Shutdown OK"),
+                Err(e) => {
+                    warn!("Server shutdown with error: {:?}", e);
+                    std::process::exit(ReturnCode::ServerExitedAbnormally as _);
+                }
             }
         }
     }
