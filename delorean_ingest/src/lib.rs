@@ -197,8 +197,8 @@ impl LineProtocolConverter {
 #[cfg(test)]
 mod delorean_ingest_tests {
     use super::*;
-    use delorean_test_helpers::approximately_equal;
     use delorean_table_schema::ColumnDefinition;
+    use delorean_test_helpers::approximately_equal;
 
     fn only_good_lines(data: &str) -> Vec<ParsedLine<'_>> {
         delorean_line_parser::parse_lines(data)
