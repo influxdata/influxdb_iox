@@ -33,9 +33,8 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
 
     // TODO: make a streaming parser that you can stream data through in blocks.
     // for now, just read the whole input file into RAM...
-    let buf = fs::read_to_string(input_filename).map_err(|source| {
-        let message = format!("Error reading {}", input_filename);
-        Error::IO { message, source }
+    let buf = fs::read_to_string(input_filename).map_err(|e| Error::UnableToReadInput {
+        name: String::from(input_filename), source: e
     })?;
     info!("Read {} bytes from {}", buf.len(), input_filename);
 
@@ -57,17 +56,22 @@ fn convert(input_filename: &str, output_filename: &str) -> Result<()> {
     debug!("Using schema deduced from sample: {:?}", converter.schema());
 
     info!("Schema deduced. Writing output to {} ...", output_filename);
-    let output_file = fs::File::create(output_filename).map_err(|e| Error::IO {
-        message: String::from("Error creating output file"),
-        source: e,
+    let output_file = fs::File::create(output_filename).map_err(|e| Error::UnableToCreateFile {
+        name: String::from(output_filename), source: e,
     })?;
 
-    let mut writer = DeloreanTableWriter::new(converter.schema(), output_file)?;
+    let mut writer = DeloreanTableWriter::new(converter.schema(), output_file)
+        .map_err(|e| Error:: UnableToCreateTableWriter { source: e})?;
 
     // Write the sample and then the remaining lines
-    writer.write_batch(&converter.pack_lines(schema_sample.into_iter()))?;
-    writer.write_batch(&converter.pack_lines(only_good_lines))?;
-    writer.close()?;
+    writer
+        .write_batch(&converter.pack_lines(schema_sample.into_iter()))
+        .map_err(|e| Error::UnableToWriteSchemaSample {source: e})?;
+    writer
+        .write_batch(&converter.pack_lines(only_good_lines))
+        .map_err(|e| Error::UnableToWriteGoodLines { source: e})?;
+    writer.close()
+        .map_err(|e| Error::UnableToCloseTableWriter { source: e})?;
     info!("Completing writing {} successfully", output_filename);
     Ok(())
 }

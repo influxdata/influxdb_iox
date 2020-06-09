@@ -19,12 +19,14 @@ pub fn dump_meta(input_filename: &str) -> Result<()> {
 
     match input_reader.file_type() {
         FileType::LineProtocol => Err(Error::NotImplemented {
-            message: String::from("Line protocol metadata dump is not yet implemented"),
+            operation_name: String::from("Line protocol metadata dump"),
         }),
         FileType::TSM => {
             let len = input_reader.len();
             let mut reader = TSMReader::new(input_reader, len);
-            let index = reader.index()?;
+            let index = reader
+                .index()
+                .map_err(|e| Error::TSM { source: e})?;
 
             let mut stats_builder = TSMMetadataBuilder::new();
 
@@ -47,12 +49,14 @@ struct MeasurementMetadata {
 
 impl MeasurementMetadata {
     fn update_for_entry(&mut self, index_entry: &mut IndexEntry) -> Result<()> {
-        let tagset = index_entry.tagset()?;
+        let tagset = index_entry.tagset()
+            .map_err(|e| Error::TSM { source: e})?;
         for (tag_name, tag_value) in tagset {
             let tag_entry = self.tags.entry(tag_name).or_default();
             tag_entry.insert(tag_value);
         }
-        let field_name = index_entry.field_key()?;
+        let field_name = index_entry.field_key()
+            .map_err(|e| Error::TSM { source: e})?;
         self.fields.insert(field_name);
         Ok(())
     }
@@ -84,7 +88,8 @@ impl BucketMetadata {
     fn update_for_entry(&mut self, index_entry: &mut IndexEntry) -> Result<()> {
         self.count += 1;
         self.total_records += u64::from(index_entry.count);
-        let measurement = index_entry.measurement()?;
+        let measurement = index_entry.measurement()
+            .map_err(|e| Error::TSM { source: e})?;
         let meta = self.measurements.entry(measurement).or_default();
         meta.update_for_entry(index_entry)?;
         Ok(())

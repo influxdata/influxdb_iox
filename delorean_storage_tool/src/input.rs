@@ -34,15 +34,15 @@ pub struct MemoryInputReader {
 
 impl FileInputReader {
     fn new(file_type: FileType, input_name: &str) -> Result<FileInputReader> {
-        let file = File::open(input_name).map_err(|e| Error::IO {
-            message: format!("Error opening input file {}", input_name),
+        let file = File::open(input_name).map_err(|e| Error::UnableToReadInput {
+            name: String::from(input_name),
             source: e,
         })?;
 
         let file_size = file
             .metadata()
-            .map_err(|e| Error::IO {
-                message: format!("Error reading metadata for input file {}", input_name),
+            .map_err(|e| Error::UnableToReadInput {
+                name: String::from(input_name),
                 source: e,
             })?
             .len();
@@ -134,12 +134,11 @@ impl InputReader {
         let ext = path
             .extension()
             .ok_or(Error::UnknownInputType {
-                message: format!("No extension on {}", path.display()),
+                details: String::from("No extension"),
+                input_name: path.display().to_string()
             })?
             .to_str()
-            .ok_or(Error::UnknownInputType {
-                message: format!("Can't decode path to utf-8 {}", path.display()),
-            })?;
+            .ok_or(Error::FileNameDecode {input_name: path.display().to_string()})?;
 
         match ext {
             "tsm" => Ok(InputReader::FileInputType(FileInputReader::new(
@@ -156,24 +155,25 @@ impl InputReader {
                 let stem_ext = stem
                     .extension()
                     .ok_or(Error::UnknownInputType {
-                        message: format!("No extension before .gz on {}", path.display()),
+                        details: String::from("No extension before .gz"),
+                        input_name: path.display().to_string()
                     })?
                     .to_str()
-                    .ok_or(Error::UnknownInputType {
-                        message: format!("Can't decode stem ext path to utf-8 {}", path.display()),
+                    .ok_or(Error::FileNameDecode {
+                        input_name: path.display().to_string()
                     })?;
 
-                let file = File::open(input_name).map_err(|e| Error::IO {
-                    message: format!("Error opening gzip file {}", input_name),
+                let file = File::open(input_name).map_err(|e| Error::UnableToReadInput {
+                    name: input_name.to_string(),
                     source: e,
                 })?;
-                let mut decoder = gzip::Decoder::new(file).map_err(|gzip_err| Error::IO {
-                    message: format!("Error gunzipping: {}", path.display()),
+                let mut decoder = gzip::Decoder::new(file).map_err(|gzip_err| Error::UnableToReadInput {
+                    name: input_name.to_string(),
                     source: gzip_err,
                 })?;
                 let mut buffer = Vec::new();
-                decoder.read_to_end(&mut buffer).map_err(|e| Error::IO {
-                    message: format!("Error reading gzip into memory {}", input_name),
+                decoder.read_to_end(&mut buffer).map_err(|e| Error::ReadingGzip {
+                    input_name: input_name.to_string(),
                     source: e,
                 })?;
 
@@ -187,16 +187,14 @@ impl InputReader {
                         buffer,
                     ))),
                     _ => Err(Error::UnknownInputType {
-                        message: format!(
-                            "Unknown input extension after .gz '{}' on {}",
-                            stem_ext,
-                            path.display()
-                        ),
+                        details: String::from("Unknown input extension before .gz"),
+                        input_name: input_name.to_string()
                     }),
                 }
             }
             _ => Err(Error::UnknownInputType {
-                message: format!("Unknown input extension '{}' on {}", ext, path.display()),
+                details: String::from("Unknown input extension"),
+                input_name: input_name.to_string(),
             }),
         }
     }
