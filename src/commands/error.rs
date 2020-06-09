@@ -18,6 +18,12 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    #[snafu(display(
+        "Can not write multiple measurements to a single file. Saw new measurement named {}",
+        new_measurement_name
+    ))]
+    MultipleMeasurementsToSingleFile { new_measurement_name: String },
+
     #[snafu(display("Not implemented: {}", operation_name))]
     NotImplemented { operation_name: String },
 
