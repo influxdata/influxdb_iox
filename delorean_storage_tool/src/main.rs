@@ -10,7 +10,7 @@ use delorean_ingest::LineProtocolConverter;
 use delorean_line_parser::{parse_lines, ParsedLine};
 use delorean_parquet::writer::DeloreanParquetTableWriter;
 use delorean_table::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError};
-use line_protocol_schema::Schema;
+use delorean_table_schema::Schema;
 
 mod error;
 mod file_meta;

@@ -2,7 +2,7 @@ pub mod packers;
 
 use snafu::Snafu;
 
-use line_protocol_schema::Schema;
+use delorean_table_schema::Schema;
 pub use packers::Packer;
 
 #[derive(Snafu, Debug)]
