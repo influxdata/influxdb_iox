@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use log::{debug, info, warn};
 
-use delorean_ingest::LineProtocolConverter;
+use delorean_ingest::{ConversionSettings, LineProtocolConverter};
 use delorean_line_parser::parse_lines;
 use delorean_parquet::writer::DeloreanParquetTableWriter;
 use delorean_table::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError};
@@ -130,10 +130,8 @@ pub fn convert(input_filename: &str, output_name: &str) -> Result<()> {
         })
     };
 
-    // The idea here is to use the first few parsed lines to deduce the schema
-    const SCHEMA_SAMPLE_SIZE: usize = 5;
-    let mut converter = LineProtocolConverter::new(SCHEMA_SAMPLE_SIZE, writer_source)
-        .map_err(|e| Error::UnableToCreateLineProtocolConverter { source: e })?;
+    let settings = ConversionSettings::default();
+    let mut converter = LineProtocolConverter::new(settings, writer_source);
     converter
         .convert(only_good_lines)
         .map_err(|e| Error::UnableToWriteGoodLines { source: e })?;

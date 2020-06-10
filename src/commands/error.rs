@@ -46,9 +46,6 @@ pub enum Error {
     #[snafu(display("Error creating a parquet table writer {}", source))]
     UnableToCreateParquetTableWriter { source: ParquetWriterError },
 
-    #[snafu(display("Error creating a line protocol converter {}", source))]
-    UnableToCreateLineProtocolConverter { source: IngestError },
-
     #[snafu(display("Error writing the sample schema {}", source))]
     UnableToWriteSchemaSample { source: IngestError },
 
