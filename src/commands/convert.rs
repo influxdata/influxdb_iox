@@ -4,12 +4,10 @@ use std::path::{Path, PathBuf};
 use log::{debug, info, warn};
 
 use delorean_ingest::LineProtocolConverter;
-use delorean_line_parser::{parse_lines, ParsedLine};
+use delorean_line_parser::parse_lines;
 use delorean_parquet::writer::DeloreanParquetTableWriter;
 use delorean_table::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError};
 use delorean_table_schema::Schema;
-
-static SCHEMA_SAMPLE_SIZE: usize = 5;
 
 use crate::commands::error::{Error, Result};
 
@@ -109,7 +107,7 @@ pub fn convert(input_filename: &str, output_name: &str) -> Result<()> {
 
     // FIXME: Design something sensible to do with lines that don't
     // parse rather than just dropping them on the floor
-    let mut only_good_lines = parse_lines(&buf).filter_map(|r| match r {
+    let only_good_lines = parse_lines(&buf).filter_map(|r| match r {
         Ok(line) => Some(line),
         Err(e) => {
             warn!("Ignorning line with parse error: {}", e);
@@ -132,21 +130,12 @@ pub fn convert(input_filename: &str, output_name: &str) -> Result<()> {
         })
     };
 
-    let schema_sample: Vec<ParsedLine<'_>> =
-        only_good_lines.by_ref().take(SCHEMA_SAMPLE_SIZE).collect();
-
     // The idea here is to use the first few parsed lines to deduce the schema
-    let mut converter = LineProtocolConverter::new(&schema_sample, writer_source)
+    const SCHEMA_SAMPLE_SIZE: usize = 5;
+    let mut converter = LineProtocolConverter::new(SCHEMA_SAMPLE_SIZE, writer_source)
         .map_err(|e| Error::UnableToCreateLineProtocolConverter { source: e })?;
-
-    debug!("Using schema deduced from sample: {:?}", converter.schema());
-
-    // Write the sample and then the remaining lines
     converter
-        .ingest_lines(schema_sample.into_iter())
-        .map_err(|e| Error::UnableToWriteSchemaSample { source: e })?;
-    converter
-        .ingest_lines(only_good_lines)
+        .convert(only_good_lines)
         .map_err(|e| Error::UnableToWriteGoodLines { source: e })?;
     converter
         .finalize()
