@@ -16,7 +16,7 @@ fn convert_bad_input_filename() {
 
     assert
         .failure()
-        .code(2)
+        .code(1)
         .stderr(predicate::str::contains("Error reading non_existent_input"))
         .stderr(predicate::str::contains("No such file or directory"));
 }
@@ -61,7 +61,7 @@ fn meta_bad_input_filename() {
 
     assert
         .failure()
-        .code(3)
+        .code(2)
         .stderr(predicate::str::contains("Metadata dump failed"))
         .stderr(predicate::str::contains(
             "Metadata dump failed: Unknown input type: No extension for non_existent_input",
@@ -75,7 +75,7 @@ fn meta_non_existent_input_filename() {
 
     assert
         .failure()
-        .code(3)
+        .code(2)
         .stderr(predicate::str::contains("Metadata dump failed"))
         .stderr(predicate::str::contains(
             "Metadata dump failed: Error reading non_existent_input.tsm",
@@ -89,7 +89,7 @@ fn meta_bad_input_filename_gz() {
 
     assert
         .failure()
-        .code(3)
+        .code(2)
         .stderr(predicate::str::contains("Metadata dump failed"))
         .stderr(predicate::str::contains(
             "Metadata dump failed: Unknown input type: No extension before .gz for non_existent_input.gz",
