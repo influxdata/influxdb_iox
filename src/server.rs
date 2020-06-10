@@ -337,7 +337,7 @@ impl From<StatusCode> for ApplicationError {
     }
 }
 
-fn warn_if_db_dir_does_not_exists(path: &std::path::Path) {
+fn warn_if_db_dir_does_not_exist(path: &std::path::Path) {
     match fs::metadata(path) {
         Ok(metadata) => {
             if metadata.is_file() {
@@ -361,7 +361,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // default database path is $HOME/.delorean
             let mut path = dirs::home_dir().unwrap();
             path.push(".delorean/");
-            warn_if_db_dir_does_not_exists(&path);
+            warn_if_db_dir_does_not_exist(&path);
 
             path.into_os_string().into_string().unwrap()
         }

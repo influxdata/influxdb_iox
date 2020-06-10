@@ -1,22 +1,22 @@
 #![deny(rust_2018_idioms)]
 #![warn(missing_debug_implementations, clippy::explicit_iter_loop)]
-use log::{debug, warn};
+use log::{debug, error, warn};
 
 use clap::{crate_authors, crate_version, App, Arg, SubCommand};
 
-pub mod commands {
+mod commands {
     pub mod convert;
-    pub mod error;
+    mod error;
     pub mod file_meta;
-    pub mod input;
+    mod input;
 }
 mod rpc;
 mod server;
 
 enum ReturnCode {
-    ConversionFailed = 2,
-    MetadataDumpFailed = 3,
-    ServerExitedAbnormally = 4,
+    ConversionFailed = 1,
+    MetadataDumpFailed = 2,
+    ServerExitedAbnormally = 3,
 }
 
 fn main() {
@@ -76,13 +76,10 @@ Examples:
         )
         .get_matches();
 
-    // TODO: do we want to setup different logging levels for different components?
-    // env::set_var("RUST_LOG", "delorean=debug,hyper=info");
-
     if matches.is_present("verbose") {
-        std::env::set_var("RUST_LOG", "debug");
+        std::env::set_var("RUST_LOG", "delorean=debug,hyper=info");
     } else {
-        std::env::set_var("RUST_LOG", "info");
+        std::env::set_var("RUST_LOG", "delorean=info,hyper=info");
     }
     env_logger::init();
 
@@ -113,7 +110,7 @@ Examples:
             match server::main() {
                 Ok(()) => eprintln!("Shutdown OK"),
                 Err(e) => {
-                    warn!("Server shutdown with error: {:?}", e);
+                    error!("Server shutdown with error: {:?}", e);
                     std::process::exit(ReturnCode::ServerExitedAbnormally as _);
                 }
             }

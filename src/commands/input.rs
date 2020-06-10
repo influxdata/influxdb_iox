@@ -126,10 +126,6 @@ impl InputReader {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     // Create a new input reader suitable for reading from
     // `input_name` and figures out the file input type based on
     // heuristics (ahem, the filename extension)
