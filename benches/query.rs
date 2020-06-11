@@ -3,7 +3,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use delorean_query_benchmarks::{generate_test_data, query, Column};
 use std::time::Duration;
 
-fn select_where(c: &mut Criterion) {
+fn query_select_where(c: &mut Criterion) {
     let batch_count = 1;
     let record_count = 1000000;
     let total_records = (batch_count * record_count) as u64;
@@ -31,7 +31,7 @@ fn select_where(c: &mut Criterion) {
 
     let (schema, data) = generate_test_data(batch_count, record_count, columns);
 
-    let mut group = c.benchmark_group("select_where");
+    let mut group = c.benchmark_group("query_select_where");
     group.sample_size(10);
     group.measurement_time(Duration::new(10, 0));
     for q in [
@@ -50,7 +50,7 @@ fn select_where(c: &mut Criterion) {
     group.finish();
 }
 
-fn group_by(c: &mut Criterion) {
+fn query_group_by(c: &mut Criterion) {
     let batch_count = 1;
     let record_count = 1000000;
     let total_records = (batch_count * record_count) as u64;
@@ -78,7 +78,7 @@ fn group_by(c: &mut Criterion) {
 
     let (schema, data) = generate_test_data(batch_count, record_count, columns);
 
-    let mut group = c.benchmark_group("select_where");
+    let mut group = c.benchmark_group("query_group_by");
     group.sample_size(10);
     group.measurement_time(Duration::new(10, 0));
     for q in [
@@ -97,6 +97,6 @@ fn group_by(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, select_where, group_by);
+criterion_group!(benches, query_select_where, query_group_by);
 
 criterion_main!(benches);
