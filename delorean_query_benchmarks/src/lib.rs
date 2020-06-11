@@ -35,7 +35,7 @@ impl Column {
     pub fn new_utf8(name: String, cardinality: Option<usize>, nullable: bool) -> Column {
         Column {
             name,
-            data_type: DataType::Float64,
+            data_type: DataType::Utf8,
             cardinality,
             nullable,
         }
