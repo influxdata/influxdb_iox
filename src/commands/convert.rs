@@ -1,6 +1,6 @@
+use log::{debug, info, warn};
 use std::fs;
 use std::path::{Path, PathBuf};
-use log::{debug, info, warn};
 
 use delorean_ingest::{ConversionSettings, LineProtocolConverter};
 use delorean_line_parser::parse_lines;
@@ -87,7 +87,9 @@ impl DeloreanTableWriterSource for ParquetDirectoryWriterSource {
 }
 
 pub fn is_directory(p: impl AsRef<Path>) -> bool {
-    fs::metadata(p).map(|metadata| metadata.is_dir()).unwrap_or(false)
+    fs::metadata(p)
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
 }
 
 pub fn convert(input_filename: &str, output_name: &str) -> Result<()> {
