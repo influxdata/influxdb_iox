@@ -87,7 +87,7 @@ impl DeloreanTableWriterSource for ParquetDirectoryWriterSource {
     }
 }
 
-pub fn is_directory(p: &Path) -> bool {
+pub fn is_directory(p: impl AsRef<Path>) -> bool {
     fs::metadata(p).map(|metadata| metadata.is_dir()).unwrap_or(false)
 }
 
@@ -113,7 +113,6 @@ pub fn convert(input_filename: &str, output_name: &str) -> Result<()> {
     });
 
     // setup writing
-    let output_path = PathBuf::from(output_name);
     let writer_source: Box<dyn DeloreanTableWriterSource> = if is_directory(&output_path) {
         info!("Writing to output directory {:?}", output_path);
         Box::new(ParquetDirectoryWriterSource {
