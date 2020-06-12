@@ -61,6 +61,7 @@ pub enum Error {
 }
 
 /// Handles buffering `ParsedLine` objects and deducing a schema from that sample
+#[derive(Debug)]
 struct MeasurementSampler<'a> {
     settings: ConversionSettings,
 
@@ -90,15 +91,6 @@ struct MeasurementWriter<'a> {
 enum MeasurementConverter<'a> {
     UnknownSchema(MeasurementSampler<'a>),
     KnownSchema(MeasurementWriter<'a>),
-}
-
-impl std::fmt::Debug for MeasurementSampler<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MeasurementSampler")
-            .field("settings", &self.settings)
-            .field("schema_sample", &self.schema_sample)
-            .finish()
-    }
 }
 
 impl std::fmt::Debug for MeasurementWriter<'_> {
