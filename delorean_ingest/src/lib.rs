@@ -194,9 +194,13 @@ impl<'a> LineProtocolConverter<'a> {
 
             // TODO remove the to_string conversion
             let measurement_string = series.measurement.to_string();
-            let mut converter = self.converters.entry(measurement_string).or_insert(
-                MeasurementConverter::UnknownSchema(MeasurementSampler::new(self.settings.clone())),
-            );
+            let settings = &self.settings;
+            let mut converter = self
+                .converters
+                .entry(measurement_string)
+                .or_insert_with(|| {
+                    MeasurementConverter::UnknownSchema(MeasurementSampler::new(settings.clone()))
+                });
 
             // This currently dispatches row by row. It might help
             // group `ParsedLines` by measurement first.
@@ -340,7 +344,7 @@ impl<'a> MeasurementWriter<'a> {
 /// single measurement into a format suitable for writing
 ///
 /// # Panics
-/// 
+///
 /// The caller is responsible for ensuring that all `ParsedLines` come
 /// from the same measurement.  This function will panic if that is
 /// not true.

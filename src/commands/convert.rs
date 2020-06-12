@@ -88,7 +88,9 @@ impl DeloreanTableWriterSource for ParquetDirectoryWriterSource {
 }
 
 pub fn is_directory(p: &Path) -> bool {
-    fs::metadata(p).map(|metadata| metadata.is_dir()).unwrap_or(false)
+    fs::metadata(p)
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
 }
 
 pub fn convert(input_filename: &str, output_name: &str) -> Result<()> {
