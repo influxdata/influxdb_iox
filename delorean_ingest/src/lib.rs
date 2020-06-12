@@ -346,7 +346,7 @@ impl<'a> MeasurementWriter<'a> {
 /// than always making new ones
 fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packer> {
     let col_defs = schema.get_col_defs();
-    let mut packers: Vec<Packer> = col_defs
+    let mut packers: Vec<_> = col_defs
         .iter()
         .enumerate()
         .map(|(idx, col_def)| {
