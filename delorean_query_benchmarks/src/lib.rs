@@ -40,6 +40,50 @@ impl Column {
             nullable,
         }
     }
+
+    // Generates a value for a column based on the row number. The presence of cardinality means
+    // that this value represents some sort of identifier (like for a dictionary of tag value -> id)
+    fn generate_value(&self, batch: usize, record: usize) -> i64 {
+        let row_number = batch * record;
+
+        let value = match self.cardinality {
+            Some(c) => row_number % c,
+            None => row_number,
+        };
+
+        value as i64
+    }
+
+    // returns true if the next generated value should be null
+    fn next_value_should_be_null(&self, record: usize) -> bool {
+       self.nullable && record & 2 == 0
+    }
+}
+
+pub fn generate_wide_high_cardinality_data(batch_count: usize, record_count: usize) -> (Arc<Schema>, Vec<RecordBatch>) {
+    let mut columns = vec![];
+
+    for i in 1..=50_usize {
+        let cardinality = i.pow(5);
+
+        columns.push(Column::new_i64(
+            format!("i64_{}", i),
+            Some(cardinality),
+            false,
+        ));
+    }
+
+    for i in 1..=50 {
+        columns.push(Column::new_f64(
+            format!("f64_{}", i),
+            None,
+            false,
+        ))
+    }
+
+    columns.push(Column::new_i64("ts".to_string(), None, false));
+
+    generate_test_data(batch_count, record_count, columns)
 }
 
 pub fn generate_test_data(
@@ -47,68 +91,46 @@ pub fn generate_test_data(
     num_records: usize,
     columns: Vec<Column>,
 ) -> (Arc<Schema>, Vec<RecordBatch>) {
-    let mut fields: Vec<Field> = Vec::with_capacity(columns.len());
-
-    for c in &columns {
-        fields.push(Field::new(&c.name, c.data_type.clone(), c.nullable));
-    }
+    let fields: Vec<_> = columns.iter().map(|c| {
+        Field::new(&c.name, c.data_type.clone(), c.nullable)
+    }).collect();
 
     let schema = Arc::new(Schema::new(fields));
 
-    let mut data: Vec<RecordBatch> = Vec::with_capacity(num_batches);
-
-    for batch in 0..num_batches {
-        let mut arrow_columns: Vec<ArrayRef> = Vec::with_capacity(columns.len());
-
-        for c in &columns {
+    let data = (1..=num_batches).map(|batch| {
+        let arrow_columns: Vec<_> = columns.iter().map(|c| {
             let arrow_col: ArrayRef = match &c.data_type {
                 DataType::Float64 => {
                     let mut builder = Float64Builder::new(num_records);
-                    for rec in 0..num_records {
-                        if c.nullable && rec % 2 == 0 {
+                    for record in 1..=num_records {
+                        if c.next_value_should_be_null(record) {
                             builder.append_null().unwrap();
                         } else {
-                            builder.append_value(rec as f64).unwrap();
+                            builder.append_value(record as f64).unwrap();
                         }
                     }
                     Arc::new(builder.finish())
                 }
                 DataType::Int64 => {
                     let mut builder = Int64Builder::new(num_records);
-                    for rec in 0..num_records {
-                        if c.nullable && rec & 2 == 0 {
+                    for record in 1..=num_records {
+                        if c.next_value_should_be_null(record) {
                             builder.append_null().unwrap();
                         } else {
-                            match c.cardinality {
-                                Some(num) => {
-                                    let row_number = (batch + 1) * (rec + 1);
-                                    let value = row_number % num;
-                                    builder.append_value(value as i64).unwrap()
-                                }
-                                None => builder.append_value(rec as i64).unwrap(),
-                            }
+                            let value = c.generate_value(batch, record);
+                            builder.append_value(value).unwrap()
                         }
                     }
                     Arc::new(builder.finish())
                 }
                 DataType::Utf8 => {
                     let mut builder = StringBuilder::new(num_records);
-                    for rec in 0..num_records {
-                        if c.nullable && rec & 2 == 0 {
+                    for record in 1..=num_records {
+                        if c.next_value_should_be_null(record) {
                             builder.append_null().unwrap();
                         } else {
-                            match c.cardinality {
-                                Some(num) => {
-                                    let row_number = (batch + 1) * (rec + 1);
-                                    let value = row_number % num;
-                                    builder
-                                        .append_value(&format!("value for {}-{}", c.name, value))
-                                        .unwrap()
-                                }
-                                None => builder
-                                    .append_value(&format!("value for {}-{}", c.name, rec))
-                                    .unwrap(),
-                            }
+                            let value = c.generate_value(batch, record);
+                            builder.append_value(&format!("value for {}-{}", c.name, value)).unwrap()
                         }
                     }
                     Arc::new(builder.finish())
@@ -116,13 +138,11 @@ pub fn generate_test_data(
                 dt => panic!(format!("data type {:?} not implemented", dt)),
             };
 
-            arrow_columns.push(arrow_col)
-        }
+            arrow_col
+        }).collect();
 
-        let batch = RecordBatch::try_new(schema.clone(), arrow_columns).unwrap();
-
-        data.push(batch);
-    }
+        RecordBatch::try_new(schema.clone(), arrow_columns).unwrap()
+    }).collect();
 
     (schema, data)
 }
