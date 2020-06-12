@@ -41,7 +41,7 @@ pub struct LineProtocolConverter<'a> {
 
     // The converters for each measurement.
     // Key: measurement_name
-    converters: BTreeMap<String, MeasurementConverter<'a>>,
+    converters: BTreeMap<delorean_line_parser::EscapedStr<'a>, MeasurementConverter<'a>>,
 
     table_writer_source: Box<dyn DeloreanTableWriterSource>,
 }
@@ -187,11 +187,12 @@ impl<'a> LineProtocolConverter<'a> {
             let series = &line.series;
 
             // TODO remove the to_string conversion
-            let measurement_string = series.measurement.to_string();
+            //let measurement_string = series.measurement.to_string();
             let settings = &self.settings;
+            let series_measurement = series.measurement.clone();
             let mut converter = self
                 .converters
-                .entry(measurement_string)
+                .entry(series_measurement)
                 .or_insert_with(|| {
                     MeasurementConverter::UnknownSchema(MeasurementSampler::new(settings.clone()))
                 });
