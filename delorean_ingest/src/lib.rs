@@ -454,9 +454,9 @@ mod delorean_ingest_tests {
 
     use std::sync::{Arc, Mutex};
 
-    // Record what happens when the writer is created so we can
-    // inspect it as part of the tests. It uses string manipulation
-    // for quick test writing and easy debugging
+    /// Record what happens when the writer is created so we can
+    /// inspect it as part of the tests. It uses string manipulation
+    /// for quick test writing and easy debugging
     struct WriterLog {
         events: Vec<String>,
     }
@@ -466,29 +466,27 @@ mod delorean_ingest_tests {
         }
     }
 
-    // copies the events out of the shared log
-    fn get_events(log: &WriterLogPtr) -> Vec<String> {
+    /// copies the events out of the shared log
+    fn get_events(log: &Arc<Mutex<WriterLog>>) -> Vec<String> {
         let log_mut = log.lock().expect("got the lock for log");
         log_mut.events.to_vec()
     }
 
-    // Adds a enw event to the log
-    fn log_event(log: &WriterLogPtr, event: String) {
+    /// Adds a new event to the log
+    fn log_event(log: &Arc<Mutex<WriterLog>>, event: String) {
         let mut mut_log = log.lock().expect("get the log for writing");
         mut_log.events.push(event);
     }
 
-    // use a ptr and mutex so we can inspect the shared value of the
-    // log during tests. Could probably use an Rc instead, but Arc may
-    // be useful when implementing this multi threaded
-    type WriterLogPtr = Arc<Mutex<WriterLog>>;
-
     struct NoOpWriter {
-        log: WriterLogPtr,
+    /// use a ptr and mutex so we can inspect the shared value of the
+    /// log during tests. Could probably use an Rc instead, but Arc may
+    /// be useful when implementing this multi threaded
+        log: Arc<Mutex<WriterLog>>,
         measurement_name: String,
     }
     impl NoOpWriter {
-        fn new(log: WriterLogPtr, measurement_name: String) -> Self {
+        fn new(log: Arc<Mutex<WriterLog>>, measurement_name: String) -> Self {
             NoOpWriter {
                 log,
                 measurement_name,
@@ -535,13 +533,13 @@ mod delorean_ingest_tests {
         }
     }
 
-    // Constructs NoOpWriters
+    /// Constructs NoOpWriters
     struct NoOpWriterSource {
-        log: WriterLogPtr,
+        log: Arc<Mutex<WriterLog>>,
     }
 
     impl NoOpWriterSource {
-        fn new(log: WriterLogPtr) -> Box<Self> {
+        fn new(log: Arc<Mutex<WriterLog>>) -> Box<Self> {
             Box::new(NoOpWriterSource { log })
         }
     }
@@ -586,7 +584,7 @@ mod delorean_ingest_tests {
             cpu usage_system=67i 1590488773254430000
             cpu usage_system=68i 1590488773254440000"#,
         )
-        .into_iter();
+            .into_iter();
 
         let mut sampler = MeasurementSampler::new(get_sampler_settings());
         assert_eq!(sampler.sample_full(), false);
