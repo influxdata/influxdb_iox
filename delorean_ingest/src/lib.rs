@@ -22,8 +22,11 @@ pub struct ConversionSettings {
 }
 
 impl ConversionSettings {
+}
+
+impl Default for ConversionSettings {
     /// Reasonable defult settings
-    pub fn default() -> Self {
+    fn default() -> Self {
         ConversionSettings {
             sample_size: 5,
             measurement_write_buffer_size: 8000,
@@ -571,9 +574,10 @@ mod delorean_ingest_tests {
     }
 
     fn get_sampler_settings() -> ConversionSettings {
-        let mut settings = ConversionSettings::default();
-        settings.sample_size = 2;
-        settings
+        ConversionSettings{
+            sample_size : 2,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -613,7 +617,7 @@ mod delorean_ingest_tests {
     fn make_sampler_from_data(data: &str) -> MeasurementSampler<'_> {
         let parsed_lines = only_good_lines(data);
         let mut sampler = MeasurementSampler::new(get_sampler_settings());
-        for line in parsed_lines.into_iter() {
+        for line in parsed_lines {
             sampler.add_sample(line)
         }
         sampler
@@ -802,9 +806,10 @@ mod delorean_ingest_tests {
 
     // --- Tests for MeasurementWriter
     fn get_writer_settings() -> ConversionSettings {
-        let mut settings = ConversionSettings::default();
-        settings.measurement_write_buffer_size = 2;
-        settings
+        ConversionSettings {
+            measurement_write_buffer_size : 2,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -879,7 +884,7 @@ mod delorean_ingest_tests {
     fn parse_data_into_sampler() -> Result<MeasurementSampler<'static>, Error> {
         let mut sampler = MeasurementSampler::new(get_sampler_settings());
 
-        for line in only_good_lines(LP_DATA).into_iter() {
+        for line in only_good_lines(LP_DATA) {
             sampler.add_sample(line);
         }
         Ok(sampler)
@@ -1008,7 +1013,7 @@ mod delorean_ingest_tests {
         let mut converter =
             LineProtocolConverter::new(settings, NoOpWriterSource::new(log.clone()));
         converter
-            .convert(parsed_lines.into_iter())
+            .convert(parsed_lines)
             .expect("conversion ok")
             .finalize()
             .expect("finalize");
@@ -1036,14 +1041,17 @@ mod delorean_ingest_tests {
         );
         let log = Arc::new(Mutex::new(WriterLog::new()));
 
-        let mut settings = ConversionSettings::default();
-        settings.sample_size = 2;
-        settings.measurement_write_buffer_size = 3;
+        let settings = ConversionSettings {
+            sample_size: 2,
+            measurement_write_buffer_size : 3,
+            ..Default::default()
+        };
+
         let mut converter =
             LineProtocolConverter::new(settings, NoOpWriterSource::new(log.clone()));
 
         converter
-            .convert(parsed_lines.into_iter())
+            .convert(parsed_lines)
             .expect("conversion ok")
             .finalize()
             .expect("finalize");
