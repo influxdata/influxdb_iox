@@ -179,7 +179,7 @@ impl<'a> LineProtocolConverter<'a> {
     /// `finalize`.
     pub fn convert(
         &mut self,
-        lines: impl Iterator<Item = ParsedLine<'a>>,
+        lines: impl IntoIterator<Item = ParsedLine<'a>>,
     ) -> Result<&mut Self, Error> {
         for line in lines {
             let series = &line.series;
