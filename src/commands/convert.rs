@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-
 use log::{debug, info, warn};
 
 use delorean_ingest::{ConversionSettings, LineProtocolConverter};
