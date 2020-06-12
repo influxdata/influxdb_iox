@@ -182,7 +182,7 @@ impl<'a> LineProtocolConverter<'a> {
     }
 
     /// Converts `ParesdLine`s from any number of measurements and
-    /// write them out to `DeloreanTableWriters`. Note that data is
+    /// writes them out to `DeloreanTableWriters`. Note that data is
     /// internally buffered and may not be written until a call to
     /// `finalize`.
     pub fn convert(
