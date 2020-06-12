@@ -39,6 +39,7 @@ fn query_select_where(c: &mut Criterion) {
         "select min(i64_1), max(i64_1) from foo",
         "select min(i64_1), max(f64_1) from foo",
         "select count(i64_1) from foo where ts > 99",
+        "select count(i64_1) from foo where ts > 99 and i64_49 = 12345",
         "select count(i64_1) from foo where ts > 99 and ts < 120",
         "select count(i64_1) from foo where (ts > 99 and ts < 500) and i64_2 > 5 and i64_3 > 10 and i64_4 > 100",
     ].iter() {
