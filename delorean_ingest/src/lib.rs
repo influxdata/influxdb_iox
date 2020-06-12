@@ -212,7 +212,7 @@ impl<'a> LineProtocolConverter<'a> {
     /// Finalizes all work of this converter and calls `close()` on the
     /// underlying writer.
     pub fn finalize(&mut self) -> Result<&mut Self, Error> {
-        // If we havent' yet switched to writing mode, do so now
+        // If we haven't yet switched to writing mode, do so now
         for converter in self.converters.values_mut() {
             converter.prepare_for_writing(&mut *self.table_writer_source, true)?;
 
@@ -247,9 +247,7 @@ impl<'a> MeasurementSampler<'a> {
     /// Use the contents of self.schema_sample to deduce the Schema of
     /// `ParsedLine`s and return the deduced schema
     fn deduce_schema_from_sample(&mut self) -> Result<Schema, Error> {
-        if self.schema_sample.is_empty() {
-            return Err(Error::NeedsAtLeastOneLine {});
-        }
+       ensure!(!self.schema_sample.is_empty(), NeedsAtLeastOneLine);
 
         let mut builder = SchemaBuilder::new(&self.schema_sample[0].series.measurement);
 
@@ -319,7 +317,7 @@ impl<'a> MeasurementWriter<'a> {
     /// table writer in a single chunk
     fn flush_buffer(&mut self) -> Result<(), Error> {
         debug!("Flushing buffer {} rows", self.write_buffer.len());
-        let packers = pack_lines(&self.schema, self.write_buffer.as_slice());
+        let packers = pack_lines(&self.schema, &self.write_buffer);
         self.table_writer.write_batch(&packers).context(Writing)?;
         self.write_buffer.clear();
         Ok(())
