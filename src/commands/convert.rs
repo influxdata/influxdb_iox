@@ -114,10 +114,10 @@ pub fn convert(input_filename: &str, output_name: &str) -> Result<()> {
     });
 
     // setup writing
-    let writer_source: Box<dyn DeloreanTableWriterSource> = if is_directory(&output_path) {
-        info!("Writing to output directory {:?}", output_path);
+    let writer_source: Box<dyn DeloreanTableWriterSource> = if is_directory(&output_name) {
+        info!("Writing to output directory {:?}", output_name);
         Box::new(ParquetDirectoryWriterSource {
-            output_dir_path: output_path,
+            output_dir_path: PathBuf::from(output_name),
         })
     } else {
         info!("Writing to output file {}", output_name);
