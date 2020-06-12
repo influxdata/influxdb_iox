@@ -1043,7 +1043,6 @@ mod delorean_ingest_tests {
         let settings = ConversionSettings {
             sample_size: 2,
             measurement_write_buffer_size: 3,
-            ..Default::default()
         };
 
         let mut converter =
