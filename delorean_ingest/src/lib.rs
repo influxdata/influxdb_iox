@@ -222,10 +222,8 @@ impl<'a> LineProtocolConverter<'a> {
         Ok(self)
     }
 
-    /// Finalizes all work of this converter and closes/flush the
-    /// underlying writer. A finalized converter can not be
-    /// used. After `finalize()` is called, any subsequent calls to
-    /// `convert` will fail
+    /// Finalizes all work of this converter and calls `close()` on the
+    /// underlying writer.
     pub fn finalize(&mut self) -> Result<&mut Self, Error> {
         // If we havent' yet switched to writing mode, do so now
         for converter in self.converters.values_mut() {
