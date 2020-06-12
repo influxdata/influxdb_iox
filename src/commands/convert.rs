@@ -60,7 +60,7 @@ struct ParquetDirectoryWriterSource {
 }
 
 impl DeloreanTableWriterSource for ParquetDirectoryWriterSource {
-    /// Returns a `DeloreanTableWriter suitable for writing data from packers.
+    /// Returns a `DeloreanTableWriter` suitable for writing data from packers.
     /// named in the template of <measurement.parquet>
     fn next_writer(&mut self, schema: &Schema) -> Result<Box<dyn DeloreanTableWriter>, TableError> {
         let mut output_file_path: PathBuf = self.output_dir_path.clone();
@@ -88,10 +88,7 @@ impl DeloreanTableWriterSource for ParquetDirectoryWriterSource {
 }
 
 pub fn is_directory(p: &Path) -> bool {
-    match fs::metadata(p).ok() {
-        Some(metadata) => metadata.is_dir(),
-        None => false,
-    }
+    fs::metadata(p).map(|metadata| metadata.is_dir()).unwrap_or(false)
 }
 
 pub fn convert(input_filename: &str, output_name: &str) -> Result<()> {

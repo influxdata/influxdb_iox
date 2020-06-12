@@ -94,7 +94,7 @@ enum MeasurementConverter<'a> {
 
 impl std::fmt::Debug for MeasurementSampler<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LineProtocolConverter")
+        f.debug_struct("MeasurementSampler")
             .field("settings", &self.settings)
             .field("schema_sample", &self.schema_sample)
             .finish()
@@ -103,7 +103,7 @@ impl std::fmt::Debug for MeasurementSampler<'_> {
 
 impl std::fmt::Debug for MeasurementWriter<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LineProtocolConverter")
+        f.debug_struct("MeasurementWriter")
             .field("settings", &self.settings)
             .field("schema", &self.schema)
             .field("table_writer", &"DYNAMIC")
@@ -117,7 +117,7 @@ impl std::fmt::Debug for LineProtocolConverter<'_> {
         f.debug_struct("LineProtocolConverter")
             .field("settings", &self.settings)
             .field("converters", &self.converters)
-            .field("table_writer", &"DYNAMIC")
+            .field("table_writer_source", &"DYNAMIC")
             .finish()
     }
 }
@@ -150,12 +150,8 @@ impl<'a> MeasurementConverter<'a> {
                     let mut writer =
                         MeasurementWriter::new(sampler.settings.clone(), schema, table_writer);
 
-                    // steal out the schema sample by swapping it with an empty vector
-                    let mut taken_sample: Vec<delorean_line_parser::ParsedLine<'_>> = Vec::new();
-                    std::mem::swap(&mut sampler.schema_sample, &mut taken_sample);
-
                     debug!("Completed change to writing mode");
-                    for line in taken_sample.into_iter() {
+                    for line in sampler.schema_sample.drain(..) {
                         writer.buffer_line(line)?;
                     }
                     *self = MeasurementConverter::KnownSchema(writer);
@@ -198,14 +194,9 @@ impl<'a> LineProtocolConverter<'a> {
 
             // TODO remove the to_string conversion
             let measurement_string = series.measurement.to_string();
-            if !self.converters.contains_key(&measurement_string) {
-                let key = series.measurement.to_string();
-                let val = MeasurementConverter::UnknownSchema(MeasurementSampler::new(
-                    self.settings.clone(),
-                ));
-                self.converters.insert(key, val);
-            }
-            let mut converter = self.converters.get_mut(&measurement_string).unwrap();
+            let mut converter = self.converters.entry(measurement_string).or_insert(
+                MeasurementConverter::UnknownSchema(MeasurementSampler::new(self.settings.clone())),
+            );
 
             // This currently dispatches row by row. It might help
             // group `ParsedLines` by measurement first.
@@ -315,7 +306,7 @@ impl<'a> MeasurementWriter<'a> {
         }
     }
 
-    pub fn buffer_full(&self) -> bool {
+    fn buffer_full(&self) -> bool {
         self.write_buffer.len() >= self.settings.measurement_write_buffer_size
     }
 
@@ -348,8 +339,10 @@ impl<'a> MeasurementWriter<'a> {
 /// Internal implementation: packs the `ParsedLine` structures for a
 /// single measurement into a format suitable for writing
 ///
+/// # Panics
+/// 
 /// The caller is responsible for ensuring that all `ParsedLines` come
-/// from the same measurement.  This function will assert if that is
+/// from the same measurement.  This function will panic if that is
 /// not true.
 ///
 ///
@@ -367,7 +360,7 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packer> {
         .collect();
 
     // map col_name -> Packer;
-    let mut packer_map: BTreeMap<&String, &mut Packer> = col_defs
+    let mut packer_map: BTreeMap<_, _> = col_defs
         .iter()
         .map(|x| &x.name)
         .zip(packers.iter_mut())
@@ -623,7 +616,7 @@ mod delorean_ingest_tests {
     }
 
     /// Creates a sampler and feeds all the lines found in data into it
-    fn make_sampler_from_data(data: &'_ str) -> MeasurementSampler<'_> {
+    fn make_sampler_from_data(data: &str) -> MeasurementSampler<'_> {
         let parsed_lines = only_good_lines(data);
         let mut sampler = MeasurementSampler::new(get_sampler_settings());
         for line in parsed_lines.into_iter() {
