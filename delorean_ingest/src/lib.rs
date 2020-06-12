@@ -247,7 +247,9 @@ impl<'a> MeasurementSampler<'a> {
     /// Use the contents of self.schema_sample to deduce the Schema of
     /// `ParsedLine`s and return the deduced schema
     fn deduce_schema_from_sample(&mut self) -> Result<Schema, Error> {
-       ensure!(!self.schema_sample.is_empty(), NeedsAtLeastOneLine);
+       if self.schema_sample.is_empty() {
+            return Err(Error::NeedsAtLeastOneLine {});
+        }
 
         let mut builder = SchemaBuilder::new(&self.schema_sample[0].series.measurement);
 
