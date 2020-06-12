@@ -128,7 +128,7 @@ impl<'a> MeasurementConverter<'a> {
             MeasurementConverter::UnknownSchema(sampler) => {
                 if force || sampler.sample_full() {
                     debug!(
-                        "Preparing for write, dededucing schema (sample_full={}, force={})",
+                        "Preparing for write, deducing schema (sample_full={}, force={})",
                         sampler.sample_full(),
                         force
                     );
