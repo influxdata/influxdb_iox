@@ -21,8 +21,7 @@ pub struct ConversionSettings {
     measurement_write_buffer_size: usize,
 }
 
-impl ConversionSettings {
-}
+impl ConversionSettings {}
 
 impl Default for ConversionSettings {
     /// Reasonable defult settings
@@ -207,7 +206,7 @@ impl<'a> LineProtocolConverter<'a> {
                     writer.buffer_line(line)?;
                 }
             }
-            converter.prepare_for_writing(&mut *self.table_writer_source, false)?;
+            converter.prepare_for_writing(&mut self.table_writer_source, false)?;
         }
         Ok(self)
     }
@@ -217,7 +216,7 @@ impl<'a> LineProtocolConverter<'a> {
     pub fn finalize(&mut self) -> Result<&mut Self, Error> {
         // If we haven't yet switched to writing mode, do so now
         for converter in self.converters.values_mut() {
-            converter.prepare_for_writing(&mut *self.table_writer_source, true)?;
+            converter.prepare_for_writing(&mut self.table_writer_source, true)?;
 
             match converter {
                 MeasurementConverter::UnknownSchema(_) => {
@@ -250,7 +249,7 @@ impl<'a> MeasurementSampler<'a> {
     /// Use the contents of self.schema_sample to deduce the Schema of
     /// `ParsedLine`s and return the deduced schema
     fn deduce_schema_from_sample(&mut self) -> Result<Schema, Error> {
-       if self.schema_sample.is_empty() {
+        if self.schema_sample.is_empty() {
             return Err(Error::NeedsAtLeastOneLine {});
         }
 
@@ -482,9 +481,9 @@ mod delorean_ingest_tests {
     }
 
     struct NoOpWriter {
-    /// use a ptr and mutex so we can inspect the shared value of the
-    /// log during tests. Could probably use an Rc instead, but Arc may
-    /// be useful when implementing this multi threaded
+        /// use a ptr and mutex so we can inspect the shared value of the
+        /// log during tests. Could probably use an Rc instead, but Arc may
+        /// be useful when implementing this multi threaded
         log: Arc<Mutex<WriterLog>>,
         measurement_name: String,
     }
@@ -574,8 +573,8 @@ mod delorean_ingest_tests {
     }
 
     fn get_sampler_settings() -> ConversionSettings {
-        ConversionSettings{
-            sample_size : 2,
+        ConversionSettings {
+            sample_size: 2,
             ..Default::default()
         }
     }
@@ -588,7 +587,7 @@ mod delorean_ingest_tests {
             cpu usage_system=67i 1590488773254430000
             cpu usage_system=68i 1590488773254440000"#,
         )
-            .into_iter();
+        .into_iter();
 
         let mut sampler = MeasurementSampler::new(get_sampler_settings());
         assert_eq!(sampler.sample_full(), false);
@@ -807,7 +806,7 @@ mod delorean_ingest_tests {
     // --- Tests for MeasurementWriter
     fn get_writer_settings() -> ConversionSettings {
         ConversionSettings {
-            measurement_write_buffer_size : 2,
+            measurement_write_buffer_size: 2,
             ..Default::default()
         }
     }
@@ -1043,7 +1042,7 @@ mod delorean_ingest_tests {
 
         let settings = ConversionSettings {
             sample_size: 2,
-            measurement_write_buffer_size : 3,
+            measurement_write_buffer_size: 3,
             ..Default::default()
         };
 

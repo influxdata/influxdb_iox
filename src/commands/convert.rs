@@ -1,11 +1,11 @@
-use log::{debug, info, warn};
-use std::fs;
-use std::path::{Path, PathBuf};
 use delorean_ingest::{ConversionSettings, LineProtocolConverter};
 use delorean_line_parser::parse_lines;
 use delorean_parquet::writer::DeloreanParquetTableWriter;
 use delorean_table::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError};
 use delorean_table_schema::Schema;
+use log::{debug, info, warn};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use crate::commands::error::{Error, Result};
 
