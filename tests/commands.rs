@@ -1,5 +1,6 @@
 use std::fs;
 use std::fs::File;
+use std::io::{BufReader, Read};
 use std::path::Path;
 
 use assert_cmd::assert::Assert;
@@ -9,8 +10,6 @@ use predicates::prelude::*;
 
 /// Validates that p is a valid parquet file
 fn validate_parquet_file(p: &Path) {
-    use std::io::{BufReader, Read};
-
     // Verify file extension is parquet
     let file_extension = p
         .extension()
@@ -120,7 +119,6 @@ fn convert_multiple_measurements() {
         .map(|dir_ent| {
             let dir_ent = dir_ent.expect("error reading dir entry");
             validate_parquet_file(&dir_ent.path());
-
             dir_ent.file_name().to_string_lossy().to_string()
         })
         .collect();
