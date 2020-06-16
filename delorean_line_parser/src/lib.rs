@@ -28,6 +28,7 @@ use std::{
     collections::{btree_map::Entry, BTreeMap},
     fmt,
 };
+use log::debug;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -312,7 +313,7 @@ pub fn parse_lines(input: &str) -> impl Iterator<Item = Result<ParsedLine<'_>>> 
             return None;
         }
 
-        match parse_line(i) {
+        let res = match parse_line(i) {
             Ok((remaining, line)) => {
                 // should have parsed the whole input line, if any
                 // data remains it is a parse error for this line
@@ -328,7 +329,14 @@ pub fn parse_lines(input: &str) -> impl Iterator<Item = Result<ParsedLine<'_>>> 
             }
             Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => Some(Err(e)),
             Err(nom::Err::Incomplete(_)) => unreachable!("Cannot have incomplete data"), // Only streaming parsers have this
+        };
+
+        if let Some(r) = &res {
+            if r.is_err() {
+                debug!("Error parsing line: '{}'. Error was {:?}", line, r);
+            }
         }
+        res
     })
 }
 
