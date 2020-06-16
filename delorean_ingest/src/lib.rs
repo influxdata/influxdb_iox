@@ -278,6 +278,7 @@ impl<'a> MeasurementSampler<'a> {
                     FieldValue::F64(_) => DataType::Float,
                     FieldValue::I64(_) => DataType::Integer,
                     FieldValue::String(_) => DataType::String,
+                    FieldValue::Boolean(_) => DataType::Boolean,
                 };
                 // FIXME: avoid the copy!
                 builder = builder.field(&field_name.to_string(), field_type);
@@ -410,6 +411,7 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packer> {
                     FieldValue::F64(f) => packer.pack_f64(Some(f)),
                     FieldValue::I64(i) => packer.pack_i64(Some(i)),
                     FieldValue::String(ref s) => packer.pack_str(Some(&s.to_string())),
+                    FieldValue::Boolean(b) => packer.pack_bool(Some(b)),
                 }
             } else {
                 panic!(
@@ -872,22 +874,22 @@ mod delorean_ingest_tests {
     // ----- Tests for pack_data -----
 
     // given protocol data for each datatype, ensure it is packed
-    // as expected.  NOTE the line protocol parser only handles
-    // Float and Int field values at the time of this writing so I
-    // can't test bool and string here.
+    // as expected.
     //
-    // TODO: add coverage for bool fields when that is available
+    // Note this table has a row with a tag and each field type and
+    // then a row the tag, fields and timestamps each hold a null
     static LP_DATA: &str = r#"
-               cpu,tag1=A int_field=64i,float_field=100.0,str_field="foo1" 1590488773254420000
-               cpu,tag1=B int_field=65i,float_field=101.0,str_field="foo2" 1590488773254430000
-               cpu        int_field=66i,float_field=102.0,str_field="foo3" 1590488773254440000
-               cpu,tag1=C               float_field=103.0,str_field="foo4" 1590488773254450000
-               cpu,tag1=D int_field=67i,str_field="foo5"                   1590488773254460000
-               cpu,tag1=E int_field=68i,float_field=104.0                  1590488773254470000
-               cpu,tag1=F int_field=69i,float_field=105.0,str_field="foo6"
-               cpu,tag1=G int_field=70i,float_field=106.0,str_field="foo7" 1590488773254480000
+               cpu,tag1=A int_field=64i,float_field=100.0,str_field="foo1",bool_field=t 1590488773254420000
+               cpu,tag1=B int_field=65i,float_field=101.0,str_field="foo2",bool_field=t 1590488773254430000
+               cpu        int_field=66i,float_field=102.0,str_field="foo3",bool_field=t 1590488773254440000
+               cpu,tag1=C               float_field=103.0,str_field="foo4",bool_field=t 1590488773254450000
+               cpu,tag1=D int_field=67i,str_field="foo5",bool_field=t                   1590488773254460000
+               cpu,tag1=E int_field=68i,float_field=104.0,bool_field=t                  1590488773254470000
+               cpu,tag1=F int_field=69i,float_field=105.0,str_field="foo6"              1590488773254480000
+               cpu,tag1=G int_field=70i,float_field=106.0,str_field="foo7",bool_field=t
+               cpu,tag1=H int_field=71i,float_field=107.0,str_field="foo8",bool_field=t 1590488773254490000
              "#;
-    static EXPECTED_NUM_LINES: usize = 8;
+    static EXPECTED_NUM_LINES: usize = 9;
 
     fn parse_data_into_sampler() -> Result<MeasurementSampler<'static>, Error> {
         let mut sampler = MeasurementSampler::new(get_sampler_settings());
@@ -905,7 +907,7 @@ mod delorean_ingest_tests {
         // Then the correct schema is extracted
         let cols = schema.get_col_defs();
         println!("Converted to {:#?}", cols);
-        assert_eq!(cols.len(), 5);
+        assert_eq!(cols.len(), 6);
         assert_eq!(cols[0], ColumnDefinition::new("tag1", 0, DataType::String));
         assert_eq!(
             cols[1],
@@ -918,6 +920,10 @@ mod delorean_ingest_tests {
         assert_eq!(
             cols[3],
             ColumnDefinition::new("str_field", 3, DataType::String)
+        );
+        assert_eq!(
+            cols[4],
+            ColumnDefinition::new("bool_field", 4, DataType::Boolean)
         );
 
         Ok(())
@@ -938,6 +944,11 @@ mod delorean_ingest_tests {
         packer.as_float_packer().values[idx]
     }
 
+    // gets the packer's value as an int
+    fn get_bool_val(packer: &Packer, idx: usize) -> bool {
+        packer.as_bool_packer().values[idx]
+    }
+
     #[test]
     fn pack_data_value() -> Result<(), Error> {
         let mut sampler = parse_data_into_sampler()?;
@@ -945,8 +956,8 @@ mod delorean_ingest_tests {
 
         let packers = pack_lines(&schema, &sampler.schema_sample);
 
-        // 5 columns so 5 packers
-        assert_eq!(packers.len(), 5);
+        // 6 columns so 6 packers
+        assert_eq!(packers.len(), 6);
 
         // all packers should have packed all lines
         for p in &packers {
@@ -963,6 +974,7 @@ mod delorean_ingest_tests {
         assert_eq!(get_string_val(tag_packer, 5), "E");
         assert_eq!(get_string_val(tag_packer, 6), "F");
         assert_eq!(get_string_val(tag_packer, 7), "G");
+        assert_eq!(get_string_val(tag_packer, 8), "H");
 
         // int_field values
         let int_field_packer = &packers[1];
@@ -974,6 +986,7 @@ mod delorean_ingest_tests {
         assert_eq!(get_int_val(int_field_packer, 5), 68);
         assert_eq!(get_int_val(int_field_packer, 6), 69);
         assert_eq!(get_int_val(int_field_packer, 7), 70);
+        assert_eq!(get_int_val(int_field_packer, 8), 71);
 
         // float_field values
         let float_field_packer = &packers[2];
@@ -1006,6 +1019,10 @@ mod delorean_ingest_tests {
             get_float_val(float_field_packer, 7),
             106.0
         ));
+        assert!(approximately_equal(
+            get_float_val(float_field_packer, 8),
+            107.0
+        ));
 
         // str_field values
         let str_field_packer = &packers[3];
@@ -1017,17 +1034,31 @@ mod delorean_ingest_tests {
         assert!(str_field_packer.is_null(5));
         assert_eq!(get_string_val(str_field_packer, 6), "foo6");
         assert_eq!(get_string_val(str_field_packer, 7), "foo7");
+        assert_eq!(get_string_val(str_field_packer, 8), "foo8");
+
+        // bool_field values
+        let bool_field_packer = &packers[4];
+        assert_eq!(get_bool_val(bool_field_packer, 0), true);
+        assert_eq!(get_bool_val(bool_field_packer, 1), true);
+        assert_eq!(get_bool_val(bool_field_packer, 2), true);
+        assert_eq!(get_bool_val(bool_field_packer, 3), true);
+        assert_eq!(get_bool_val(bool_field_packer, 4), true);
+        assert_eq!(get_bool_val(bool_field_packer, 5), true);
+        assert!(bool_field_packer.is_null(6));
+        assert_eq!(get_bool_val(bool_field_packer, 7), true);
+        assert_eq!(get_bool_val(bool_field_packer, 8), true);
 
         // timestamp values (NB The timestamps are truncated to Microseconds)
-        let timestamp_packer = &packers[4];
+        let timestamp_packer = &packers[5];
         assert_eq!(get_int_val(timestamp_packer, 0), 1_590_488_773_254_420);
         assert_eq!(get_int_val(timestamp_packer, 1), 1_590_488_773_254_430);
         assert_eq!(get_int_val(timestamp_packer, 2), 1_590_488_773_254_440);
         assert_eq!(get_int_val(timestamp_packer, 3), 1_590_488_773_254_450);
         assert_eq!(get_int_val(timestamp_packer, 4), 1_590_488_773_254_460);
         assert_eq!(get_int_val(timestamp_packer, 5), 1_590_488_773_254_470);
-        assert!(timestamp_packer.is_null(6));
-        assert_eq!(get_int_val(timestamp_packer, 7), 1_590_488_773_254_480);
+        assert_eq!(get_int_val(timestamp_packer, 6), 1_590_488_773_254_480);
+        assert!(timestamp_packer.is_null(7));
+        assert_eq!(get_int_val(timestamp_packer, 8), 1_590_488_773_254_490);
 
         Ok(())
     }
