@@ -65,7 +65,7 @@ pub enum Error {
         "Could not parse entire line. Found trailing content: '{}'",
         trailing_content
     ))]
-    CanNotParseEntireLine { trailing_content: String },
+    CannotParseEntireLine { trailing_content: String },
 
     // TODO: Replace this with specific failures.
     #[snafu(display(r#"A generic parsing error occurred: {:?}"#, kind))]
@@ -319,7 +319,7 @@ pub fn parse_lines(input: &str) -> impl Iterator<Item = Result<ParsedLine<'_>>> 
                 // corresponding Go logic:
                 // https://github.com/influxdata/influxdb/blob/217eddc87e14a79b01d0c22994fc139f530094a2/models/points_parser.go#L259-L266
                 if !remaining.is_empty() {
-                    Some(Err(Error::CanNotParseEntireLine {
+                    Some(Err(Error::CannotParseEntireLine {
                         trailing_content: String::from(remaining),
                     }))
                 } else {
@@ -1522,7 +1522,7 @@ her"#,
         assert!(vals[0].is_err());
         assert_eq!(
             format!("{:?}", &vals[0]),
-            "Err(CanNotParseEntireLine { trailing_content: \".22,jkl=4\" })"
+            "Err(CannotParseEntireLine { trailing_content: \".22,jkl=4\" })"
         );
 
         assert!(vals[1].is_ok());
