@@ -420,7 +420,12 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packer> {
         }
 
         if let Some(packer) = packer_map.get_mut(timestamp_col_name) {
-            packer.pack_i64(line.timestamp);
+            // The Rust implementation of the parquet writer doesn't support
+            // Nanosecond precision for timestamps yet, so we downconvert them here
+            // to microseconds
+            let timestamp_micros = line.timestamp.map(|timestamp_nanos| timestamp_nanos / 1000);
+
+            packer.pack_i64(timestamp_micros);
         } else {
             panic!("No {} field present in schema...", timestamp_col_name);
         }
@@ -1013,16 +1018,16 @@ mod delorean_ingest_tests {
         assert_eq!(get_string_val(str_field_packer, 6), "foo6");
         assert_eq!(get_string_val(str_field_packer, 7), "foo7");
 
-        // timestamp values
+        // timestamp values (NB The timestamps are truncated to Microseconds)
         let timestamp_packer = &packers[4];
-        assert_eq!(get_int_val(timestamp_packer, 0), 1_590_488_773_254_420_000);
-        assert_eq!(get_int_val(timestamp_packer, 1), 1_590_488_773_254_430_000);
-        assert_eq!(get_int_val(timestamp_packer, 2), 1_590_488_773_254_440_000);
-        assert_eq!(get_int_val(timestamp_packer, 3), 1_590_488_773_254_450_000);
-        assert_eq!(get_int_val(timestamp_packer, 4), 1_590_488_773_254_460_000);
-        assert_eq!(get_int_val(timestamp_packer, 5), 1_590_488_773_254_470_000);
+        assert_eq!(get_int_val(timestamp_packer, 0), 1_590_488_773_254_420);
+        assert_eq!(get_int_val(timestamp_packer, 1), 1_590_488_773_254_430);
+        assert_eq!(get_int_val(timestamp_packer, 2), 1_590_488_773_254_440);
+        assert_eq!(get_int_val(timestamp_packer, 3), 1_590_488_773_254_450);
+        assert_eq!(get_int_val(timestamp_packer, 4), 1_590_488_773_254_460);
+        assert_eq!(get_int_val(timestamp_packer, 5), 1_590_488_773_254_470);
         assert!(timestamp_packer.is_null(6));
-        assert_eq!(get_int_val(timestamp_packer, 7), 1_590_488_773_254_480_000);
+        assert_eq!(get_int_val(timestamp_packer, 7), 1_590_488_773_254_480);
 
         Ok(())
     }
