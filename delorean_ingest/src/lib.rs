@@ -941,7 +941,7 @@ mod delorean_ingest_tests {
 
         let packers = pack_lines(&schema, &sampler.schema_sample);
 
-        // 4 columns so 4 packers
+        // 5 columns so 5 packers
         assert_eq!(packers.len(), 5);
 
         // all packers should have packed all lines
