@@ -569,7 +569,6 @@ mod delorean_ingest_tests {
     fn only_good_lines(data: &str) -> Vec<ParsedLine<'_>> {
         delorean_line_parser::parse_lines(data)
             .filter_map(|r| {
-                println!("parse result: {:?}", r);
                 assert!(r.is_ok());
                 r.ok()
             })

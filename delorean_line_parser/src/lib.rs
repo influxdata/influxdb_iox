@@ -334,10 +334,8 @@ pub fn parse_lines(input: &str) -> impl Iterator<Item = Result<ParsedLine<'_>>> 
             Err(nom::Err::Incomplete(_)) => unreachable!("Cannot have incomplete data"), // Only streaming parsers have this
         };
 
-        if let Some(r) = &res {
-            if r.is_err() {
-                debug!("Error parsing line: '{}'. Error was {:?}", line, r);
-            }
+        if let Some(Err(r)) = &res {
+            debug!("Error parsing line: '{}'. Error was {:?}", line, r);
         }
         res
     })
