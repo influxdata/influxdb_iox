@@ -17,7 +17,7 @@ use crate::{
 /// be read from `input`, with a total size of `input_size` byes
 ///
 /// Returns a Vec of ColumnStats, one for each column in the input
-pub fn get_col_stats<R: 'static>(input: R, input_size: u64) -> Result<Vec<ColumnStats>>
+pub fn col_stats<R: 'static>(input: R, input_size: u64) -> Result<Vec<ColumnStats>>
 where
     R: Read + Seek,
 {

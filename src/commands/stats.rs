@@ -7,7 +7,7 @@ use crate::{
     commands::input::{FileType, InputReader},
 };
 
-use delorean_parquet::stats::get_col_stats;
+use delorean_parquet::stats::col_stats;
 
 /// Print statistics about the file name in input_filename to stdout
 pub fn stats(input_filename: &str) -> Result<()> {
@@ -30,7 +30,7 @@ pub fn stats(input_filename: &str) -> Result<()> {
             let input_len = input_reader.len();
             (
                 input_len,
-                get_col_stats(input_reader, input_len)
+                col_stats(input_reader, input_len)
                     .map_err(|e| Error::UnableDumpToParquetMetadata { source: e })?,
             )
         }
