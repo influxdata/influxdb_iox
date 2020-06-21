@@ -16,7 +16,7 @@ Thus, we choose to use a consistent set of idioms throughout our code so that it
 pub enum Error {
     #[snafu(display(r#"Conversion needs at least one line of data"#))]
     NeedsAtLeastOneLine,
-    ...
+    // ...
 }
 ```
 
@@ -24,7 +24,7 @@ pub enum Error {
 ```rust
 pub enum Error {
     NeedsAtLeastOneLine,
-    ...
+    // ...
 ```
 
 
@@ -114,7 +114,7 @@ input_reader
     .read_to_string(&mut buf)
     .context(UnableToReadInput {
                 name: input_filename
-    });
+    })?;
 ```
 
 *Bad*
@@ -125,10 +125,10 @@ input_reader
     .map_err(|e| Error::UnableToReadInput {
                 name: String::from(input_filename),
                 source: e,
-    });
+    })?;
 ```
 
-### Each error in a module should have a distinct Error struct
+### Each error in a module should have a distinct Error enum
 
 Specific error types are preferred over  a generic error with a `message` or `kind` field.
 
