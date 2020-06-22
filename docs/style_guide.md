@@ -126,7 +126,7 @@ return Err(Error::NotImplemented {
 input_reader
     .read_to_string(&mut buf)
     .context(UnableToReadInput {
-        name: input_filename,
+        input_filename,
     })?;
 ```
 
