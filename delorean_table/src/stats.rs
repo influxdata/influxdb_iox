@@ -24,15 +24,12 @@ pub struct ColumnStats {
 /// use delorean_table_schema::DataType;
 /// use delorean_table::stats::ColumnStatsBuilder;
 ///
-/// let mut builder = ColumnStatsBuilder::new(String::from("My Column"), 3, DataType::Float);
-///
-/// builder
+/// let stats = ColumnStatsBuilder::new("My Column", 3, DataType::Float)
 ///    .compression("GZIP")
 ///    .add_rows(3)
 ///    .compression("SNAPPY")
-///    .add_rows(7);
-///
-/// let stats = builder.build();
+///    .add_rows(7)
+///    .build();
 ///
 /// assert_eq!(stats.compression_description, r#"{"GZIP", "SNAPPY"}"#);
 /// assert_eq!(stats.num_rows, 10);
@@ -94,9 +91,9 @@ impl ColumnStatsBuilder {
     }
 
     /// Create the resulting ColumnStats
-    pub fn build(self) -> ColumnStats {
+    pub fn build(&self) -> ColumnStats {
         ColumnStats {
-            column_name: self.column_name,
+            column_name: self.column_name.clone(),
             column_index: self.column_index,
             compression_description: format!("{:?}", self.compression_descriptions),
             num_rows: self.num_rows,
@@ -127,9 +124,8 @@ mod test {
 
     #[test]
     fn stats_builder_create() {
-        let builder = ColumnStatsBuilder::new("My Column", 7, DataType::Integer);
+        let stats = ColumnStatsBuilder::new("My Column", 7, DataType::Integer).build();
 
-        let stats = builder.build();
         assert_eq!(
             stats,
             ColumnStats {
@@ -143,14 +139,12 @@ mod test {
 
     #[test]
     fn stats_builder_compression() {
-        let mut builder = ColumnStatsBuilder::new("My Column", 3, DataType::Float);
-
-        builder
+        let stats = ColumnStatsBuilder::new("My Column", 3, DataType::Float)
             .compression("GZIP")
             .compression("DEFLATE")
-            .compression("GZIP");
+            .compression("GZIP")
+            .build();
 
-        let stats = builder.build();
         assert_eq!(
             stats,
             ColumnStats {
@@ -164,11 +158,11 @@ mod test {
 
     #[test]
     fn stats_builder_add_rows() {
-        let mut builder = ColumnStatsBuilder::new("My Column", 3, DataType::Float);
+        let stats = ColumnStatsBuilder::new("My Column", 3, DataType::Float)
+            .add_rows(7)
+            .add_rows(3)
+            .build();
 
-        builder.add_rows(7).add_rows(3);
-
-        let stats = builder.build();
         assert_eq!(
             stats,
             ColumnStats {
@@ -182,11 +176,11 @@ mod test {
 
     #[test]
     fn stats_builder_add_compressed_bytes() {
-        let mut builder = ColumnStatsBuilder::new("My Column", 3, DataType::Float);
+        let stats = ColumnStatsBuilder::new("My Column", 3, DataType::Float)
+            .add_compressed_bytes(7)
+            .add_compressed_bytes(3)
+            .build();
 
-        builder.add_compressed_bytes(7).add_compressed_bytes(3);
-
-        let stats = builder.build();
         assert_eq!(
             stats,
             ColumnStats {
@@ -200,11 +194,11 @@ mod test {
 
     #[test]
     fn stats_builder_add_uncompressed_bytes() {
-        let mut builder = ColumnStatsBuilder::new("My Column", 3, DataType::Float);
+        let stats = ColumnStatsBuilder::new("My Column", 3, DataType::Float)
+            .add_uncompressed_bytes(7)
+            .add_uncompressed_bytes(3)
+            .build();
 
-        builder.add_uncompressed_bytes(7).add_uncompressed_bytes(3);
-
-        let stats = builder.build();
         assert_eq!(
             stats,
             ColumnStats {
