@@ -4,6 +4,7 @@ use std::convert::TryInto;
 use std::io::{Read, Seek};
 
 use log::debug;
+use parquet::basic::{Compression, Encoding};
 use parquet::file::reader::{FileReader, SerializedFileReader};
 
 use delorean_table::stats::{ColumnStats, ColumnStatsBuilder};
@@ -47,14 +48,12 @@ where
                 ColumnStatsBuilder::new(col_path.string(), cc_idx, data_type)
             });
 
-            let compression_string = format!(
-                "{:?}; {:?}",
-                cc_metadata.encodings(),
-                cc_metadata.compression()
-            );
-
             builder
-                .compression(&compression_string)
+                .compression(&format!(
+                    "Enc: {}, Comp: {}",
+                    encoding_display(&cc_metadata.encodings()),
+                    compression_display(&cc_metadata.compression()),
+                ))
                 .add_rows(
                     cc_metadata
                         .num_values()
@@ -86,4 +85,57 @@ where
     v.sort_by_key(|stats| stats.column_index);
 
     Ok(v)
+}
+
+/// Create a more user friendly display of the encodings
+fn encoding_display(encodings: &Vec<Encoding>) -> String {
+    if encodings
+        .iter()
+        .find(|&&e| e == Encoding::RLE_DICTIONARY)
+        .is_some()
+    {
+        // parquet represents "dictionary" encoding as [PLAIN,
+        // RLE_DICTIONARY, RLE] , which is somewhat confusing -- it means
+        // to point out that the dictionary page uses plain encoding,
+        // whereas the data page uses RLE encoding.
+        "Dictionary".into()
+    } else {
+        return format!("{:?}", encodings);
+    }
+}
+
+/// Create a user friendly display of the encodings
+fn compression_display(compression: &Compression) -> String {
+    return format!("{}", compression);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_encoding_display() {
+        assert_eq!(&encoding_display(&vec![Encoding::PLAIN]), "[PLAIN]");
+        assert_eq!(
+            &encoding_display(&vec![Encoding::PLAIN, Encoding::RLE]),
+            "[PLAIN, RLE]"
+        );
+        assert_eq!(
+            &encoding_display(&vec![
+                Encoding::PLAIN,
+                Encoding::RLE,
+                Encoding::RLE_DICTIONARY
+            ]),
+            "Dictionary"
+        );
+        assert_eq!(
+            &encoding_display(&vec![Encoding::DELTA_BYTE_ARRAY, Encoding::RLE_DICTIONARY]),
+            "Dictionary"
+        );
+    }
+
+    #[test]
+    fn test_compression_display() {
+        assert_eq!(&compression_display(&Compression::GZIP), "GZIP");
+    }
 }
