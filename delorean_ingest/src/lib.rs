@@ -1115,7 +1115,7 @@ mod delorean_ingest_tests {
     // as expected.
     //
     // Note this table has a row with a tag and each field type and
-    // then a row the tag, fields and timestamps each hold a null
+    // then a row where the tag, fields and timestamps each hold a null
     static LP_DATA: &str = r#"
                cpu,tag1=A int_field=64i,float_field=100.0,str_field="foo1",bool_field=t 1590488773254420000
                cpu,tag1=B int_field=65i,float_field=101.0,str_field="foo2",bool_field=t 1590488773254430000
