@@ -50,7 +50,7 @@ pub struct ColumnStatsBuilder {
 
 impl ColumnStatsBuilder {
     pub fn new(
-        column_name: String,
+        column_name: impl Into<String>,
         column_index: usize,
         data_type: DataType,
     ) -> ColumnStatsBuilder {

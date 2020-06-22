@@ -13,7 +13,7 @@ use crate::{
     InputReaderAdapter,
 };
 
-/// Calculate storage statistics for a particular paquet file that can
+/// Calculate storage statistics for a particular parquet file that can
 /// be read from `input`, with a total size of `input_size` byes
 ///
 /// Returns a Vec of ColumnStats, one for each column in the input
@@ -77,14 +77,14 @@ where
         }
     }
 
-    // now, marshall up all the results
+    // now, marshal up all the results
     let mut v = stats_builders
         .into_iter()
         .map(|(_k, b)| b.build())
         .collect::<Vec<_>>();
 
     // ensure output is not sorted by column name, but by column index
-    v.sort_by(|a, b| a.column_index.cmp(&b.column_index));
+    v.sort_by_key(|stats| stats.column_index);
 
     Ok(v)
 }
