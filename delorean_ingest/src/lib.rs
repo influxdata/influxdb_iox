@@ -1254,7 +1254,6 @@ mod delorean_ingest_tests {
         assert_eq!(str_field_packer.get(7).unwrap(), &ByteArray::from("foo7"));
         assert_eq!(str_field_packer.get(8).unwrap(), &ByteArray::from("foo8"));
 
-
         // bool_field values
         let bool_field_packer = &packers[4].bool_packer();
         assert_eq!(bool_field_packer.get(0).unwrap(), &true);
@@ -1266,7 +1265,6 @@ mod delorean_ingest_tests {
         assert!(bool_field_packer.is_null(6));
         assert_eq!(bool_field_packer.get(7).unwrap(), &true);
         assert_eq!(bool_field_packer.get(8).unwrap(), &true);
-
 
         // timestamp values (NB The timestamps are truncated to Microseconds)
         let timestamp_packer = &packers[5].i64_packer();
