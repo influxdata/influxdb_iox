@@ -51,7 +51,7 @@ fn convert_line_protocol_good_input_filename() {
     let mut cmd = Command::cargo_bin("delorean").unwrap();
 
     let parquet_path = delorean_test_helpers::tempfile::Builder::new()
-        .prefix("dstool_e2e")
+        .prefix("convert_e2e")
         .suffix(".parquet")
         .tempfile()
         .expect("error creating temp file")
@@ -71,7 +71,7 @@ fn convert_line_protocol_good_input_filename() {
 
     assert
         .success()
-        .stderr(predicate::str::contains("dstool convert starting"))
+        .stderr(predicate::str::contains("convert starting"))
         .stderr(predicate::str::contains(
             "Writing output for measurement h2o_temperature",
         ))
@@ -82,47 +82,54 @@ fn convert_line_protocol_good_input_filename() {
 
 #[test]
 fn convert_tsm_good_input_filename() {
-    let mut cmd = Command::cargo_bin("delorean").unwrap();
+    //
+    // TODO: this needs to work for a temp directory...
+    //
 
-    let parquet_path = delorean_test_helpers::tempfile::Builder::new()
-        .prefix("dstool_e2e_tsm")
-        .suffix(".parquet")
-        .tempfile()
-        .expect("error creating temp file")
-        .into_temp_path();
-    let parquet_filename_string = parquet_path.to_string_lossy().to_string();
+    // let mut cmd = Command::cargo_bin("delorean").unwrap();
 
-    let assert = cmd
-        .arg("convert")
-        .arg("tests/fixtures/000000000000005-000000002.tsm.gz")
-        .arg(&parquet_filename_string)
-        .assert();
+    // let tmp_dir = delorean_test_helpers::tmp_dir();
+    // let parquet_path = tmp_dir.unwrap().into_path().to_str().unwrap();
 
-    // TODO this should succeed when TSM -> parquet conversion is implemented.
-    assert
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("Conversion failed"))
-        .stderr(predicate::str::contains(
-            "Not implemented: TSM Conversion not supported yet",
-        ));
+    // // ::Builder::new()
+    // //     .prefix("dstool_e2e_tsm")
+    // //     .suffix(".parquet")
+    // //     .tempfile()
+    // //     .expect("error creating temp file")
+    // //     .into_temp_path();
+    // // let parquet_filename_string = parquet_path.to_string_lossy().to_string();
 
-    // TODO add better success expectations
+    // let assert = cmd
+    //     .arg("convert")
+    //     .arg("tests/fixtures/cpu_usage.tsm")
+    //     .arg(&parquet_path)
+    //     .assert();
 
-    // let expected_success_string = format!(
-    //     "Completing writing to {} successfully",
-    //     parquet_filename_string
-    // );
+    // // TODO this should succeed when TSM -> parquet conversion is implemented.
+    // // assert
+    // //     .failure()
+    // //     .code(1)
+    // //     .stderr(predicate::str::contains("Conversion failed"))
+    // //     .stderr(predicate::str::contains(
+    // //         "Not implemented: TSM Conversion not supported yet",
+    // //     ));
 
-    // assert
-    //     .success()
-    //     .stderr(predicate::str::contains("dstool convert starting"))
-    //     .stderr(predicate::str::contains(
-    //         "Writing output for measurement h2o_temperature",
-    //     ))
-    //     .stderr(predicate::str::contains(expected_success_string));
+    // // TODO add better success expectations
 
-    // validate_parquet_file(&parquet_path);
+    // // let expected_success_string = format!(
+    // //     "Completing writing to {} successfully",
+    // //     parquet_filename_string
+    // // );
+
+    // // assert
+    // //     .success()
+    // //     .stderr(predicate::str::contains("dstool convert starting"))
+    // //     .stderr(predicate::str::contains(
+    // //         "Writing output for measurement h2o_temperature",
+    // //     ))
+    // //     .stderr(predicate::str::contains(expected_success_string));
+
+    // // validate_parquet_file(&parquet_path);
 }
 
 #[test]
@@ -131,7 +138,7 @@ fn convert_multiple_measurements() {
 
     // Create a directory
     let parquet_output_path = delorean_test_helpers::tempfile::Builder::new()
-        .prefix("dstool_e2e")
+        .prefix("convert_multiple_e2e")
         .tempdir()
         .expect("error creating temp directory");
 
@@ -150,7 +157,7 @@ fn convert_multiple_measurements() {
 
     assert
         .success()
-        .stderr(predicate::str::contains("dstool convert starting"))
+        .stderr(predicate::str::contains("convert starting"))
         .stderr(predicate::str::contains("Writing to output directory"))
         .stderr(predicate::str::contains(
             "Writing output for measurement h2o_temperature",
@@ -228,7 +235,7 @@ fn uncompress_gz(
     let gz_file = File::open(input_path).expect("Error opening input");
 
     let output_path = delorean_test_helpers::tempfile::Builder::new()
-        .prefix("dstool_decompressed_e2e")
+        .prefix("decompressed_e2e")
         .suffix(output_extension)
         .tempfile()
         .expect("error creating temp file")
@@ -309,4 +316,59 @@ fn meta_cpu_usage_tsm_gz() {
         .assert();
 
     assert_meta_cpu_usage_tsm(assert);
+}
+
+/// Validates some of the metadata output content for this tsm file
+fn assert_meta_temperature_parquet(assert: Assert) {
+    assert
+        .success()
+        .stdout(predicate::str::contains("Parquet file metadata:"))
+        .stdout(predicate::str::contains(r#"created by: "Delorean""#))
+        .stdout(predicate::str::contains(
+            r#"Column Chunk [3]:
+    file_offset: 595
+    column_type: DOUBLE
+    column_path: bottom_degrees
+    num_values: 6
+    encodings: [PLAIN, RLE_DICTIONARY, RLE]
+    compression: GZIP
+    compressed_size: 125
+    uncompressed_size: 90
+    data_page_offset: 547
+    has_index_page: false
+    has_dictionary_page: true
+    dictionary_page_offset: 470
+    NO STATISTICS"#,
+        ));
+}
+
+#[test]
+fn meta_temperature_parquet() {
+    let mut cmd = Command::cargo_bin("delorean").unwrap();
+    let assert = cmd
+        .arg("meta")
+        .arg("tests/fixtures/parquet/temperature.parquet")
+        .assert();
+
+    assert_meta_temperature_parquet(assert);
+}
+
+#[test]
+fn stats_temperature_parquet() {
+    let mut cmd = Command::cargo_bin("delorean").unwrap();
+    let assert = cmd
+        .arg("stats")
+        .arg("tests/fixtures/parquet/temperature.parquet")
+        .assert();
+
+    assert
+        .success()
+        .stdout(predicate::str::contains("Storage statistics:"))
+        .stdout(predicate::str::contains(
+            r#"Column Stats 'state' [1]
+  Total rows: 6, DataType: String, Compression: {"Enc: Dictionary, Comp: GZIP"}
+  Compressed/Uncompressed Bytes: (      90/      52) 120.0000 bits per row"#))
+        .stdout(predicate::str::contains(
+            "temperature.parquet: total columns/rows/bytes: (       5/       6/    1128) 1504.0000 bits per row"
+        ));
 }

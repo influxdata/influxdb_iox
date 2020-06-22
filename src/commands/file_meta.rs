@@ -2,17 +2,19 @@
 #![warn(missing_debug_implementations, clippy::explicit_iter_loop)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::convert::TryInto;
 
-use delorean::storage::tsm::{IndexEntry, InfluxID, TSMReader};
-use delorean::storage::StorageError;
+use delorean_tsm::reader::{IndexEntry, TSMIndexReader};
+use delorean_tsm::{InfluxID, TSMError};
 
+use delorean_parquet::metadata::print_parquet_metadata;
 use log::{debug, info};
 
 use crate::commands::error::{Error, Result};
 use crate::commands::input::{FileType, InputReader};
 
 pub fn dump_meta(input_filename: &str) -> Result<()> {
-    info!("dstool meta starting");
+    info!("meta starting");
     debug!("Reading from input file {}", input_filename);
 
     let input_reader = InputReader::new(input_filename)?;
@@ -22,9 +24,12 @@ pub fn dump_meta(input_filename: &str) -> Result<()> {
             operation_name: String::from("Line protocol metadata dump"),
         }),
         FileType::TSM => {
-            let len = input_reader.len();
+            let len = input_reader
+                .len()
+                .try_into()
+                .expect("File size more than usize");
             let reader =
-                TSMReader::try_new(input_reader, len).map_err(|e| Error::TSM { source: e })?;
+                TSMIndexReader::try_new(input_reader, len).map_err(|e| Error::TSM { source: e })?;
 
             let mut stats_builder = TSMMetadataBuilder::new();
 
@@ -32,6 +37,12 @@ pub fn dump_meta(input_filename: &str) -> Result<()> {
                 stats_builder.process_entry(&mut entry)?;
             }
             stats_builder.print_report();
+            Ok(())
+        }
+        FileType::Parquet => {
+            let input_len = input_reader.len();
+            print_parquet_metadata(input_reader, input_len)
+                .map_err(|e| Error::UnableDumpToParquetMetadata { source: e })?;
             Ok(())
         }
     }
@@ -117,7 +128,7 @@ impl TSMMetadataBuilder {
         Self::default()
     }
 
-    fn process_entry(&mut self, entry: &mut Result<IndexEntry, StorageError>) -> Result<()> {
+    fn process_entry(&mut self, entry: &mut Result<IndexEntry, TSMError>) -> Result<()> {
         match entry {
             Ok(index_entry) => {
                 self.num_entries += 1;

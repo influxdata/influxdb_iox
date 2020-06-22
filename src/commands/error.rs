@@ -1,8 +1,9 @@
 use snafu::Snafu;
 
-use delorean::storage::StorageError;
 use delorean_ingest::Error as IngestError;
+use delorean_parquet::error::Error as DeloreanParquetError;
 use delorean_parquet::writer::Error as ParquetWriterError;
+use delorean_tsm::TSMError;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -55,8 +56,11 @@ pub enum Error {
     #[snafu(display("Error while closing the table writer {}", source))]
     UnableToCloseTableWriter { source: IngestError },
 
+    #[snafu(display("Unable to dump parquet file metadata: {}", source))]
+    UnableDumpToParquetMetadata { source: DeloreanParquetError },
+
     #[snafu(display(r#"Error reading TSM data: {}"#, source))]
-    TSM { source: StorageError },
+    TSM { source: TSMError },
 
     #[snafu(display(r#"Error parsing data: {}"#, source))]
     Parsing { source: delorean_line_parser::Error },

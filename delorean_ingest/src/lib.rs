@@ -1,17 +1,23 @@
-#![deny(rust_2018_idioms)]
-#![warn(missing_debug_implementations, clippy::explicit_iter_loop)]
-
 //! Library with code for (aspirationally) ingesting various data formats into Delorean
 //! Currently supports converting LineProtocol
 //! TODO move this to delorean/src/ingest/line_protocol.rs?
+#![deny(rust_2018_idioms)]
+#![warn(missing_debug_implementations, clippy::explicit_iter_loop)]
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::{BufRead, Seek};
+
 use log::debug;
+use parquet::data_type::ByteArray;
 use snafu::{ResultExt, Snafu};
 
-use std::collections::BTreeMap;
-
 use delorean_line_parser::{FieldValue, ParsedLine};
-use delorean_table::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError, Packer};
+use delorean_table::packers::{Packer, Packers};
+use delorean_table::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError};
 use delorean_table_schema::{DataType, Schema, SchemaBuilder};
+use delorean_tsm::mapper::{map_field_columns, ColumnData, TSMMeasurementMapper};
+use delorean_tsm::reader::{TSMBlockReader, TSMIndexReader};
+use delorean_tsm::{BlockType, TSMError};
 
 #[derive(Debug, Clone)]
 pub struct ConversionSettings {
@@ -24,7 +30,7 @@ pub struct ConversionSettings {
 impl ConversionSettings {}
 
 impl Default for ConversionSettings {
-    /// Reasonable defult settings
+    /// Reasonable default settings
     fn default() -> Self {
         ConversionSettings {
             sample_size: 5,
@@ -60,6 +66,9 @@ pub enum Error {
 
     #[snafu(display(r#"Error creating TableWriter: {}"#, source))]
     WriterCreation { source: TableError },
+
+    #[snafu(display(r#"Error processing TSM File: {}"#, source))]
+    TSMProcessing { source: TSMError },
 }
 
 /// Handles buffering `ParsedLine` objects and deducing a schema from that sample
@@ -349,14 +358,19 @@ impl<'a> MeasurementWriter<'a> {
 ///
 /// TODO: improve performance by reusing the the Vec<Packer> rather
 /// than always making new ones
-fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packer> {
+fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packers> {
     let col_defs = schema.get_col_defs();
     let mut packers: Vec<_> = col_defs
         .iter()
         .enumerate()
         .map(|(idx, col_def)| {
             debug!("  Column definition [{}] = {:?}", idx, col_def);
-            Packer::with_capacity(col_def.data_type, lines.len())
+
+            // Initialise a Packer<T> for the matching data type wrapped in a
+            // Packers enum variant to allow it to live in a vector.
+            let mut packer = Packers::from(col_def.data_type);
+            packer.reserve_exact(lines.len());
+            packer
         })
         .collect();
 
@@ -394,7 +408,9 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packer> {
             for (tag_name, tag_value) in tag_set {
                 let tag_name_str = tag_name.to_string();
                 if let Some(packer) = packer_map.get_mut(&tag_name_str) {
-                    packer.pack_str(Some(&tag_value.to_string()));
+                    packer
+                        .str_packer_mut()
+                        .push(ByteArray::from(tag_value.to_string().into_bytes()));
                 } else {
                     panic!(
                         "tag {} seen in input that has no matching column in schema",
@@ -408,10 +424,20 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packer> {
             let field_name_str = field_name.to_string();
             if let Some(packer) = packer_map.get_mut(&field_name_str) {
                 match *field_value {
-                    FieldValue::F64(f) => packer.pack_f64(Some(f)),
-                    FieldValue::I64(i) => packer.pack_i64(Some(i)),
-                    FieldValue::String(ref s) => packer.pack_str(Some(&s.to_string())),
-                    FieldValue::Boolean(b) => packer.pack_bool(Some(b)),
+                    FieldValue::F64(f) => {
+                        packer.f64_packer_mut().push(f);
+                    }
+                    FieldValue::I64(i) => {
+                        packer.i64_packer_mut().push(i);
+                    }
+                    FieldValue::String(ref s) => {
+                        packer
+                            .str_packer_mut()
+                            .push(ByteArray::from(s.to_string().into_bytes()));
+                    }
+                    FieldValue::Boolean(b) => {
+                        packer.bool_packer_mut().push(b);
+                    }
                 }
             } else {
                 panic!(
@@ -427,7 +453,8 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packer> {
             // to microseconds
             let timestamp_micros = line.timestamp.map(|timestamp_nanos| timestamp_nanos / 1000);
 
-            packer.pack_i64(timestamp_micros);
+            // TODO(edd) why would line _not_ have a timestamp??? We should always have them
+            packer.i64_packer_mut().push_option(timestamp_micros)
         } else {
             panic!("No {} field present in schema...", timestamp_col_name);
         }
@@ -436,7 +463,7 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packer> {
         for packer in packer_map.values_mut() {
             if packer.len() < starting_len + 1 {
                 assert_eq!(packer.len(), starting_len, "packer should be unchanged");
-                packer.pack_none();
+                packer.push_none();
             } else {
                 assert_eq!(
                     starting_len + 1,
@@ -448,7 +475,7 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packer> {
             }
         }
 
-        // Should have added one value to all packers. Asser that invariant here
+        // Should have added one value to all packers. Assert that invariant here
         assert!(
             packer_map.values().all(|x| x.len() == starting_len + 1),
             "Should have added 1 row to all packers"
@@ -457,12 +484,223 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packer> {
     packers
 }
 
+/// Converts a TSM file into the delorean_table internal columnar
+/// data format and then passes that converted data to a
+/// `DeloreanTableWriter`
+pub struct TSMFileConverter {
+    table_writer_source: Box<dyn DeloreanTableWriterSource>,
+}
+
+impl TSMFileConverter {
+    pub fn new(table_writer_source: Box<dyn DeloreanTableWriterSource>) -> Self {
+        Self {
+            table_writer_source,
+        }
+    }
+
+    /// Processes a TSM file's index and writes each measurement to a Parquet
+    /// writer.
+    pub fn convert(
+        &mut self,
+        index_stream: impl BufRead + Seek,
+        index_stream_size: usize,
+        block_stream: impl BufRead + Seek,
+    ) -> Result<(), Error> {
+        let index_reader = TSMIndexReader::try_new(index_stream, index_stream_size)
+            .map_err(|e| Error::TSMProcessing { source: e })?;
+        let mut block_reader = TSMBlockReader::new(block_stream);
+
+        let mapper = TSMMeasurementMapper::new(index_reader.peekable());
+
+        for measurement in mapper {
+            match measurement {
+                Ok(mut m) => {
+                    let mut builder = SchemaBuilder::new(&m.name);
+                    let mut packed_columns: Vec<Packers> = Vec::new();
+
+                    let mut tks = Vec::new();
+                    for tag in m.tag_columns() {
+                        builder = builder.tag(tag);
+                        tks.push(tag.clone());
+                        packed_columns.push(Packers::String(Packer::new()));
+                    }
+
+                    let mut fks = Vec::new();
+                    for (field_key, block_type) in m.field_columns().to_owned() {
+                        builder = builder.field(&field_key, DataType::from(&block_type));
+                        fks.push((field_key.clone(), block_type));
+                        packed_columns.push(Packers::String(Packer::new())); // FIXME - will change
+                    }
+
+                    // Account for timestamp
+                    packed_columns.push(Packers::Integer(Packer::new()));
+
+                    let schema = builder.build();
+
+                    // get mapping between named columns and packer indexes.
+                    let name_packer = schema
+                        .get_col_defs()
+                        .iter()
+                        .map(|c| (c.name.clone(), c.index as usize))
+                        .collect::<BTreeMap<String, usize>>();
+
+                    // For each tagset combination in the measurement I need
+                    // to build out the table. Then for each column in the
+                    // table I need to convert to a Packer<T> and append it
+                    // to the packer_column.
+
+                    for (tag_set_pair, blocks) in m.tag_set_fields_blocks() {
+                        let (ts, field_cols) = map_field_columns(&mut block_reader, blocks)
+                            .map_err(|e| Error::TSMProcessing { source: e })?;
+
+                        // Start with the timestamp column.
+                        let col_len = ts.len();
+                        let ts_idx =
+                            name_packer
+                                .get(schema.timestamp())
+                                .ok_or(Error::TSMProcessing {
+                                    // TODO clean this error up
+                                    source: TSMError {
+                                        description: "could not find ts column".to_string(),
+                                    },
+                                })?;
+
+                        packed_columns[*ts_idx] = Packers::from(ts);
+
+                        // Next let's pad out all of the tag columns we know have
+                        // repeated values.
+                        for (tag_key, tag_value) in tag_set_pair {
+                            let idx = name_packer.get(tag_key).ok_or(Error::TSMProcessing {
+                                // TODO clean this error up
+                                source: TSMError {
+                                    description: "could not find column".to_string(),
+                                },
+                            })?;
+
+                            // this will create a column of repeated values.
+                            packed_columns[*idx] = Packers::from_elem_str(tag_value, col_len);
+                        }
+
+                        // Next let's write out NULL values for any tag columns
+                        // on the measurement that we don't have values for
+                        // because they're not part of this tagset.
+                        let tag_keys = tag_set_pair
+                            .iter()
+                            .map(|pair| pair.0.clone())
+                            .collect::<BTreeSet<String>>();
+                        for key in &tks {
+                            if tag_keys.contains(key) {
+                                continue;
+                            }
+
+                            let idx = name_packer.get(key).ok_or(Error::TSMProcessing {
+                                // TODO clean this error up
+                                source: TSMError {
+                                    description: "could not find column".to_string(),
+                                },
+                            })?;
+
+                            // this will create a column of repeated None values.
+                            let col: Vec<Option<Vec<u8>>> = vec![None; col_len];
+                            packed_columns[*idx] = Packers::from(col);
+                        }
+
+                        // Next let's write out all of the field column data.
+                        let mut got_field_cols = Vec::new();
+                        for (field_key, field_values) in field_cols {
+                            let idx = name_packer.get(&field_key).ok_or(Error::TSMProcessing {
+                                // TODO clean this error up
+                                source: TSMError {
+                                    description: "could not find column".to_string(),
+                                },
+                            })?;
+
+                            match field_values {
+                                ColumnData::Float(v) => packed_columns[*idx] = Packers::from(v),
+                                ColumnData::Integer(v) => packed_columns[*idx] = Packers::from(v),
+                                ColumnData::Str(v) => packed_columns[*idx] = Packers::from(v),
+                                ColumnData::Bool(v) => packed_columns[*idx] = Packers::from(v),
+                                ColumnData::Unsigned(v) => packed_columns[*idx] = Packers::from(v),
+                            }
+                            got_field_cols.push(field_key);
+                        }
+
+                        // Finally let's write out all of the field columns that
+                        // we don't have values for here.
+                        for (key, field_type) in &fks {
+                            if got_field_cols.contains(key) {
+                                continue;
+                            }
+
+                            let idx = name_packer.get(key).ok_or(Error::TSMProcessing {
+                                // TODO clean this error up
+                                source: TSMError {
+                                    description: "could not find column".to_string(),
+                                },
+                            })?;
+
+                            // this will create a column of repeated None values.
+                            match field_type {
+                                BlockType::Float => {
+                                    let col: Vec<Option<f64>> = vec![None; col_len];
+                                    packed_columns[*idx] = Packers::from(col);
+                                }
+                                BlockType::Integer => {
+                                    let col: Vec<Option<i64>> = vec![None; col_len];
+                                    packed_columns[*idx] = Packers::from(col);
+                                }
+                                BlockType::Bool => {
+                                    let col: Vec<Option<bool>> = vec![None; col_len];
+                                    packed_columns[*idx] = Packers::from(col);
+                                }
+                                BlockType::Str => {
+                                    let col: Vec<Option<Vec<u8>>> = vec![None; col_len];
+                                    packed_columns[*idx] = Packers::from(col);
+                                }
+                                BlockType::Unsigned => {
+                                    let col: Vec<Option<u64>> = vec![None; col_len];
+                                    packed_columns[*idx] = Packers::from(col);
+                                }
+                            }
+                        }
+                    }
+
+                    let mut table_writer = self
+                        .table_writer_source
+                        .next_writer(&schema)
+                        .context(WriterCreation)?;
+
+                    table_writer
+                        .write_batch(&packed_columns)
+                        .map_err(|e| Error::WriterCreation { source: e })?;
+                    table_writer
+                        .close()
+                        .map_err(|e| Error::WriterCreation { source: e })?;
+                }
+                Err(e) => return Err(Error::TSMProcessing { source: e }),
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for TSMFileConverter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TSMFileConverter")
+            // .field("settings", &self.settings)
+            // .field("converters", &self.converters)
+            .field("table_writer_source", &"DYNAMIC")
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod delorean_ingest_tests {
     use super::*;
     use delorean_table::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError};
     use delorean_table_schema::ColumnDefinition;
     use delorean_test_helpers::approximately_equal;
+    use parquet::data_type::ByteArray;
 
     use std::sync::{Arc, Mutex};
 
@@ -507,7 +745,7 @@ mod delorean_ingest_tests {
     }
 
     impl DeloreanTableWriter for NoOpWriter {
-        fn write_batch(&mut self, packers: &[Packer]) -> Result<(), TableError> {
+        fn write_batch(&mut self, packers: &[Packers]) -> Result<(), TableError> {
             if packers.is_empty() {
                 log_event(
                     &self.log,
@@ -929,26 +1167,6 @@ mod delorean_ingest_tests {
         Ok(())
     }
 
-    // gets the packer's value as a string.
-    fn get_string_val(packer: &Packer, idx: usize) -> &str {
-        packer.as_string_packer().values[idx].as_utf8().unwrap()
-    }
-
-    // gets the packer's value as an int
-    fn get_int_val(packer: &Packer, idx: usize) -> i64 {
-        packer.as_int_packer().values[idx]
-    }
-
-    // gets the packer's value as an int
-    fn get_float_val(packer: &Packer, idx: usize) -> f64 {
-        packer.as_float_packer().values[idx]
-    }
-
-    // gets the packer's value as an int
-    fn get_bool_val(packer: &Packer, idx: usize) -> bool {
-        packer.as_bool_packer().values[idx]
-    }
-
     #[test]
     fn pack_data_value() -> Result<(), Error> {
         let mut sampler = parse_data_into_sampler()?;
@@ -965,100 +1183,102 @@ mod delorean_ingest_tests {
         }
 
         // Tag values
-        let tag_packer = &packers[0];
-        assert_eq!(get_string_val(tag_packer, 0), "A");
-        assert_eq!(get_string_val(tag_packer, 1), "B");
+        let tag_packer = packers[0].str_packer();
+        assert_eq!(tag_packer.get(0).unwrap(), &ByteArray::from("A"));
+        assert_eq!(tag_packer.get(1).unwrap(), &ByteArray::from("B"));
         assert!(packers[0].is_null(2));
-        assert_eq!(get_string_val(tag_packer, 3), "C");
-        assert_eq!(get_string_val(tag_packer, 4), "D");
-        assert_eq!(get_string_val(tag_packer, 5), "E");
-        assert_eq!(get_string_val(tag_packer, 6), "F");
-        assert_eq!(get_string_val(tag_packer, 7), "G");
-        assert_eq!(get_string_val(tag_packer, 8), "H");
+        assert_eq!(tag_packer.get(3).unwrap(), &ByteArray::from("C"));
+        assert_eq!(tag_packer.get(4).unwrap(), &ByteArray::from("D"));
+        assert_eq!(tag_packer.get(5).unwrap(), &ByteArray::from("E"));
+        assert_eq!(tag_packer.get(6).unwrap(), &ByteArray::from("F"));
+        assert_eq!(tag_packer.get(7).unwrap(), &ByteArray::from("G"));
+        assert_eq!(tag_packer.get(8).unwrap(), &ByteArray::from("H"));
 
         // int_field values
-        let int_field_packer = &packers[1];
-        assert_eq!(get_int_val(int_field_packer, 0), 64);
-        assert_eq!(get_int_val(int_field_packer, 1), 65);
-        assert_eq!(get_int_val(int_field_packer, 2), 66);
+        let int_field_packer = &packers[1].i64_packer();
+        assert_eq!(int_field_packer.get(0).unwrap(), &64);
+        assert_eq!(int_field_packer.get(1).unwrap(), &65);
+        assert_eq!(int_field_packer.get(2).unwrap(), &66);
         assert!(int_field_packer.is_null(3));
-        assert_eq!(get_int_val(int_field_packer, 4), 67);
-        assert_eq!(get_int_val(int_field_packer, 5), 68);
-        assert_eq!(get_int_val(int_field_packer, 6), 69);
-        assert_eq!(get_int_val(int_field_packer, 7), 70);
-        assert_eq!(get_int_val(int_field_packer, 8), 71);
+        assert_eq!(int_field_packer.get(4).unwrap(), &67);
+        assert_eq!(int_field_packer.get(5).unwrap(), &68);
+        assert_eq!(int_field_packer.get(6).unwrap(), &69);
+        assert_eq!(int_field_packer.get(7).unwrap(), &70);
+        assert_eq!(int_field_packer.get(8).unwrap(), &71);
 
         // float_field values
-        let float_field_packer = &packers[2];
+        let float_field_packer = &packers[2].f64_packer();
         assert!(approximately_equal(
-            get_float_val(float_field_packer, 0),
+            *float_field_packer.get(0).unwrap(),
             100.0
         ));
         assert!(approximately_equal(
-            get_float_val(float_field_packer, 1),
+            *float_field_packer.get(1).unwrap(),
             101.0
         ));
         assert!(approximately_equal(
-            get_float_val(float_field_packer, 2),
+            *float_field_packer.get(2).unwrap(),
             102.0
         ));
         assert!(approximately_equal(
-            get_float_val(float_field_packer, 3),
+            *float_field_packer.get(3).unwrap(),
             103.0
         ));
         assert!(float_field_packer.is_null(4));
         assert!(approximately_equal(
-            get_float_val(float_field_packer, 5),
+            *float_field_packer.get(5).unwrap(),
             104.0
         ));
         assert!(approximately_equal(
-            get_float_val(float_field_packer, 6),
+            *float_field_packer.get(6).unwrap(),
             105.0
         ));
         assert!(approximately_equal(
-            get_float_val(float_field_packer, 7),
+            *float_field_packer.get(7).unwrap(),
             106.0
         ));
         assert!(approximately_equal(
-            get_float_val(float_field_packer, 8),
+            *float_field_packer.get(8).unwrap(),
             107.0
         ));
 
         // str_field values
-        let str_field_packer = &packers[3];
-        assert_eq!(get_string_val(str_field_packer, 0), "foo1");
-        assert_eq!(get_string_val(str_field_packer, 1), "foo2");
-        assert_eq!(get_string_val(str_field_packer, 2), "foo3");
-        assert_eq!(get_string_val(str_field_packer, 3), "foo4");
-        assert_eq!(get_string_val(str_field_packer, 4), "foo5");
+        let str_field_packer = &packers[3].str_packer();
+        assert_eq!(str_field_packer.get(0).unwrap(), &ByteArray::from("foo1"));
+        assert_eq!(str_field_packer.get(1).unwrap(), &ByteArray::from("foo2"));
+        assert_eq!(str_field_packer.get(2).unwrap(), &ByteArray::from("foo3"));
+        assert_eq!(str_field_packer.get(3).unwrap(), &ByteArray::from("foo4"));
+        assert_eq!(str_field_packer.get(4).unwrap(), &ByteArray::from("foo5"));
         assert!(str_field_packer.is_null(5));
-        assert_eq!(get_string_val(str_field_packer, 6), "foo6");
-        assert_eq!(get_string_val(str_field_packer, 7), "foo7");
-        assert_eq!(get_string_val(str_field_packer, 8), "foo8");
+        assert_eq!(str_field_packer.get(6).unwrap(), &ByteArray::from("foo6"));
+        assert_eq!(str_field_packer.get(7).unwrap(), &ByteArray::from("foo7"));
+        assert_eq!(str_field_packer.get(8).unwrap(), &ByteArray::from("foo8"));
+
 
         // bool_field values
-        let bool_field_packer = &packers[4];
-        assert_eq!(get_bool_val(bool_field_packer, 0), true);
-        assert_eq!(get_bool_val(bool_field_packer, 1), true);
-        assert_eq!(get_bool_val(bool_field_packer, 2), true);
-        assert_eq!(get_bool_val(bool_field_packer, 3), true);
-        assert_eq!(get_bool_val(bool_field_packer, 4), true);
-        assert_eq!(get_bool_val(bool_field_packer, 5), true);
+        let bool_field_packer = &packers[4].bool_packer();
+        assert_eq!(bool_field_packer.get(0).unwrap(), &true);
+        assert_eq!(bool_field_packer.get(1).unwrap(), &true);
+        assert_eq!(bool_field_packer.get(2).unwrap(), &true);
+        assert_eq!(bool_field_packer.get(3).unwrap(), &true);
+        assert_eq!(bool_field_packer.get(4).unwrap(), &true);
+        assert_eq!(bool_field_packer.get(5).unwrap(), &true);
         assert!(bool_field_packer.is_null(6));
-        assert_eq!(get_bool_val(bool_field_packer, 7), true);
-        assert_eq!(get_bool_val(bool_field_packer, 8), true);
+        assert_eq!(bool_field_packer.get(7).unwrap(), &true);
+        assert_eq!(bool_field_packer.get(8).unwrap(), &true);
+
 
         // timestamp values (NB The timestamps are truncated to Microseconds)
-        let timestamp_packer = &packers[5];
-        assert_eq!(get_int_val(timestamp_packer, 0), 1_590_488_773_254_420);
-        assert_eq!(get_int_val(timestamp_packer, 1), 1_590_488_773_254_430);
-        assert_eq!(get_int_val(timestamp_packer, 2), 1_590_488_773_254_440);
-        assert_eq!(get_int_val(timestamp_packer, 3), 1_590_488_773_254_450);
-        assert_eq!(get_int_val(timestamp_packer, 4), 1_590_488_773_254_460);
-        assert_eq!(get_int_val(timestamp_packer, 5), 1_590_488_773_254_470);
-        assert_eq!(get_int_val(timestamp_packer, 6), 1_590_488_773_254_480);
+        let timestamp_packer = &packers[5].i64_packer();
+        assert_eq!(timestamp_packer.get(0).unwrap(), &1_590_488_773_254_420);
+        assert_eq!(timestamp_packer.get(1).unwrap(), &1_590_488_773_254_430);
+        assert_eq!(timestamp_packer.get(2).unwrap(), &1_590_488_773_254_440);
+        assert_eq!(timestamp_packer.get(3).unwrap(), &1_590_488_773_254_450);
+        assert_eq!(timestamp_packer.get(4).unwrap(), &1_590_488_773_254_460);
+        assert_eq!(timestamp_packer.get(5).unwrap(), &1_590_488_773_254_470);
+        assert_eq!(timestamp_packer.get(6).unwrap(), &1_590_488_773_254_480);
         assert!(timestamp_packer.is_null(7));
-        assert_eq!(get_int_val(timestamp_packer, 8), 1_590_488_773_254_490);
+        assert_eq!(timestamp_packer.get(8).unwrap(), &1_590_488_773_254_490);
 
         Ok(())
     }
@@ -1132,4 +1352,36 @@ mod delorean_ingest_tests {
 
         Ok(())
     }
+
+    // ----- Tests for TSM Data -----
+
+    // #[test]
+    // fn conversion_tsm_files() -> Result<(), Error> {
+    //     let log = Arc::new(Mutex::new(WriterLog::new()));
+
+    //     // let mut converter =
+    //     //     LineProtocolConverter::new(settings, NoOpWriterSource::new(log.clone()));
+
+    //     // converter
+    //     // .convert(parsed_lines)
+    //     // .expect("conversion ok")
+    //     // .finalize()
+    //     // .expect("finalize");
+
+    //     assert_eq!(
+    //         get_events(&log),
+    //         vec![
+    //             "Created writer for measurement h2o_temperature",
+    //             "Created writer for measurement air_temperature",
+    //             "[air_temperature] Wrote batch of 4 cols, 3 rows",
+    //             "[h2o_temperature] Wrote batch of 4 cols, 3 rows",
+    //             "[air_temperature] Wrote batch of 4 cols, 1 rows",
+    //             "[air_temperature] Closed",
+    //             "[h2o_temperature] Wrote batch of 4 cols, 2 rows",
+    //             "[h2o_temperature] Closed",
+    //         ]
+    //     );
+
+    //     Ok(())
+    // }
 }
