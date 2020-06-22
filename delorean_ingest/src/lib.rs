@@ -263,7 +263,7 @@ impl<'a> MeasurementSampler<'a> {
             return Err(Error::NeedsAtLeastOneLine {});
         }
 
-        let mut builder = SchemaBuilder::new(&self.schema_sample[0].series.measurement);
+        let mut builder = SchemaBuilder::new(self.schema_sample[0].series.measurement.as_str());
 
         for line in &self.schema_sample {
             let series = &line.series;
