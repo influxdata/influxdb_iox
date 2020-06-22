@@ -11,7 +11,7 @@ use delorean_parquet::stats::col_stats;
 
 /// Print statistics about the file name in input_filename to stdout
 pub fn stats(input_filename: &str) -> Result<()> {
-    info!("dstool stats starting");
+    info!("stats starting");
 
     let input_reader = InputReader::new(input_filename)?;
 
