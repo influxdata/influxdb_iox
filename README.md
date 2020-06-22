@@ -8,4 +8,4 @@ To compile and run this, you'll need:
 
 
 ## Contributing:
-- Delorean is written mostly in idomatic rust -- please see the [Style Guide](docs/style_guide.md) for more details.
+- Delorean is written mostly in idiomatic Rust -- please see the [Style Guide](docs/style_guide.md) for more details.
