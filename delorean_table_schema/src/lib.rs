@@ -51,8 +51,9 @@ impl Tag {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-/// Line Protocol Data Types as defined in
-/// [the InfluxData documentation](https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_tutorial/#data-types)
+/// Line Protocol Data Types as defined in [the InfluxData documentation][influx]
+///
+/// [influx]: https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_tutorial/#data-types
 pub enum DataType {
     /// 64-bit floating point number (TDB if NULLs / Nans are allowed)
     Float,
