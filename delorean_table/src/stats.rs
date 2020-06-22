@@ -55,7 +55,7 @@ impl ColumnStatsBuilder {
         data_type: DataType,
     ) -> ColumnStatsBuilder {
         ColumnStatsBuilder {
-            column_name,
+            column_name: column_name.into(),
             column_index,
             compression_descriptions: BTreeSet::new(),
             num_rows: 0,
@@ -128,7 +128,7 @@ mod test {
 
     #[test]
     fn stats_builder_create() {
-        let builder = ColumnStatsBuilder::new(String::from("My Column"), 7, DataType::Integer);
+        let builder = ColumnStatsBuilder::new("My Column", 7, DataType::Integer);
 
         let stats = builder.build();
         assert_eq!(
@@ -144,7 +144,7 @@ mod test {
 
     #[test]
     fn stats_builder_compression() {
-        let mut builder = ColumnStatsBuilder::new(String::from("My Column"), 3, DataType::Float);
+        let mut builder = ColumnStatsBuilder::new("My Column", 3, DataType::Float);
 
         builder
             .compression("GZIP")
@@ -165,7 +165,7 @@ mod test {
 
     #[test]
     fn stats_builder_add_rows() {
-        let mut builder = ColumnStatsBuilder::new(String::from("My Column"), 3, DataType::Float);
+        let mut builder = ColumnStatsBuilder::new("My Column", 3, DataType::Float);
 
         builder.add_rows(7).add_rows(3);
 
@@ -183,7 +183,7 @@ mod test {
 
     #[test]
     fn stats_builder_add_compressed_bytes() {
-        let mut builder = ColumnStatsBuilder::new(String::from("My Column"), 3, DataType::Float);
+        let mut builder = ColumnStatsBuilder::new("My Column", 3, DataType::Float);
 
         builder.add_compressed_bytes(7).add_compressed_bytes(3);
 
@@ -201,7 +201,7 @@ mod test {
 
     #[test]
     fn stats_builder_add_uncompressed_bytes() {
-        let mut builder = ColumnStatsBuilder::new(String::from("My Column"), 3, DataType::Float);
+        let mut builder = ColumnStatsBuilder::new("My Column", 3, DataType::Float);
 
         builder.add_uncompressed_bytes(7).add_uncompressed_bytes(3);
 
@@ -210,7 +210,7 @@ mod test {
             stats,
             ColumnStats {
                 column_index: 3,
-                column_name: String::from("My Column"),
+                column_name: "My Column".into(),
                 num_uncompressed_bytes: 10,
                 ..Default::default()
             }
