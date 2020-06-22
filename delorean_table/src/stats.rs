@@ -65,13 +65,12 @@ impl ColumnStatsBuilder {
         }
     }
 
-    /// Add a compression description to this column Keeps track of
-    /// all compression descriptions and formats them nicely if there
-    /// are different compressions.
+    /// Add a compression description to this column. As there may be
+    /// several all compression descriptions that apply to any single column,
+    /// the builder tracks a list of descriptions.
     pub fn compression(&mut self, compression: &str) -> &mut Self {
         if !self.compression_descriptions.contains(compression) {
-            self.compression_descriptions
-                .insert(String::from(compression));
+            self.compression_descriptions.insert(compression.into());
         }
         self
     }

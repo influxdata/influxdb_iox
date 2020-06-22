@@ -1,5 +1,6 @@
 //! Provide storage statistics for parquet files
 use std::collections::BTreeMap;
+use std::convert::TryInto;
 use std::io::{Read, Seek};
 
 use log::debug;
@@ -45,8 +46,6 @@ where
                 let data_type = data_type_from_parquet_type(cc_metadata.column_type());
                 ColumnStatsBuilder::new(col_path.string(), cc_idx, data_type)
             });
-
-            use std::convert::TryInto;
 
             let compression_string = format!(
                 "{:?}; {:?}",
