@@ -88,12 +88,8 @@ where
 }
 
 /// Create a more user friendly display of the encodings
-fn encoding_display(encodings: &Vec<Encoding>) -> String {
-    if encodings
-        .iter()
-        .find(|&&e| e == Encoding::RLE_DICTIONARY)
-        .is_some()
-    {
+fn encoding_display(encodings: &[Encoding]) -> String {
+    if encodings.iter().any(|&e| e == Encoding::RLE_DICTIONARY) {
         // parquet represents "dictionary" encoding as [PLAIN,
         // RLE_DICTIONARY, RLE] , which is somewhat confusing -- it means
         // to point out that the dictionary page uses plain encoding,
@@ -115,21 +111,17 @@ mod tests {
 
     #[test]
     fn test_encoding_display() {
-        assert_eq!(&encoding_display(&vec![Encoding::PLAIN]), "[PLAIN]");
+        assert_eq!(&encoding_display(&[Encoding::PLAIN]), "[PLAIN]");
         assert_eq!(
-            &encoding_display(&vec![Encoding::PLAIN, Encoding::RLE]),
+            &encoding_display(&[Encoding::PLAIN, Encoding::RLE]),
             "[PLAIN, RLE]"
         );
         assert_eq!(
-            &encoding_display(&vec![
-                Encoding::PLAIN,
-                Encoding::RLE,
-                Encoding::RLE_DICTIONARY
-            ]),
+            &encoding_display(&[Encoding::PLAIN, Encoding::RLE, Encoding::RLE_DICTIONARY]),
             "Dictionary"
         );
         assert_eq!(
-            &encoding_display(&vec![Encoding::DELTA_BYTE_ARRAY, Encoding::RLE_DICTIONARY]),
+            &encoding_display(&[Encoding::DELTA_BYTE_ARRAY, Encoding::RLE_DICTIONARY]),
             "Dictionary"
         );
     }
