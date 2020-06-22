@@ -242,7 +242,7 @@ pub enum FieldValue<'a> {
 /// escaped, in which case the data in the input buffer is not
 /// contiguous. This enum provides an interface to access all such
 /// strings as contiguous string slices for compatibility with other
-/// ocde, and is optimized for the common case where the
+/// code, and is optimized for the common case where the
 /// input was all in a contiguous string slice.
 ///
 /// For example the 8 character string `Foo\\Bar` (note the double
@@ -896,7 +896,7 @@ mod test {
     fn escaped_str_basic() -> Result {
         // Demonstrate how strings without any escapes are handled.
         let es = EscapedStr::from("Foo");
-        assert_eq!(es.as_str(), "Foo");
+        assert_eq!(es, "Foo");
         assert!(!es.is_escaped(), "There are no escaped values");
         assert!(!es.ends_with("F"));
         assert!(!es.ends_with("z"));
@@ -920,15 +920,15 @@ mod test {
         assert!(es.ends_with("Bar"));
 
         // Test PartialEq implementation for escaped str
-        assert!(es.as_str() == "Foo\\aBar");
-        assert!(es.as_str() != "Foo\\aBa");
-        assert!(es.as_str() != "Foo\\aBaz");
-        assert!(es.as_str() != "Foo\\a");
-        assert!(es.as_str() != "Foo\\");
-        assert!(es.as_str() != "Foo");
-        assert!(es.as_str() != "Fo");
-        assert!(es.as_str() != "F");
-        assert!(es.as_str() != "");
+        assert!(es == "Foo\\aBar");
+        assert!(es != "Foo\\aBa");
+        assert!(es != "Foo\\aBaz");
+        assert!(es != "Foo\\a");
+        assert!(es != "Foo\\");
+        assert!(es != "Foo");
+        assert!(es != "Fo");
+        assert!(es != "F");
+        assert!(es != "");
 
         Ok(())
     }
