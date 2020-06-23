@@ -250,7 +250,7 @@ pub enum FieldValue<'a> {
 /// `\\`) is parsed into the logical 7 character string `Foo\Bar`
 /// (note the single `\`)
 ///
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub enum EscapedStr<'a> {
     SingleSlice(&'a str),
     CopiedValue(String),
@@ -306,8 +306,6 @@ impl<'a> PartialEq for EscapedStr<'a> {
         self.as_str() == other.as_str()
     }
 }
-
-impl<'a> Eq for EscapedStr<'a> {}
 
 impl<'a> PartialOrd for EscapedStr<'a> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
