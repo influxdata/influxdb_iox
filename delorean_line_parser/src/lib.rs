@@ -266,10 +266,6 @@ impl fmt::Display for EscapedStr<'_> {
 }
 
 impl<'a> EscapedStr<'a> {
-    fn from_str(s: &'a str) -> EscapedStr<'a> {
-        EscapedStr::SingleSlice(s)
-    }
-
     fn from_slices(v: &[&'a str]) -> EscapedStr<'a> {
         match v.len() {
             0 => EscapedStr::SingleSlice(""),
@@ -322,7 +318,7 @@ impl<'a> Ord for EscapedStr<'a> {
 
 impl<'a> From<&'a str> for EscapedStr<'a> {
     fn from(other: &'a str) -> Self {
-        EscapedStr::from_str(other)
+        EscapedStr::SingleSlice(other)
     }
 }
 
