@@ -644,7 +644,7 @@ fn escape_or_fallback<'a>(
     move |i| {
         let (remaining, s) = escape_or_fallback_inner(normal, escape_char, escaped)(i)?;
 
-        if s.ends_with("\\") {
+        if s.ends_with('\\') {
             EndsWithBackslash.fail().map_err(nom::Err::Failure)
         } else {
             Ok((remaining, s))
@@ -891,10 +891,10 @@ mod test {
         let es = EscapedStr::from("Foo");
         assert_eq!(es, "Foo");
         assert!(!es.is_escaped(), "There are no escaped values");
-        assert!(!es.ends_with("F"));
-        assert!(!es.ends_with("z"));
+        assert!(!es.ends_with('F'));
+        assert!(!es.ends_with('z'));
         assert!(!es.ends_with("zz"));
-        assert!(es.ends_with("o"));
+        assert!(es.ends_with('o'));
         assert!(es.ends_with("oo"));
         assert!(es.ends_with("Foo"));
         Ok(())
