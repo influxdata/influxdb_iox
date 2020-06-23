@@ -30,6 +30,7 @@ use std::{
     borrow::Cow,
     collections::{btree_map::Entry, BTreeMap},
     fmt,
+    ops::Deref,
 };
 
 #[derive(Debug, Snafu)]
@@ -285,14 +286,22 @@ impl<'a> EscapedStr<'a> {
     /// single slice. The slice may not point into the original
     /// buffer.
     pub fn as_str(&self) -> &str {
-        match &self {
-            EscapedStr::SingleSlice(s) => s,
-            EscapedStr::CopiedValue(s) => &s,
-        }
+        &*self
     }
 
     fn ends_with(&self, needle: &str) -> bool {
         self.as_str().ends_with(needle)
+    }
+}
+
+impl<'a> Deref for EscapedStr<'a> {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        match &self {
+            EscapedStr::SingleSlice(s) => s,
+            EscapedStr::CopiedValue(s) => s,
+        }
     }
 }
 
