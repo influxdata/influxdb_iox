@@ -288,10 +288,6 @@ impl<'a> EscapedStr<'a> {
     pub fn as_str(&self) -> &str {
         &*self
     }
-
-    fn ends_with(&self, needle: &str) -> bool {
-        self.as_str().ends_with(needle)
-    }
 }
 
 impl<'a> Deref for EscapedStr<'a> {
