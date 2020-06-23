@@ -325,12 +325,6 @@ impl<'a> From<&'a str> for EscapedStr<'a> {
     }
 }
 
-impl<'a> From<&'a EscapedStr<'a>> for &'a str {
-    fn from(other: &'a EscapedStr<'a>) -> Self {
-        other.as_str()
-    }
-}
-
 impl PartialEq<&str> for EscapedStr<'_> {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
