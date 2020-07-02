@@ -250,6 +250,53 @@ mod tests {
     }
 
     #[test]
+    fn parse_tsm_key_escaped() {
+        //<org_id bucket_id>,\x00=query_log,env=prod01-eu-central-1,error=memory\ allocation\ limit\ reached:\ limit\ 740000000\ bytes\,\ allocated:\ 739849088\,\ wanted:\ 6946816;\ memory\ allocation\ limit\ reached:\ limit\ 740000000\ bytes\,\ allocated:\ 739849088\,\ wanted:\ 6946816,errorCode=invalid,errorType=user,host=queryd-algow-rw-76d68d5968-fzgwr,hostname=queryd-algow-rw-76d68d5968-fzgwr,nodename=ip-10-153-10-221.eu-central-1.compute.internal,orgID=0b6e852e272ffdd9,ot_trace_sampled=false,role=queryd-algow-rw,source=hackney,ÿ=responseSize#!~#responseSize
+        let buf = vec![
+            "844910ECE80BE8BC3C0BD4C89186CA892C",
+            "003D71756572795F6C6F672C656E763D70726F6430312D65752D63656E747261",
+            "6C2D312C6572726F723D6D656D6F72795C20616C6C6F636174696F6E5C206C69",
+            "6D69745C20726561636865643A5C206C696D69745C203734303030303030305C",
+            "2062797465735C2C5C20616C6C6F63617465643A5C203733393834393038385C2",
+            "C5C2077616E7465643A5C20363934363831363B5C206D656D6F72795C20616C6C",
+            "6F636174696F6E5C206C696D69745C20726561636865643A5C206C696D69745C2",
+            "03734303030303030305C2062797465735C2C5C20616C6C6F63617465643A5C20",
+            "3733393834393038385C2C5C2077616E7465643A5C20363934363831362C65727",
+            "26F72436F64653D696E76616C69642C6572726F72547970653D757365722C686F",
+            "73743D7175657279642D616C676F772D72772D373664363864353936382D667A6",
+            "777722C686F73746E616D653D7175657279642D616C676F772D72772D37366436",
+            "3864353936382D667A6777722C6E6F64656E616D653D69702D31302D3135332D3",
+            "1302D3232312E65752D63656E7472616C2D312E636F6D707574652E696E746572",
+            "6E616C2C6F726749443D306236653835326532373266666464392C6F745F74726",
+            "163655F73616D706C65643D66616C73652C726F6C653D7175657279642D616C67",
+            "6F772D72772C736F757263653D6861636B6E65792CFF3D726573706F6E7365536",
+            "97A6523217E23726573706F6E736553697A65",
+        ]
+        .join("");
+        let tsm_key = hex::decode(buf).unwrap();
+
+        let parsed_key = super::parse_tsm_key(tsm_key).unwrap();
+        assert_eq!(parsed_key.measurement, String::from("query_log"));
+
+        let exp_tagset = vec![
+            (String::from("env"), String::from("prod01-eu-central-1")),
+            (String::from("error"), String::from("memory allocation limit reached: limit 740000000 bytes, allocated: 739849088, wanted: 6946816; memory allocation limit reached: limit 740000000 bytes, allocated: 739849088, wanted: 6946816")),
+            (String::from("errorCode"), String::from("invalid")),
+            (String::from("errorType"), String::from("user")),
+            (String::from("host"), String::from("queryd-algow-rw-76d68d5968-fzgwr")),
+            (String::from("hostname"), String::from("queryd-algow-rw-76d68d5968-fzgwr")),
+            (String::from("nodename"), String::from("ip-10-153-10-221.eu-central-1.compute.internal")),
+            (String::from("orgID"), String::from("0b6e852e272ffdd9")),
+            (String::from("ot_trace_sampled"), String::from("false")),
+            (String::from("role"), String::from("queryd-algow-rw")),
+            (String::from("source"), String::from("hackney")),
+
+        ];
+        assert_eq!(parsed_key.tagset, exp_tagset);
+        assert_eq!(parsed_key.field_key, String::from("requeueDuration"));
+    }
+
+    #[test]
     fn influx_id() {
         let id = InfluxID::new_str("20aa9b0").unwrap();
         assert_eq!(id, InfluxID(34_253_232));
