@@ -22,10 +22,12 @@ use delorean_tsm::{
 };
 use log::debug;
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
+use std::sync::Arc;
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufRead, Seek},
 };
+use tokio::sync::{mpsc, Mutex};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConversionSettings {
@@ -87,7 +89,15 @@ pub enum Error {
     // TODO clean this error up
     #[snafu(display(r#"could not find column"#))]
     CouldNotFindColumn,
+
+    #[snafu(display(r#"Error sending work to workers: {}"#, source))]
+    ChannelSendError { source: Box<dyn std::error::Error> },
+
+    #[snafu(display(r#"Error in worker: {}"#, source))]
+    WorkerError { source: Box<dyn std::error::Error> },
 }
+
+unsafe impl std::marker::Send for Error {}
 
 /// Handles buffering `ParsedLine` objects and deducing a schema from that sample
 #[derive(Debug)]
@@ -511,46 +521,91 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packers> {
 /// Converts a TSM file into the delorean_table internal columnar
 /// data format and then passes that converted data to a
 /// `DeloreanTableWriter`
-pub struct TSMFileConverter {
-    table_writer_source: Box<dyn DeloreanTableWriterSource>,
+#[derive(Clone, Copy)]
+pub struct TSMFileConverter {}
+
+fn do_work(
+    measurement: Result<MeasurementTable, TSMError>,
+    block_reader: impl BlockDecoder,
+    table_writer_source: &mut (dyn DeloreanTableWriterSource + std::marker::Send),
+) -> Result<(), Error> {
+    println!("AAL processing measurement...");
+    let mut m = measurement.context(TSMProcessing)?;
+    let (schema, packed_columns) =
+        TSMFileConverter::process_measurement_table(block_reader, &mut m)?;
+
+    let mut table_writer = table_writer_source
+        .next_writer(&schema)
+        .context(WriterCreation)?;
+
+    table_writer.write_batch(&packed_columns).context(Writing)?;
+
+    table_writer.close().context(WriterCreation)?;
+
+    Ok(())
 }
 
 impl TSMFileConverter {
-    pub fn new(table_writer_source: Box<dyn DeloreanTableWriterSource>) -> Self {
-        Self {
-            table_writer_source,
-        }
-    }
-
     /// Processes a TSM file's index and writes each measurement to a Parquet
-    /// writer.
-    pub fn convert(
+    /// writer. Returns a future which resolves to the result
+    pub async fn convert(
         &mut self,
+        mut table_writer_source: Box<dyn DeloreanTableWriterSource + std::marker::Send>,
         index_stream: impl BufRead + Seek,
         index_stream_size: usize,
-        block_stream: impl BufRead + Seek,
+        block_stream: impl BufRead + Seek + std::marker::Send + 'static,
     ) -> Result<(), Error> {
+        println!("AAL Beginning tsm conversion");
         let index_reader =
             TSMIndexReader::try_new(index_stream, index_stream_size).context(TSMProcessing)?;
-        let mut block_reader = TSMBlockReader::new(block_stream);
+
+        let errors: Vec<Box<dyn std::error::Error + std::marker::Send + 'static>> = Vec::new();
+        let errors = Arc::new(Mutex::new(errors));
+        let writer_errors = errors.clone();
 
         let mapper = TSMMeasurementMapper::new(index_reader.peekable());
 
+        // channel where we will send measurements to be converted
+        let (mut tx, mut rx) = mpsc::channel(1);
+
+        // this future handles reading measurements off rx, and writing them to the table
+        // writer. TODO spawn a thread per writer.
+        let writer = tokio::task::spawn(async move {
+            let mut block_reader = TSMBlockReader::new(block_stream);
+            while let Some(measurement) = rx.recv().await {
+                let res = do_work(measurement, &mut block_reader, &mut table_writer_source);
+                if let Err(e) = res {
+                    writer_errors.lock().await.push(Box::new(e));
+                }
+            }
+        });
+
         for measurement in mapper {
-            let mut m = measurement.context(TSMProcessing)?;
-            let (schema, packed_columns) =
-                Self::process_measurement_table(&mut block_reader, &mut m)?;
-
-            let mut table_writer = self
-                .table_writer_source
-                .next_writer(&schema)
-                .context(WriterCreation)?;
-
-            table_writer
-                .write_batch(&packed_columns)
-                .context(WriterCreation)?;
-            table_writer.close().context(WriterCreation)?;
+            println!("Sending measurement");
+            tx.send(measurement)
+                .await
+                .map_err(|e| Error::ChannelSendError {
+                    source: Box::new(e),
+                })?
         }
+
+        // close tx channel so writer knows we are done
+        println!("closing channel");
+        std::mem::drop(tx);
+
+        // wait for writer to complete
+        println!("waiting for writer to complete");
+        writer.await.map_err(|e| Error::WorkerError {
+            source: Box::new(e),
+        })?;
+
+        let mut errors = errors.lock().await;
+        // If any writer errored, return only the last one (TBD is
+        // there some better way to handle these errors?)
+        if let Some(e) = errors.pop() {
+            return Err(Error::WorkerError { source: e });
+        }
+
         Ok(())
     }
 
@@ -784,13 +839,15 @@ mod delorean_ingest_tests {
     use delorean_table_schema::ColumnDefinition;
     use delorean_test_helpers::approximately_equal;
 
-    use libflate::gzip;
-    use std::fs::File;
-    use std::io::BufReader;
-    use std::io::Cursor;
-    use std::io::Read;
+    //use libflate::gzip;
+    // use std::fs::File;
+    // use std::io::BufReader;
+    // use std::io::Cursor;
+    // use std::io::Read;
 
     use std::sync::{Arc, Mutex};
+    //use tokio::prelude::*;
+    //use tokio::test;
 
     /// Record what happens when the writer is created so we can
     /// inspect it as part of the tests. It uses string manipulation
@@ -1702,44 +1759,45 @@ mod delorean_ingest_tests {
         Ok(())
     }
 
-    #[test]
-    fn conversion_tsm_files() -> Result<(), Error> {
-        let file = File::open("../tests/fixtures/000000000000462-000000002.tsm.gz");
-        let mut decoder = gzip::Decoder::new(file.unwrap()).unwrap();
-        let mut buf = Vec::new();
-        decoder.read_to_end(&mut buf).unwrap();
+    // #[test]
+    // fn conversion_tsm_files() -> Result<(), Error> {
+    //     let file = File::open("../tests/fixtures/000000000000462-000000002.tsm.gz");
+    //     let mut decoder = gzip::Decoder::new(file.unwrap()).unwrap();
+    //     let mut buf = Vec::new();
+    //     decoder.read_to_end(&mut buf).unwrap();
 
-        let log = Arc::new(Mutex::new(WriterLog::new()));
-        let mut converter = TSMFileConverter::new(NoOpWriterSource::new(log.clone()));
-        let index_steam = BufReader::new(Cursor::new(&buf));
-        let block_stream = BufReader::new(Cursor::new(&buf));
-        converter
-            .convert(index_steam, 236_029, block_stream)
-            .unwrap();
+    //     let log = Arc::new(Mutex::new(WriterLog::new()));
+    //     let mut converter = TSMFileConverter::new(NoOpWriterSource::new(log.clone()));
+    //     let index_steam = BufReader::new(Cursor::new(&buf));
+    //     let block_stream = BufReader::new(Cursor::new(&buf));
+    //     converter
+    //         .convert(index_steam, 236_029, block_stream)
+    //         .await
+    //         .unwrap();
 
-        // CPU columns: - tags: cpu, host. (2)
-        //                fields: usage_guest, usage_guest_nice
-        //                        usage_idle, usage_iowait, usage_irq,
-        //                        usage_nice, usage_softirq, usage_steal,
-        //                        usage_system, usage_user (10)
-        //                timestamp (1)
-        //
-        // disk columns: - tags: device, fstype, host, mode, path (5)
-        //                 fields: free, inodes_free, inodes_total, inodes_used,
-        //                         total, used, used_percent (7)
-        //                 timestamp (1)
-        assert_eq!(
-            get_events(&log),
-            vec![
-                "Created writer for measurement cpu",
-                "[cpu] Wrote batch of 13 cols, 8568 rows",
-                "[cpu] Closed",
-                "Created writer for measurement disk",
-                "[disk] Wrote batch of 13 cols, 3535 rows",
-                "[disk] Closed"
-            ],
-        );
+    //     // CPU columns: - tags: cpu, host. (2)
+    //     //                fields: usage_guest, usage_guest_nice
+    //     //                        usage_idle, usage_iowait, usage_irq,
+    //     //                        usage_nice, usage_softirq, usage_steal,
+    //     //                        usage_system, usage_user (10)
+    //     //                timestamp (1)
+    //     //
+    //     // disk columns: - tags: device, fstype, host, mode, path (5)
+    //     //                 fields: free, inodes_free, inodes_total, inodes_used,
+    //     //                         total, used, used_percent (7)
+    //     //                 timestamp (1)
+    //     assert_eq!(
+    //         get_events(&log),
+    //         vec![
+    //             "Created writer for measurement cpu",
+    //             "[cpu] Wrote batch of 13 cols, 8568 rows",
+    //             "[cpu] Closed",
+    //             "Created writer for measurement disk",
+    //             "[disk] Wrote batch of 13 cols, 3535 rows",
+    //             "[disk] Closed"
+    //         ],
+    //     );
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }

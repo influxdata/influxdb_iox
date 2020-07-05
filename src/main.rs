@@ -27,7 +27,8 @@ enum ReturnCode {
     ServerExitedAbnormally = 4,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let help = r#"Delorean server and command line tools
 
 Examples:
@@ -115,7 +116,9 @@ Examples:
             let output_filename = sub_matches.value_of("OUTPUT").unwrap();
             let compression_level =
                 value_t!(sub_matches, "compression_level", CompressionLevel).unwrap();
-            match commands::convert::convert(&input_filename, &output_filename, compression_level) {
+            match commands::convert::convert(&input_filename, &output_filename, compression_level)
+                .await
+            {
                 Ok(()) => debug!("Conversion completed successfully"),
                 Err(e) => {
                     eprintln!("Conversion failed: {}", e);
@@ -145,7 +148,7 @@ Examples:
         }
         ("server", Some(_)) | (_, _) => {
             println!("Starting delorean server...");
-            match commands::server::main() {
+            match commands::server::main().await {
                 Ok(()) => eprintln!("Shutdown OK"),
                 Err(e) => {
                     error!("Server shutdown with error: {:?}", e);

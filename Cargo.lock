@@ -691,6 +691,7 @@ dependencies = [
  "libflate",
  "log",
  "snafu",
+ "tokio",
 ]
 
 [[package]]

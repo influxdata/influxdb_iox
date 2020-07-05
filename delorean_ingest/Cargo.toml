@@ -11,6 +11,7 @@ edition = "2018"
 snafu = "0.6.2"
 env_logger = "0.7.1"
 log = "0.4.8"
+tokio = { version = "0.2", features = ["full"] }
 delorean_line_parser = { path = "../delorean_line_parser" }
 delorean_table = { path = "../delorean_table" }
 delorean_table_schema = { path = "../delorean_table_schema" }

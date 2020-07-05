@@ -103,7 +103,7 @@ pub fn is_directory(p: impl AsRef<Path>) -> bool {
         .unwrap_or(false)
 }
 
-pub fn convert(
+pub async fn convert(
     input_filename: &str,
     output_name: &str,
     compression_level: CompressionLevel,
@@ -137,6 +137,7 @@ pub fn convert(
                 input_block_reader,
                 output_name,
             )
+            .await
         }
         FileType::Parquet => ParquetNotImplemented.fail(),
     }
@@ -197,7 +198,7 @@ fn convert_line_protocol_to_parquet(
     Ok(())
 }
 
-fn convert_tsm_to_parquet(
+async fn convert_tsm_to_parquet(
     index_stream: InputReader,
     index_stream_size: usize,
     compression_level: CompressionLevel,
@@ -205,24 +206,26 @@ fn convert_tsm_to_parquet(
     output_name: &str,
 ) -> Result<()> {
     // setup writing
-    let writer_source: Box<dyn DeloreanTableWriterSource> = if is_directory(&output_name) {
-        info!("Writing to output directory {:?}", output_name);
-        Box::new(ParquetDirectoryWriterSource {
-            compression_level,
-            output_dir_path: PathBuf::from(output_name),
-        })
-    } else {
-        info!("Writing to output file {}", output_name);
-        Box::new(ParquetFileWriterSource {
-            compression_level,
-            output_filename: String::from(output_name),
-            made_file: false,
-        })
-    };
+    let writer_source: Box<dyn DeloreanTableWriterSource + std::marker::Send> =
+        if is_directory(&output_name) {
+            info!("Writing to output directory {:?}", output_name);
+            Box::new(ParquetDirectoryWriterSource {
+                compression_level,
+                output_dir_path: PathBuf::from(output_name),
+            })
+        } else {
+            info!("Writing to output file {}", output_name);
+            Box::new(ParquetFileWriterSource {
+                compression_level,
+                output_filename: String::from(output_name),
+                made_file: false,
+            })
+        };
 
-    let mut converter = TSMFileConverter::new(writer_source);
+    let mut converter = TSMFileConverter {};
     converter
-        .convert(index_stream, index_stream_size, block_stream)
+        .convert(writer_source, index_stream, index_stream_size, block_stream)
+        .await
         .context(UnableToCloseTableWriter)
 }
 
