@@ -688,9 +688,11 @@ dependencies = [
  "delorean_test_helpers",
  "delorean_tsm",
  "env_logger",
+ "futures",
  "libflate",
  "log",
  "snafu",
+ "tokio",
 ]
 
 [[package]]
@@ -1044,6 +1046,7 @@ dependencies = [
  "futures-core",
  "futures-task",
  "futures-util",
+ "num_cpus",
 ]
 
 [[package]]

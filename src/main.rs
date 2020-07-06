@@ -5,10 +5,10 @@
     clippy::explicit_iter_loop,
     clippy::use_self
 )]
-
 use clap::{crate_authors, crate_version, value_t, App, Arg, SubCommand};
 use delorean_parquet::writer::CompressionLevel;
-use log::{debug, error, warn};
+use futures::executor::ThreadPool;
+use tracing::{debug, error, warn};
 
 pub mod server;
 
@@ -25,6 +25,7 @@ enum ReturnCode {
     MetadataDumpFailed = 2,
     StatsFailed = 3,
     ServerExitedAbnormally = 4,
+    CanNotStartThreadPool = 5,
 }
 
 #[tokio::main]
@@ -110,13 +111,32 @@ Examples:
 
     setup_logging(matches.is_present("verbose"));
 
+    // Fire up a separate threadpool for CPU heavy tasks
+    let thread_pool = match ThreadPool::new() {
+        Ok(thread_pool) => {
+            debug!("Created threadpool: {:?}", thread_pool);
+            thread_pool
+        }
+        Err(e) => {
+            error!("Exiting due to failure to start threadpool, : {}", e);
+            std::process::exit(ReturnCode::CanNotStartThreadPool as _)
+        }
+    };
+
     match matches.subcommand() {
         ("convert", Some(sub_matches)) => {
             let input_filename = sub_matches.value_of("INPUT").unwrap();
             let output_filename = sub_matches.value_of("OUTPUT").unwrap();
             let compression_level =
                 value_t!(sub_matches, "compression_level", CompressionLevel).unwrap();
-            match commands::convert::convert(&input_filename, &output_filename, compression_level) {
+            match commands::convert::convert(
+                thread_pool,
+                &input_filename,
+                &output_filename,
+                compression_level,
+            )
+            .await
+            {
                 Ok(()) => debug!("Conversion completed successfully"),
                 Err(e) => {
                     eprintln!("Conversion failed: {}", e);

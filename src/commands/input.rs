@@ -18,14 +18,14 @@ pub enum FileType {
     Parquet,
 }
 
-// Interface for interacting with streams
+/// Interface for interacting with streams from delorean command line
 #[derive(Debug)]
 pub enum InputReader {
     FileInputType(FileInputReader),
     MemoryInputType(MemoryInputReader),
 }
 
-// Contains a (file backed) reader to read raw uncompressed bytes
+/// Contains a (file backed) reader to read raw uncompressed bytes
 #[derive(Debug)]
 pub struct FileInputReader {
     file_type: FileType,
@@ -33,7 +33,7 @@ pub struct FileInputReader {
     reader: BufReader<std::fs::File>,
 }
 
-// Contains an in-memory reader...
+/// Contains a reader that is based on an in-memory buffer...
 #[derive(Debug)]
 pub struct MemoryInputReader {
     file_type: FileType,

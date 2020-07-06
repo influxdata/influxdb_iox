@@ -1,11 +1,13 @@
 use delorean_ingest::{
-    ConversionSettings, Error as IngestError, LineProtocolConverter, TSMFileConverter,
+    ConversionSettings, Error as IngestError, IngestReader, InputSource, LineProtocolConverter,
+    TSMFileConverter,
 };
 use delorean_line_parser::parse_lines;
 use delorean_parquet::writer::Error as ParquetWriterError;
 use delorean_parquet::writer::{CompressionLevel, DeloreanParquetTableWriter};
 use delorean_table::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError};
 use delorean_table_schema::Schema;
+use futures::task::SpawnExt;
 use log::{debug, info, warn};
 use snafu::{ResultExt, Snafu};
 use std::{
@@ -103,7 +105,8 @@ pub fn is_directory(p: impl AsRef<Path>) -> bool {
         .unwrap_or(false)
 }
 
-pub fn convert(
+pub async fn convert(
+    thread_pool: impl SpawnExt + Send,
     input_filename: &str,
     output_name: &str,
     compression_level: CompressionLevel,
@@ -126,17 +129,37 @@ pub fn convert(
             output_name,
         ),
         FileType::TSM => {
-            // TODO(edd): we can remove this when I figure out the best way to share
-            // the reader between the TSM index reader and the Block decoder.
-            let input_block_reader = InputReader::new(input_filename).context(OpenInput)?;
+            // TSM converter is multi-threaded, so it needs to read
+            // the input in parallel with different readers. Set up
+            // a thing that can open the input source in parallel
+
+            struct InputReaderSource {
+                input_filename: String,
+            }
+            impl InputSource for InputReaderSource {
+                fn new_reader(
+                    &self,
+                ) -> std::result::Result<Box<dyn IngestReader>, Box<dyn std::error::Error>>
+                {
+                    let input_block_reader = InputReader::new(&self.input_filename)
+                        .context(OpenInput)
+                        .map_err(|e| Box::new(e))?;
+                    Ok(Box::new(input_block_reader))
+                }
+            }
+
             let len = input_reader.len() as usize;
             convert_tsm_to_parquet(
+                thread_pool,
                 input_reader,
                 len,
                 compression_level,
-                input_block_reader,
+                InputReaderSource {
+                    input_filename: input_filename.into(),
+                },
                 output_name,
             )
+            .await
         }
         FileType::Parquet => ParquetNotImplemented.fail(),
     }
@@ -172,7 +195,7 @@ fn convert_line_protocol_to_parquet(
         }
     });
 
-    let writer_source: Box<dyn DeloreanTableWriterSource> = if is_directory(&output_name) {
+    let writer_source: Box<dyn DeloreanTableWriterSource + Send> = if is_directory(&output_name) {
         info!("Writing to output directory {:?}", output_name);
         Box::new(ParquetDirectoryWriterSource {
             compression_level,
@@ -197,15 +220,16 @@ fn convert_line_protocol_to_parquet(
     Ok(())
 }
 
-fn convert_tsm_to_parquet(
+async fn convert_tsm_to_parquet(
+    thread_pool: impl SpawnExt + Send,
     index_stream: InputReader,
     index_stream_size: usize,
     compression_level: CompressionLevel,
-    block_stream: InputReader,
+    block_stream_source: impl InputSource + Send + 'static,
     output_name: &str,
 ) -> Result<()> {
     // setup writing
-    let writer_source: Box<dyn DeloreanTableWriterSource> = if is_directory(&output_name) {
+    let writer_source: Box<dyn DeloreanTableWriterSource + Send> = if is_directory(&output_name) {
         info!("Writing to output directory {:?}", output_name);
         Box::new(ParquetDirectoryWriterSource {
             compression_level,
@@ -220,10 +244,15 @@ fn convert_tsm_to_parquet(
         })
     };
 
-    let mut converter = TSMFileConverter::new(writer_source);
-    converter
-        .convert(index_stream, index_stream_size, block_stream)
-        .context(UnableToCloseTableWriter)
+    TSMFileConverter::convert(
+        thread_pool,
+        writer_source,
+        index_stream,
+        index_stream_size,
+        block_stream_source,
+    )
+    .await
+    .context(UnableToCloseTableWriter)
 }
 
 #[derive(Debug, Snafu)]

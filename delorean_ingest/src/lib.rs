@@ -20,12 +20,27 @@ use delorean_tsm::{
     reader::{BlockDecoder, TSMBlockReader, TSMIndexReader},
     BlockType, TSMError,
 };
-use log::debug;
+use futures::{
+    lock::Mutex as FutureMutex,
+    task::{SpawnError, SpawnExt},
+};
+use log::{debug, error, warn};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
+use std::sync::{Arc, Mutex};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufRead, Seek},
 };
+
+/// Trait for things that can provide new input readers into the
+/// *same* underlying data concurrently (by different tasks/threads)
+pub trait IngestReader: BufRead + Seek + Send {}
+
+impl<T: BufRead + Seek + Send> IngestReader for T {}
+
+pub trait InputSource {
+    fn new_reader(&self) -> std::result::Result<Box<dyn IngestReader>, Box<dyn std::error::Error>>;
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConversionSettings {
@@ -34,8 +49,6 @@ pub struct ConversionSettings {
     // Buffer up tp this many ParsedLines per measurement before writing them
     measurement_write_buffer_size: usize,
 }
-
-impl ConversionSettings {}
 
 impl Default for ConversionSettings {
     /// Reasonable default settings
@@ -59,7 +72,7 @@ pub struct LineProtocolConverter<'a> {
     // NB Use owned strings as key so we can look up by str
     converters: BTreeMap<String, MeasurementConverter<'a>>,
 
-    table_writer_source: Box<dyn DeloreanTableWriterSource>,
+    table_writer_source: Box<dyn DeloreanTableWriterSource + Send>,
 }
 
 #[derive(Snafu, Debug)]
@@ -87,7 +100,20 @@ pub enum Error {
     // TODO clean this error up
     #[snafu(display(r#"could not find column"#))]
     CouldNotFindColumn,
+
+    #[snafu(display(r#"Could not spawn converter thread"#))]
+    SpawnFailure { source: SpawnError },
+
+    #[snafu(display(r#"Error sending work to converter thread"#))]
+    ThreadCommunication { source: Box<dyn std::error::Error> },
+
+    #[snafu(display(r#"Error opening TSM input source for reading block"#))]
+    TSMInputSource { source: Box<dyn std::error::Error> },
 }
+
+unsafe impl Send for Error {}
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Handles buffering `ParsedLine` objects and deducing a schema from that sample
 #[derive(Debug)]
@@ -192,7 +218,7 @@ impl<'a> LineProtocolConverter<'a> {
     /// `table_writer_source`.
     pub fn new(
         settings: ConversionSettings,
-        table_writer_source: Box<dyn DeloreanTableWriterSource>,
+        table_writer_source: Box<dyn DeloreanTableWriterSource + Send + 'static>,
     ) -> Self {
         LineProtocolConverter {
             settings,
@@ -511,46 +537,91 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packers> {
 /// Converts a TSM file into the delorean_table internal columnar
 /// data format and then passes that converted data to a
 /// `DeloreanTableWriter`
-pub struct TSMFileConverter {
-    table_writer_source: Box<dyn DeloreanTableWriterSource>,
-}
+#[derive(Clone, Copy)]
+pub struct TSMFileConverter {}
 
 impl TSMFileConverter {
-    pub fn new(table_writer_source: Box<dyn DeloreanTableWriterSource>) -> Self {
-        Self {
-            table_writer_source,
-        }
-    }
-
     /// Processes a TSM file's index and writes each measurement to a Parquet
     /// writer.
-    pub fn convert(
-        &mut self,
+    ///
+    /// The TSM index will be read using `index_stream` and each of
+    /// the block streams will be used by a worker thread as it reads
+    /// and decodes blocks and writes it to parquet
+    pub async fn convert(
+        thread_pool: impl SpawnExt,
+        table_writer_source: Box<dyn DeloreanTableWriterSource + Send + 'static>,
         index_stream: impl BufRead + Seek,
         index_stream_size: usize,
-        block_stream: impl BufRead + Seek,
+        block_stream_source: impl InputSource + Send + 'static,
     ) -> Result<(), Error> {
         let index_reader =
             TSMIndexReader::try_new(index_stream, index_stream_size).context(TSMProcessing)?;
-        let mut block_reader = TSMBlockReader::new(block_stream);
 
         let mapper = TSMMeasurementMapper::new(index_reader.peekable());
 
+        let block_stream_source = Arc::new(FutureMutex::new(block_stream_source));
+        let table_writer_source = Arc::new(Mutex::new(table_writer_source));
+
+        let mut job_handles = Vec::new();
         for measurement in mapper {
-            let mut m = measurement.context(TSMProcessing)?;
-            let (schema, packed_columns) =
-                Self::process_measurement_table(&mut block_reader, &mut m)?;
+            let mut m = match measurement {
+                Ok(m) => m,
+                Err(e) => {
+                    warn!("Ignoring index error: {}", e);
+                    continue;
+                }
+            };
 
-            let mut table_writer = self
-                .table_writer_source
-                .next_writer(&schema)
-                .context(WriterCreation)?;
+            // prepare the state to be moved
+            let work_block_stream_source = block_stream_source.clone();
+            let work_table_writer_source = table_writer_source.clone();
 
-            table_writer
-                .write_batch(&packed_columns)
-                .context(WriterCreation)?;
-            table_writer.close().context(WriterCreation)?;
+            debug!("Scheduling processing of measurement {}", m.name);
+
+            let work = async move {
+                let block_stream = work_block_stream_source
+                    .lock()
+                    .await
+                    .new_reader()
+                    .context(TSMInputSource)?;
+                let mut block_reader = TSMBlockReader::new(block_stream);
+
+                let (schema, packed_columns) =
+                    Self::process_measurement_table(&mut block_reader, &mut m)?;
+                debug!("WRITER [{}] Completed packing measurement table", m.name);
+
+                let mut table_writer = work_table_writer_source
+                    .lock()
+                    .expect("Locked table writer mutex")
+                    .next_writer(&schema)
+                    .context(WriterCreation)?;
+
+                debug!(
+                    "WRITER [{}] Created table writer for {} rows",
+                    m.name,
+                    packed_columns[0].num_rows()
+                );
+
+                table_writer
+                    .write_batch(&packed_columns)
+                    .context(WriterCreation)?;
+                table_writer.close().context(WriterCreation)?;
+                debug!("WRITER [{}] Completed writing to table writer", m.name);
+
+                Ok::<(), Error>(())
+            };
+
+            job_handles.push(thread_pool.spawn_with_handle(work).context(SpawnFailure)?);
         }
+
+        for res in futures::future::join_all(job_handles).await {
+            // If any of the writers fail, fail the whole conversion
+            if let Err(e) = res {
+                error!("Error during write: {}", e);
+                return Err(e);
+            }
+        }
+
         Ok(())
     }
 
@@ -790,6 +861,7 @@ mod delorean_ingest_tests {
     use std::io::Cursor;
     use std::io::Read;
 
+    use futures::executor::ThreadPool;
     use std::sync::{Arc, Mutex};
 
     /// Record what happens when the writer is created so we can
@@ -1702,20 +1774,40 @@ mod delorean_ingest_tests {
         Ok(())
     }
 
-    #[test]
-    fn conversion_tsm_files() -> Result<(), Error> {
+    #[tokio::test]
+    async fn conversion_tsm_files() -> Result<(), Error> {
         let file = File::open("../tests/fixtures/000000000000462-000000002.tsm.gz");
         let mut decoder = gzip::Decoder::new(file.unwrap()).unwrap();
         let mut buf = Vec::new();
         decoder.read_to_end(&mut buf).unwrap();
 
+        let thread_pool = ThreadPool::new().expect("creating thread pool");
+
         let log = Arc::new(Mutex::new(WriterLog::new()));
-        let mut converter = TSMFileConverter::new(NoOpWriterSource::new(log.clone()));
-        let index_steam = BufReader::new(Cursor::new(&buf));
-        let block_stream = BufReader::new(Cursor::new(&buf));
-        converter
-            .convert(index_steam, 236_029, block_stream)
-            .unwrap();
+        let table_writer_source = NoOpWriterSource::new(log.clone());
+
+        struct TestInputSource {
+            buf: Vec<u8>,
+        }
+        impl InputSource for TestInputSource {
+            fn new_reader(&self) -> Result<Box<dyn IngestReader>, Box<dyn std::error::Error>> {
+                let input_reader = BufReader::new(Cursor::new(self.buf.clone()));
+                Ok(Box::new(input_reader))
+            }
+        }
+
+        let buf_len = buf.len();
+        let index_stream = Cursor::new(buf.clone());
+        let input_reader_source = TestInputSource { buf };
+        TSMFileConverter::convert(
+            thread_pool,
+            table_writer_source,
+            index_stream,
+            buf_len,
+            input_reader_source,
+        )
+        .await
+        .unwrap();
 
         // CPU columns: - tags: cpu, host. (2)
         //                fields: usage_guest, usage_guest_nice
@@ -1728,15 +1820,20 @@ mod delorean_ingest_tests {
         //                 fields: free, inodes_free, inodes_total, inodes_used,
         //                         total, used, used_percent (7)
         //                 timestamp (1)
+
+        let mut events = get_events(&log);
+        // as this is multi-threaded, the order is not deterministic
+        events.sort();
+
         assert_eq!(
-            get_events(&log),
+            events,
             vec![
                 "Created writer for measurement cpu",
-                "[cpu] Wrote batch of 13 cols, 8568 rows",
-                "[cpu] Closed",
                 "Created writer for measurement disk",
+                "[cpu] Closed",
+                "[cpu] Wrote batch of 13 cols, 8568 rows",
+                "[disk] Closed",
                 "[disk] Wrote batch of 13 cols, 3535 rows",
-                "[disk] Closed"
             ],
         );
 
