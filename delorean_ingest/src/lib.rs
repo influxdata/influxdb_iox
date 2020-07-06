@@ -529,7 +529,6 @@ fn do_work(
     block_reader: impl BlockDecoder,
     table_writer_source: &mut (dyn DeloreanTableWriterSource + std::marker::Send),
 ) -> Result<(), Error> {
-    println!("AAL processing measurement...");
     let mut m = measurement.context(TSMProcessing)?;
     let (schema, packed_columns) =
         TSMFileConverter::process_measurement_table(block_reader, &mut m)?;
@@ -555,7 +554,6 @@ impl TSMFileConverter {
         index_stream_size: usize,
         block_stream: impl BufRead + Seek + std::marker::Send + 'static,
     ) -> Result<(), Error> {
-        println!("AAL Beginning tsm conversion");
         let index_reader =
             TSMIndexReader::try_new(index_stream, index_stream_size).context(TSMProcessing)?;
 
@@ -581,7 +579,6 @@ impl TSMFileConverter {
         });
 
         for measurement in mapper {
-            println!("Sending measurement");
             tx.send(measurement)
                 .await
                 .map_err(|e| Error::ChannelSendError {
@@ -590,11 +587,9 @@ impl TSMFileConverter {
         }
 
         // close tx channel so writer knows we are done
-        println!("closing channel");
         std::mem::drop(tx);
 
         // wait for writer to complete
-        println!("waiting for writer to complete");
         writer.await.map_err(|e| Error::WorkerError {
             source: Box::new(e),
         })?;
