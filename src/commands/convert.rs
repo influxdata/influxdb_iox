@@ -142,8 +142,7 @@ pub async fn convert(
                 ) -> std::result::Result<Box<dyn IngestReader>, Box<dyn std::error::Error>>
                 {
                     let input_block_reader = InputReader::new(&self.input_filename)
-                        .context(OpenInput)
-                        .map_err(|e| Box::new(e))?;
+                        .context(OpenInput)?;
                     Ok(Box::new(input_block_reader))
                 }
             }
