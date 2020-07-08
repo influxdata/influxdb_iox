@@ -316,9 +316,9 @@ fn parse_tsm_tag_value(
     // Examine each character in the tag value until we hit an unescaped
     // comma (move onto next tag key), or we error out.
     //
-    // In line protocol, it is an error to have an unescaped space
-    // comma in a tag value.  However, in the TSM index, it is
-    // possible to have have such unescaped spaces values. For example, in
+    // In line protocol, it is an error to have an unescaped space in
+    // a tag value.  However, in the TSM index, it is possible to have
+    // have such unescaped spaces values. For example, in
     // https://github.com/influxdata/delorean/issues/228: we saw one
     // like the following (note the combination of escaped and
     // unescaped strings):
