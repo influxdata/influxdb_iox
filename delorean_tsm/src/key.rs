@@ -315,6 +315,15 @@ fn parse_tsm_tag_value(
 
     // Examine each character in the tag value until we hit an unescaped
     // comma (move onto next tag key), or we error out.
+    //
+    // In line protocol, it is an error to have an unescaped space
+    // comma in a tag value.  However, in the TSM index, it is
+    // possible to have have such unescaped spaces values. For example, in
+    // https://github.com/influxdata/delorean/issues/228: we saw one
+    // like the following (note the combination of escaped and
+    // unescaped strings):
+    //
+    // memoryUsageAfterGc.Code\ Cache#!~#memoryUsageAfterGc.Code Cache
     for byte in rem_key {
         match state {
             State::Start => {
@@ -329,13 +338,6 @@ fn parse_tsm_tag_value(
                         .fail()
                     }
                     // An unescaped space is an invalid tag value.
-                    b' ' => {
-                        return ParsingTSMTagValue {
-                            tag_key,
-                            description: "invalid unescaped ' '",
-                        }
-                        .fail()
-                    }
                     b',' => {
                         return ParsingTSMTagValue {
                             tag_key,
@@ -358,14 +360,6 @@ fn parse_tsm_tag_value(
                         return ParsingTSMTagValue {
                             tag_key,
                             description: "invalid unescaped '='",
-                        }
-                        .fail()
-                    }
-                    // An unescaped space is an invalid tag value.
-                    b' ' => {
-                        return ParsingTSMTagValue {
-                            tag_key,
-                            description: "invalid unescaped ' '",
                         }
                         .fail()
                     }
@@ -484,8 +478,10 @@ mod tests {
         do_test_parse_tsm_tag_value_error(r"val1\", "", "tag value ends in escape");
         do_test_parse_tsm_tag_value_error(r"=b", "b", "invalid unescaped '='");
         do_test_parse_tsm_tag_value_error(r"f=b", "b", "invalid unescaped '='");
-        do_test_parse_tsm_tag_value_error(r" v", "v", "invalid unescaped ' '");
-        do_test_parse_tsm_tag_value_error(r"v ", "", "invalid unescaped ' '");
+        do_test_parse_tsm_tag_value_good(r" v", "", (false, " v".into()));
+        do_test_parse_tsm_tag_value_good(r"v ", "", (false, "v ".into()));
+        // Combination of escaped and unescaped strings
+        do_test_parse_tsm_tag_value_good(r"v x\ y z", "", (false, "v x y z".into()));
     }
 
     // create key in this form:
@@ -553,7 +549,7 @@ mod tests {
         // expect that a representation of the actual TSM key is in the error message
         assert!(
             err_str.contains(
-                "Error while parsing tsm tag key '1234567887654321, =m,tag1=val1,tag2=val2':"
+                "Error while parsing tsm tag key '1234567887654321,\x00=m,tag1=val1,tag2=val2':"
             ),
             err_str
         );
