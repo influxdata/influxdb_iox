@@ -1,0 +1,16 @@
+[package]
+name = "influxdb2_client_derive"
+version = "0.1.0"
+authors = ["Jake Goulding <jake.goulding@integer32.com>"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+influxdb2_client_core = { version = "0.1.0", path = "../influxdb2_client_core", default-features = false }
+syn = { version = "1.0.35", default-features = false, features = ["derive", "parsing", "proc-macro", "printing"] }
+quote = { version = "1.0.7", default-features = false }
+proc-macro2 = { version = "1.0.19", default-features = false }

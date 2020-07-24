@@ -18,6 +18,8 @@ members = [
     "delorean_tsm",
     "delorean_wal",
     "influxdb2_client",
+    "influxdb2_client/influxdb2_client_derive",
+    "influxdb2_client/influxdb2_client_core",
 ]
 
 [profile.release]

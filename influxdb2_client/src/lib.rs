@@ -61,7 +61,11 @@ use snafu::{ResultExt, Snafu};
 use std::io::{self, Write};
 
 mod data_point;
-pub use data_point::{DataPoint, FieldValue, WriteDataPoint};
+pub use data_point::{DataPoint, FieldValue};
+
+pub use influxdb2_client_core::*;
+#[cfg(feature = "derive")]
+pub use influxdb2_client_derive::DataPoint;
 
 /// Errors that occur while making requests to the Influx server.
 #[derive(Debug, Snafu)]
