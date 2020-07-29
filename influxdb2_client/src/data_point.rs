@@ -266,22 +266,56 @@ trait WriteFieldValue {
 }
 
 impl WriteFieldValue for FieldValue {
-    fn write_field_value_to<W>(&self, mut w: W) -> io::Result<()>
+    fn write_field_value_to<W>(&self, w: W) -> io::Result<()>
     where
         W: io::Write,
     {
         use FieldValue::*;
 
         match self {
-            Bool(v) => write!(w, "{}", if *v { "t" } else { "f" }),
-            F64(v) => write!(w, "{}", v),
-            I64(v) => write!(w, "{}i", v),
-            String(v) => {
-                w.write_all(br#"""#)?;
-                escape_and_write_value(v, FIELD_VALUE_STRING_DELIMITERS, &mut w)?;
-                w.write_all(br#"""#)
-            }
+            Bool(v) => v.write_field_value_to(w),
+            F64(v) => v.write_field_value_to(w),
+            I64(v) => v.write_field_value_to(w),
+            String(v) => v.write_field_value_to(w),
         }
+    }
+}
+
+impl WriteFieldValue for bool {
+    fn write_field_value_to<W>(&self, mut w: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
+        write!(w, "{}", if *self { "t" } else { "f" })
+    }
+}
+
+impl WriteFieldValue for f64 {
+    fn write_field_value_to<W>(&self, mut w: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
+        write!(w, "{}", self)
+    }
+}
+
+impl WriteFieldValue for i64 {
+    fn write_field_value_to<W>(&self, mut w: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
+        write!(w, "{}i", self)
+    }
+}
+
+impl WriteFieldValue for str {
+    fn write_field_value_to<W>(&self, mut w: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
+        w.write_all(br#"""#)?;
+        escape_and_write_value(self, FIELD_VALUE_STRING_DELIMITERS, &mut w)?;
+        w.write_all(br#"""#)
     }
 }
 
