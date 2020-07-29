@@ -205,6 +205,15 @@ trait WriteMeasurement {
         W: io::Write;
 }
 
+impl WriteMeasurement for String {
+    fn write_measurement_to<W>(&self, w: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
+        str::write_measurement_to(self, w)
+    }
+}
+
 impl WriteMeasurement for str {
     fn write_measurement_to<W>(&self, w: W) -> io::Result<()>
     where
@@ -218,6 +227,15 @@ trait WriteTagKey {
     fn write_tag_key_to<W>(&self, w: W) -> io::Result<()>
     where
         W: io::Write;
+}
+
+impl WriteTagKey for String {
+    fn write_tag_key_to<W>(&self, w: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
+        str::write_tag_key_to(self, w)
+    }
 }
 
 impl WriteTagKey for str {
@@ -235,6 +253,15 @@ trait WriteTagValue {
         W: io::Write;
 }
 
+impl WriteTagValue for String {
+    fn write_tag_value_to<W>(&self, w: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
+        str::write_tag_value_to(self, w)
+    }
+}
+
 impl WriteTagValue for str {
     fn write_tag_value_to<W>(&self, w: W) -> io::Result<()>
     where
@@ -248,6 +275,15 @@ trait WriteFieldKey {
     fn write_field_key_to<W>(&self, w: W) -> io::Result<()>
     where
         W: io::Write;
+}
+
+impl WriteFieldKey for String {
+    fn write_field_key_to<W>(&self, w: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
+        str::write_field_key_to(self, w)
+    }
 }
 
 impl WriteFieldKey for str {
@@ -305,6 +341,15 @@ impl WriteFieldValue for i64 {
         W: io::Write,
     {
         write!(w, "{}i", self)
+    }
+}
+
+impl WriteFieldValue for String {
+    fn write_field_value_to<W>(&self, w: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
+        str::write_field_value_to(self, w)
     }
 }
 
