@@ -692,6 +692,7 @@ name = "delorean_mem_qe"
 version = "0.1.0"
 dependencies = [
  "arrow",
+ "chrono",
  "croaring",
  "delorean_table",
  "snafu",
