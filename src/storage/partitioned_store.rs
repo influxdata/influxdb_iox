@@ -82,8 +82,8 @@ pub struct Partition {
 }
 
 #[derive(Debug)]
-struct WalDetails {
-    wal: Wal<mpsc::Sender<delorean_wal::Result<()>>>,
+pub struct WalDetails {
+    pub wal: Wal<mpsc::Sender<delorean_wal::Result<()>>>,
     metadata: WalMetadata,
     // There is no mechanism available to the HTTP API to trigger an immediate sync yet
     #[allow(dead_code)]
@@ -91,7 +91,7 @@ struct WalDetails {
 }
 
 impl WalDetails {
-    async fn write_metadata(&self) -> Result<()> {
+    pub async fn write_metadata(&self) -> Result<()> {
         let metadata_path = self.wal.metadata_path();
         Ok(tokio::fs::write(
             metadata_path.clone(),
@@ -317,7 +317,7 @@ impl Partition {
     }
 }
 
-async fn start_wal_sync_task(wal_builder: WalBuilder) -> Result<WalDetails> {
+pub async fn start_wal_sync_task(wal_builder: WalBuilder) -> Result<WalDetails> {
     let wal = wal_builder
         .wal::<mpsc::Sender<_>>()
         .context(UnderlyingWalError)?;
@@ -345,6 +345,8 @@ async fn start_wal_sync_task(wal_builder: WalBuilder) -> Result<WalDetails> {
                 };
 
                 let (to_notify, outcome) = task::block_in_place(|| wal.sync());
+
+                println!("wal synced!");
 
                 for mut notify in to_notify {
                     notify
