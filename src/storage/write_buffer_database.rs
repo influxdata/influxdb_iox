@@ -204,7 +204,10 @@ impl Db {
         let mut partitions = self.partitions.write().await;
 
         let mut builder = match &self.wal_details {
-            Some(_) => Some((flatbuffers::FlatBufferBuilder::new_with_capacity(1024), vec![])),
+            Some(_) => {
+                let fbb = flatbuffers::FlatBufferBuilder::new_with_capacity(1024);
+                Some(WalEntryBuilder{fbb, entries: vec![]})
+            },
             None => None,
         };
 
@@ -215,17 +218,8 @@ impl Db {
                 None => {
                     let id = self.next_partition_id.fetch_add(1, Ordering::Relaxed);
 
-                    if let Some((fb, entries)) = &mut builder {
-                        let partition_name = fb.create_string(&key);
-                        let partition_open = wb::PartitionOpen::create(fb, &wb::PartitionOpenArgs{
-                            id,
-                            name: Some(partition_name),
-                        });
-                        let entry = wb::WriteBufferEntry::create(fb, &wb::WriteBufferEntryArgs{
-                            partition_open: Some(partition_open),
-                            ..Default::default()
-                        });
-                        entries.push(entry);
+                    if let Some(builder) = &mut builder {
+                        builder.add_partition_open(id, &key);
                     }
 
                     let mut p = Partition::new(id, key);
@@ -236,19 +230,15 @@ impl Db {
         }
 
         if let Some(WalDetails { wal, .. }) = &self.wal_details {
-            let (fb, entries) = &mut builder.unwrap();
+            let builder = &mut builder.unwrap();
 
             let (ingest_done_tx, mut ingest_done_rx) = mpsc::channel(1);
 
             let mut w = wal.append();
 
-            let entry_vec = fb.create_vector(&entries);
-            let batch = wb::WriteBufferBatch::create(fb, &wb::WriteBufferBatchArgs{
-                entries: Some(entry_vec)
-            });
-            fb.finish(batch, None);
+            builder.create_batch();
 
-            w.write_all(fb.finished_data())
+            w.write_all(builder.fbb.finished_data())
                 .context(WritingToWal)?;
             w.finalize(ingest_done_tx).expect("TODO handle errors");
 
@@ -317,7 +307,7 @@ impl Partition {
         t.add_wal_row(values)
     }
 
-    fn write_line<'a>(&mut self, line: &ParsedLine<'_>, builder: &mut Option<(flatbuffers::FlatBufferBuilder<'a>, Vec<flatbuffers::WIPOffset<wb::WriteBufferEntry<'a>>>)>) -> Result<()> {
+    fn write_line<'a>(&mut self, line: &ParsedLine<'_>, builder: &mut Option<WalEntryBuilder<'_>>) -> Result<()> {
         let measurement = line.series.measurement.as_str();
         let table_id = self.get_or_insert_dict(measurement, builder);
         let partition_id = self.id;
@@ -348,14 +338,14 @@ impl Partition {
         Ok(())
     }
 
-    fn get_or_insert_dict<'a>(&mut self, value: &str, builder: &mut Option<(flatbuffers::FlatBufferBuilder<'a>, Vec<flatbuffers::WIPOffset<wb::WriteBufferEntry<'a>>>)>) -> u32 {
+    fn get_or_insert_dict<'a>(&mut self, value: &str, builder: &mut Option<WalEntryBuilder<'_>>) -> u32 {
         match self.dictionary.get(value) {
             Some(id) => symbol_to_u32(id),
             None => {
                 let id = symbol_to_u32(self.dictionary.get_or_intern(value));
 
-                if let Some((fbb, entries)) = builder {
-                    add_dictionary_entry(self.id, value, id, fbb, entries);
+                if let Some(builder) = builder {
+                    builder.add_dictionary_entry(self.id, value, id);
                 }
 
                 id
@@ -389,20 +379,6 @@ enum Value<'a> {
     FieldValue(&'a FieldValue<'a>)
 }
 
-
-fn add_dictionary_entry<'a>(partition_id: u32, value: &str, id: u32, fbb: &mut flatbuffers::FlatBufferBuilder<'a>, entries: &mut Vec<flatbuffers::WIPOffset<wb::WriteBufferEntry<'a>>>) {
-    let value_offset = fbb.create_string(value);
-    let dictionary_add = wb::DictionaryAdd::create(fbb, &wb::DictionaryAddArgs {
-        id,
-        partition_id,
-        value: Some(value_offset),
-    });
-    let entry = wb::WriteBufferEntry::create(fbb, &wb::WriteBufferEntryArgs {
-        dictionary_add: Some(dictionary_add),
-        ..Default::default()
-    });
-    entries.push(entry);
-}
 
 fn symbol_to_u32(sym: DefaultSymbol) -> u32 {
     sym.to_usize() as u32
@@ -499,7 +475,7 @@ impl Table {
         }
     }
 
-    fn add_row<'a>(&mut self, values: &[ColumnValue<'_>], builder: &mut Option<(flatbuffers::FlatBufferBuilder<'a>, Vec<flatbuffers::WIPOffset<wb::WriteBufferEntry<'a>>>)>) -> Result<()> {
+    fn add_row<'a>(&mut self, values: &[ColumnValue<'_>], builder: &mut Option<WalEntryBuilder<'_>>) -> Result<()> {
         let row_count = self.row_count();
 
         // insert new columns and validate existing ones
@@ -540,19 +516,8 @@ impl Table {
                     };
                     self.columns.push(col);
 
-                    if let Some((fbb, entries)) = builder {
-                        let schema_append = wb::SchemaAppend::create(fbb, &wb::SchemaAppendArgs{
-                            partition_id: self.partition_id,
-                            table_id: self.id,
-                            column_id: val.id,
-                            column_type: wal_type,
-                        });
-
-                        let entry = wb::WriteBufferEntry::create(fbb, &wb::WriteBufferEntryArgs {
-                            schema_append: Some(schema_append),
-                            ..Default::default()
-                        });
-                        entries.push(entry);
+                    if let Some(builder) = builder {
+                        builder.add_schema_append(self.partition_id, self.id, val.id, wal_type);
                     }
 
                     &mut self.columns[index]
@@ -658,6 +623,72 @@ impl Table {
         let schema = ArrowSchema::new(fields);
 
         RecordBatch::try_new(Arc::new(schema), columns).context(ArrowError {})
+    }
+}
+
+struct WalEntryBuilder<'a> {
+    fbb: flatbuffers::FlatBufferBuilder<'a>,
+    entries: Vec<flatbuffers::WIPOffset<wb::WriteBufferEntry<'a>>>,
+}
+
+impl WalEntryBuilder<'_> {
+    fn add_dictionary_entry(&mut self, partition_id: u32, value: &str, id: u32) {
+        let value_offset = self.fbb.create_string(value);
+
+        let dictionary_add = wb::DictionaryAdd::create(&mut self.fbb, &wb::DictionaryAddArgs {
+            id,
+            partition_id,
+            value: Some(value_offset),
+        });
+
+        let entry = wb::WriteBufferEntry::create(&mut self.fbb, &wb::WriteBufferEntryArgs {
+            dictionary_add: Some(dictionary_add),
+            ..Default::default()
+        });
+
+        self.entries.push(entry);
+    }
+
+    fn add_partition_open(&mut self, id: u32, name: &str) {
+        let partition_name = self.fbb.create_string(&name);
+
+        let partition_open = wb::PartitionOpen::create(&mut self.fbb, &wb::PartitionOpenArgs{
+            id,
+            name: Some(partition_name),
+        });
+
+        let entry = wb::WriteBufferEntry::create(&mut self.fbb, &wb::WriteBufferEntryArgs{
+            partition_open: Some(partition_open),
+            ..Default::default()
+        });
+
+        self.entries.push(entry);
+    }
+
+    fn add_schema_append(&mut self, partition_id: u32, table_id: u32, column_id: u32, column_type: wb::ColumnType) {
+        let schema_append = wb::SchemaAppend::create(&mut self.fbb, &wb::SchemaAppendArgs{
+            partition_id,
+            table_id,
+            column_id,
+            column_type,
+        });
+
+        let entry = wb::WriteBufferEntry::create(&mut self.fbb, &wb::WriteBufferEntryArgs {
+            schema_append: Some(schema_append),
+            ..Default::default()
+        });
+
+        self.entries.push(entry);
+    }
+
+    fn create_batch(&mut self) {
+        let entry_vec = self.fbb.create_vector(&self.entries);
+
+        let batch = wb::WriteBufferBatch::create(&mut self.fbb, &wb::WriteBufferBatchArgs{
+            entries: Some(entry_vec)
+        });
+
+        self.fbb.finish(batch, None);
     }
 }
 
