@@ -3,25 +3,15 @@ use crate::storage::partitioned_store::{
     WalDetails,
     start_wal_sync_task
 };
-use delorean_wal::{Wal, Append, WalBuilder};
+use delorean_wal::WalBuilder;
 use delorean_line_parser::{ParsedLine, FieldValue};
 use crate::generated_types::wal as wb;
-use wb::{
-    WriteBufferBatch,
-    WriteBufferEntry,
-    PartitionOpen,
-    PartitionSnapshotStarted,
-    DictionaryAdd,
-    SchemaAppend,
-    Row,
-};
 
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::sync::atomic::{Ordering, AtomicU32};
 use std::path::PathBuf;
 use std::io::{Write, ErrorKind};
-use std::fmt;
 use std::convert::TryFrom;
 
 use tokio::sync::RwLock;
@@ -35,15 +25,13 @@ use arrow::{
     },
     record_batch::RecordBatch,
 };
-use chrono::{DateTime, TimeZone, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use string_interner::{backend::StringBackend, StringInterner, DefaultSymbol, DefaultHashBuilder, Symbol};
 use futures::{
     channel::mpsc,
-    stream::{BoxStream, Stream},
-    FutureExt, SinkExt, StreamExt,
+    StreamExt,
 };
-use flatbuffers::WIPOffset;
-use arrow::array::{UInt32Builder, Float64Builder, Int64Builder, BooleanBuilder};
+use arrow::array::{Float64Builder, Int64Builder, BooleanBuilder};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -154,7 +142,7 @@ impl Db {
         // TODO: check wal metadata format
         let entries = wal_builder.entries().context(LoadingWal {database: name.clone()})?;
         let mut partitions: HashMap<u32, Partition> = HashMap::new();
-        let mut next_partition_id = 0;
+        let next_partition_id = 0;
         for entry in entries {
             let entry = entry.context(LoadingWal{database: name.clone()})?;
             let bytes = entry.as_data();
@@ -164,7 +152,6 @@ impl Db {
             if let Some(entries) = entry.entries() {
                 for entry in entries {
                     if let Some(po) = entry.partition_open() {
-                        println!("opened partition {} {}", po.id(), po.name().unwrap());
                         let id = po.id();
                         let p = Partition::new(id, po.name().unwrap().to_string());
                         partitions.insert(id, p);
@@ -173,17 +160,14 @@ impl Db {
                     } else if let Some(_pf) = entry.partition_snapshot_finished() {
                         // TODO: handle partition snapshot finished
                     } else if let Some(da) = entry.dictionary_add() {
-                        println!("dict add {} - {}:{}", da.partition_id(), da.id(), da.value().unwrap());
                         let p = partitions.get_mut(&da.partition_id()).context(WalRecoverError{database: name.clone(), error: format!("couldn't add dictionary item to partition {} with id {} and value {}", da.partition_id(), da.id(), da.value().unwrap())})?;
                         p.intern_new_dict_entry(da.value().unwrap());
                     } else if let Some(sa) = entry.schema_append() {
-                        println!("schema append partition:{} - table:{} - column:{}, type:{:?}", sa.partition_id(), sa.table_id(), sa.column_id(), sa.column_type());
                         let p = partitions.get_mut(&sa.partition_id()).context(WalRecoverError{database: name.clone(), error: format!("couldn't append schema to partition {} in table id {} and column id {}", sa.partition_id(), sa.table_id(), sa.column_id())})?;
-                        p.append_schema(sa.table_id(), sa.column_id(), sa.column_type())?;
+                        p.append_wal_schema(sa.table_id(), sa.column_id(), sa.column_type())?;
                     } else if let Some(row) = entry.write() {
-                        println!("adding row! {:?}", row);
                         let p = partitions.get_mut(&row.partition_id()).context(WalRecoverError{database: name.clone(), error: format!("couldn't add row because partition {} wasn't found", row.partition_id())})?;
-                        p.add_row(row.partition_id(), &row.values().unwrap())?;
+                        p.add_wal_row(row.table_id(), &row.values().unwrap())?;
                     }
                 }
             }
@@ -204,10 +188,11 @@ impl Db {
         let mut partitions = self.partitions.write().await;
 
         let mut builder = match &self.wal_details {
-            Some(_) => {
-                let fbb = flatbuffers::FlatBufferBuilder::new_with_capacity(1024);
-                Some(WalEntryBuilder{fbb, entries: vec![]})
-            },
+            Some(_) => Some(WalEntryBuilder{
+                fbb: flatbuffers::FlatBufferBuilder::new_with_capacity(1024),
+                entries: vec![],
+                row_values: vec![],
+            }),
             None => None,
         };
 
@@ -252,7 +237,7 @@ impl Db {
         Ok(())
     }
 
-    pub async fn table_to_arrow(&self, table_name: &str, columns: &[&str]) -> Result<RecordBatch> {
+    pub async fn table_to_arrow(&self, table_name: &str, _columns: &[&str]) -> Result<RecordBatch> {
         // TODO: have this work with multiple partitions
         let partitions = self.partitions.read().await;
         let partition = partitions.first().context(TableNotFound {table: table_name.to_string()})?;
@@ -296,13 +281,13 @@ impl Partition {
         self.dictionary.get_or_intern(name);
     }
 
-    fn append_schema(&mut self, table_id: u32, column_id: u32, column_type: wb::ColumnType) -> Result<()> {
-        let t = self.tables.get_mut(&table_id).context(WalPartitionError{partition_id: self.id, error: format!("error addding schema to table id {} with column id {}", table_id, column_id)})?;
+    fn append_wal_schema(&mut self, table_id: u32, column_id: u32, column_type: wb::ColumnType) -> Result<()> {
+        let t = self.tables.entry(table_id).or_insert(Table::new(table_id, self.id));
         t.append_schema(column_id, column_type);
         Ok(())
     }
 
-    fn add_row(&mut self, table_id: u32, values: &flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<wb::Value<'_>>>) -> Result<()> {
+    fn add_wal_row(&mut self, table_id: u32, values: &flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<wb::Value<'_>>>) -> Result<()> {
         let t = self.tables.get_mut(&table_id).context(WalPartitionError{partition_id: self.id, error: format!("error: table id {} not found to add row", table_id)})?;
         t.add_wal_row(values)
     }
@@ -332,7 +317,7 @@ impl Partition {
         let time_value = FieldValue::I64(time);
         values.push(ColumnValue{id: time_id, value: Value::FieldValue(&time_value)});
 
-        let mut table = self.tables.entry(table_id).or_insert_with(|| Table::new(table_id, partition_id));
+        let table = self.tables.entry(table_id).or_insert_with(|| Table::new(table_id, partition_id));
         table.add_row(&values, builder)?;
 
         Ok(())
@@ -439,6 +424,8 @@ impl Table {
     }
 
     fn add_wal_row(&mut self, values: &flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<wb::Value<'_>>>) -> Result<()> {
+        let row_count = self.row_count();
+
         for value in values {
             let col = self.columns.get_mut(value.column_index() as usize).context(WalColumnError{column_id: value.column_index()})?;
             match (col, value.value_type()) {
@@ -465,6 +452,11 @@ impl Table {
                 _ => return SchemaMismatch {error: "column type mismatch recovering from WAL"}.fail(),
             }
         }
+
+        for col in &mut self.columns {
+            col.push_none_if_len_equal(row_count);
+        }
+
         Ok(())
     }
 
@@ -480,7 +472,7 @@ impl Table {
 
         // insert new columns and validate existing ones
         for val in values {
-            let mut column = match self.column_id_to_index.get(&val.id) {
+            let column = match self.column_id_to_index.get(&val.id) {
                 Some(idx) => &mut self.columns[*idx],
                 None => {
                     // Add the column and make all values for existing rows None
@@ -531,7 +523,54 @@ impl Table {
         for val in values {
             let idx = self.column_id_to_index.get(&val.id).context(InsertError {})?;
             let column = self.columns.get_mut(*idx).context(InsertError {})?;
-            column.push_value(val)?;
+
+            match &val.value {
+                Value::TagValueId(val) => {
+                    match column {
+                        Column::Tag(vals) => {
+                            if let Some(builder) = builder {
+                                builder.add_tag_value(u16::try_from(*idx).unwrap(),*val);
+                            }
+                            vals.push(Some(*val))
+                        },
+                        _ => return SchemaMismatch { error: "passed value is a tag and existing column is not".to_string()}.fail(),
+                    }
+                },
+                Value::FieldValue(field) => {
+                    match (column, field) {
+                        (Column::Tag(_), _ ) => return SchemaMismatch { error: "existing column is a tag and passed value is not".to_string()}.fail(),
+                        (Column::String(vals), FieldValue::String(val)) => {
+                            if let Some(builder) = builder {
+                                builder.add_string_value(u16::try_from(*idx).unwrap(), val.as_str());
+                            }
+                            vals.push(Some(val.as_str().to_string()))
+                        },
+                        (Column::Bool(vals), FieldValue::Boolean(val)) => {
+                            if let Some(builder) = builder {
+                                builder.add_bool_value(u16::try_from(*idx).unwrap(), *val);
+                            }
+                            vals.push(Some(*val))
+                        },
+                        (Column::I64(vals), FieldValue::I64(val)) => {
+                            if let Some(builder) = builder {
+                                builder.add_i64_value(u16::try_from(*idx).unwrap(), *val);
+                            }
+                            vals.push(Some(*val))
+                        },
+                        (Column::F64(vals), FieldValue::F64(val)) => {
+                            if let Some(builder) = builder {
+                                builder.add_f64_value(u16::try_from(*idx).unwrap(), *val);
+                            }
+                            vals.push(Some(*val))
+                        },
+                        _ => panic!("yarrr the field didn't match"),
+                    }
+                },
+            }
+        }
+
+        if let Some(builder) = builder {
+            builder.add_row(self.partition_id, self.id);
         }
 
         // make sure all columns are of the same length
@@ -545,7 +584,7 @@ impl Table {
     fn to_arrow(&self, dictionary: &StringInterner<DefaultSymbol, StringBackend<DefaultSymbol>, DefaultHashBuilder>) -> Result<RecordBatch> {
         let mut index: Vec<_> = self.column_id_to_index.iter().collect();
         index.sort_by(|a, b| a.1.cmp(b.1));
-        let ids: Vec<_> = index.iter().map(|(a, b)| **a).collect();
+        let ids: Vec<_> = index.iter().map(|(a, _)| **a).collect();
 
         let mut fields = Vec::with_capacity(self.columns.len());
         let mut columns: Vec<ArrayRef> = Vec::with_capacity(self.columns.len());
@@ -629,6 +668,7 @@ impl Table {
 struct WalEntryBuilder<'a> {
     fbb: flatbuffers::FlatBufferBuilder<'a>,
     entries: Vec<flatbuffers::WIPOffset<wb::WriteBufferEntry<'a>>>,
+    row_values: Vec<flatbuffers::WIPOffset<wb::Value<'a>>>,
 }
 
 impl WalEntryBuilder<'_> {
@@ -681,6 +721,96 @@ impl WalEntryBuilder<'_> {
         self.entries.push(entry);
     }
 
+    fn add_tag_value(&mut self, column_index: u16, value: u32) {
+        let tv = wb::TagValue::create(&mut self.fbb, &wb::TagValueArgs{
+            value,
+        });
+
+        let row_value = wb::Value::create(&mut self.fbb, &wb::ValueArgs{
+            column_index,
+            value_type: wb::ColumnValue::TagValue,
+            value: Some(tv.as_union_value()),
+        });
+
+        self.row_values.push(row_value);
+    }
+
+    fn add_string_value(&mut self, column_index: u16, value: &str) {
+        let value_offset = self.fbb.create_string(value);
+
+        let sv = wb::StringValue::create(&mut self.fbb, &wb::StringValueArgs{
+            value: Some(value_offset),
+        });
+
+        let row_value = wb::Value::create(&mut self.fbb, &wb::ValueArgs{
+            column_index,
+            value_type: wb::ColumnValue::StringValue,
+            value: Some(sv.as_union_value()),
+        });
+
+        self.row_values.push(row_value);
+    }
+
+    fn add_f64_value(&mut self, column_index: u16, value: f64) {
+        let fv = wb::F64Value::create(&mut self.fbb, &wb::F64ValueArgs{
+            value,
+        });
+
+        let row_value = wb::Value::create(&mut self.fbb, &wb::ValueArgs{
+            column_index,
+            value_type: wb::ColumnValue::F64Value,
+            value: Some(fv.as_union_value()),
+        });
+
+        self.row_values.push(row_value);
+    }
+
+    fn add_i64_value(&mut self, column_index: u16, value: i64) {
+        let iv = wb::I64Value::create(&mut self.fbb, &wb::I64ValueArgs{
+            value,
+        });
+
+        let row_value = wb::Value::create(&mut self.fbb, &wb::ValueArgs{
+            column_index,
+            value_type: wb::ColumnValue::I64Value,
+            value: Some(iv.as_union_value()),
+        });
+
+        self.row_values.push(row_value);
+    }
+
+    fn add_bool_value(&mut self, column_index: u16, value: bool) {
+        let bv = wb::BoolValue::create(&mut self.fbb, &wb::BoolValueArgs{
+            value,
+        });
+
+        let row_value = wb::Value::create(&mut self.fbb, &wb::ValueArgs{
+            column_index,
+            value_type: wb::ColumnValue::BoolValue,
+            value: Some(bv.as_union_value()),
+        });
+
+        self.row_values.push(row_value);
+    }
+
+    fn add_row(&mut self, partition_id: u32, table_id: u32) {
+        let values_vec = self.fbb.create_vector(&self.row_values);
+
+        let row = wb::Row::create(&mut self.fbb, &wb::RowArgs{
+            partition_id,
+            table_id,
+            values: Some(values_vec),
+        });
+
+        let entry = wb::WriteBufferEntry::create(&mut self.fbb, &wb::WriteBufferEntryArgs{
+            write: Some(row),
+            ..Default::default()
+        });
+
+        self.entries.push(entry);
+        self.row_values = vec![];
+    }
+
     fn create_batch(&mut self) {
         let entry_vec = self.fbb.create_vector(&self.entries);
 
@@ -728,31 +858,8 @@ impl Column {
         }
     }
 
-    fn push_value(&mut self, val: &ColumnValue<'_>) -> Result<()> {
-        match &val.value {
-            Value::TagValueId(val) => {
-                match self {
-                    Column::Tag(vals) => vals.push(Some(*val)),
-                    _ => return SchemaMismatch { error: "passed value is a tag and existing column is not".to_string()}.fail(),
-                }
-            },
-            Value::FieldValue(field) => {
-                match (self, field) {
-                    (Column::Tag(_), _ ) => return SchemaMismatch { error: "existing column is a tag and passed value is not".to_string()}.fail(),
-                    (Column::String(vals), FieldValue::String(val)) => vals.push(Some(val.as_str().to_string())),
-                    (Column::Bool(vals), FieldValue::Boolean(val)) => vals.push(Some(*val)),
-                    (Column::I64(vals), FieldValue::I64(val)) => vals.push(Some(*val)),
-                    (Column::F64(vals), FieldValue::F64(val)) => vals.push(Some(*val)),
-                    _ => panic!("yarrr the field didn't match"),
-                }
-            },
-        }
-
-        Ok(())
-    }
-
     // push_none_if_len_equal will add a None value to the end of the Vec of values if the
-    // length is equal to the passed in value.
+    // length is equal to the passed in value. This is used to ensure columns are all the same length.
     fn push_none_if_len_equal(&mut self, len: usize) {
         match self {
             Self::F64(v) => if v.len() == len {
@@ -778,6 +885,7 @@ impl Column {
 mod tests {
     use super::*;
     use delorean_line_parser::parse_lines;
+    use arrow::util::pretty::pretty_format_batches;
 
     type TestError = Box<dyn std::error::Error + Send + Sync + 'static>;
     type Result<T = (), E = TestError> = std::result::Result<T, E>;
@@ -786,9 +894,33 @@ mod tests {
     async fn write_data_and_recover() -> Result {
         let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
 
+        let expected_cpu_table =
+r#"+--------+------+------+-------+-------------+-------+------+---------+-----------+
+| region | host | user | other | str         | b     | time | new_tag | new_field |
++--------+------+------+-------+-------------+-------+------+---------+-----------+
+| west   | A    | 23.2 | 1     | some string | true  | 10   |         | 0         |
+| west   | B    | 23.1 | 0     |             | false | 15   |         | 0         |
+|        | A    | 0    | 0     |             | false | 20   | foo     | 15.1      |
++--------+------+------+-------+-------------+-------+------+---------+-----------+
+"#;
+        let expected_mem_table =
+r#"+--------+------+-------+------+
+| region | host | val   | time |
++--------+------+-------+------+
+| east   | C    | 23432 | 10   |
++--------+------+-------+------+
+"#;
+        let expected_disk_table =
+r#"+--------+------+----------+--------------+------+
+| region | host | bytes    | used_percent | time |
++--------+------+----------+--------------+------+
+| west   | A    | 23432323 | 76.2         | 10   |
++--------+------+----------+--------------+------+
+"#;
+
         {
-            let mut db = Db::new_with_wal("mydb".to_string(), &mut dir.clone()).await?;
-            let lines: Vec<_> = parse_lines("cpu,region=west,host=A user=23.2,other=1i,str=\"some string\",b=true 10").map(|l| l.unwrap()).collect();
+            let db = Db::new_with_wal("mydb".to_string(), &mut dir).await?;
+            let lines: Vec<_> = parse_lines("cpu,region=west,host=A user=23.2,other=1i,str=\"some string\",b=true 10\ndisk,region=west,host=A bytes=23432323i,used_percent=76.2 10").map(|l| l.unwrap()).collect();
             db.write_lines(&lines).await?;
             let lines: Vec<_> = parse_lines("cpu,region=west,host=B user=23.1 15").map(|l| l.unwrap()).collect();
             db.write_lines(&lines).await?;
@@ -797,23 +929,30 @@ mod tests {
             let lines: Vec<_> = parse_lines("mem,region=east,host=C val=23432 10").map(|l| l.unwrap()).collect();
             db.write_lines(&lines).await?;
 
-            let table = db.table_to_arrow("mem", &vec!["region","host"]).await?;
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            for f in std::fs::read_dir(db.dir).unwrap() {
-                let f = f.unwrap();
-                println!("wal path: {:?}", f.path());
-                if f.path().is_dir() {
-                    println!("dir inside: {:?}", std::fs::read_dir(f.path()).unwrap());
-                }
-            }
-//            panic!(format!("OMG teh table!\n{:?}", table));
+            let table = db.table_to_arrow("cpu", &vec!["region","host"]).await?;
+            let res = pretty_format_batches(&[table]).unwrap();
+            assert_eq!(expected_cpu_table, res);
+            let table = db.table_to_arrow("mem", &vec![]).await?;
+            let res = pretty_format_batches(&[table]).unwrap();
+            assert_eq!(expected_mem_table, res);
+            let table = db.table_to_arrow("disk", &vec![]).await?;
+            let res = pretty_format_batches(&[table]).unwrap();
+            assert_eq!(expected_disk_table, res);
         }
 
         // check that it recovers from the wal
         {
-            let db = Db::restore_from_wal("mydb".to_string(), &mut dir).await?;
-            let table = db.table_to_arrow("cpu", &vec![]).await?;
-            panic!(format!("table restored! {:?}", table));
+            let db = Db::restore_from_wal("mydb".to_string(), dir).await?;
+
+            let table = db.table_to_arrow("cpu", &vec!["region","host"]).await?;
+            let res = pretty_format_batches(&[table]).unwrap();
+            assert_eq!(expected_cpu_table, res);
+            let table = db.table_to_arrow("mem", &vec![]).await?;
+            let res = pretty_format_batches(&[table]).unwrap();
+            assert_eq!(expected_mem_table, res);
+            let table = db.table_to_arrow("disk", &vec![]).await?;
+            let res = pretty_format_batches(&[table]).unwrap();
+            assert_eq!(expected_disk_table, res);
         }
 
 

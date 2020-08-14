@@ -346,8 +346,6 @@ pub async fn start_wal_sync_task(wal_builder: WalBuilder) -> Result<WalDetails> 
 
                 let (to_notify, outcome) = task::block_in_place(|| wal.sync());
 
-                println!("wal synced!");
-
                 for mut notify in to_notify {
                     notify
                         .send(outcome.clone())
