@@ -1,3 +1,5 @@
+use tracing::{debug, error, info};
+
 use crate::generated_types::wal as wb;
 use crate::storage::partitioned_store::{
     start_wal_sync_task, Error as PartitionedStoreError, WalDetails,
@@ -11,6 +13,7 @@ use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::fs;
 
 use arrow::array::{BooleanBuilder, Float64Builder, Int64Builder};
 use arrow::{
@@ -18,6 +21,17 @@ use arrow::{
     datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema},
     record_batch::RecordBatch,
 };
+use datafusion::{
+    datasource::MemTable,
+    error::ExecutionError,
+    execution::context::ExecutionContext,
+};
+use sqlparser::{
+    ast::{Statement, SetExpr},
+    dialect::GenericDialect,
+    parser::Parser,
+};
+
 use chrono::{DateTime, NaiveDateTime, Utc};
 use futures::{channel::mpsc, StreamExt};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
@@ -25,11 +39,19 @@ use string_interner::{
     backend::StringBackend, DefaultHashBuilder, DefaultSymbol, StringInterner, Symbol,
 };
 use tokio::sync::RwLock;
+use arrow::datatypes::Schema;
+use sqlparser::ast::TableFactor;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
+    #[snafu(display("Error reading {}: {}", message, source))]
+    ReadError { message: String, source: std::io::Error },
+
     #[snafu(display("Partition error writing to WAL: {}", source))]
     WritingToWal { source: std::io::Error },
+
+    #[snafu(display("Dir {:?} invalid for DB", dir))]
+    OpenDb {dir: PathBuf },
 
     #[snafu(display("Error opening WAL for database {}: {}", database, source))]
     OpeningWal {
@@ -81,32 +103,110 @@ pub enum Error {
 
     #[snafu(display("id conversion error"))]
     IdConversionError { source: std::num::TryFromIntError },
+
+    #[snafu(display("Invalid sql query: {} : {}", query, source))]
+    InvalidSqlQuery {
+        query: String,
+        source: sqlparser::parser::ParserError,
+    },
+
+    #[snafu(display("error executing query {}: {}", query, source))]
+    QueryError { query: String, source: ExecutionError },
+
+    #[snafu(display("Unsupported SQL statement in query {}: {}", query, statement))]
+    UnsupportedStatement { query: String, statement: Statement },
+
+    #[snafu(display("query error {} on query {}", message, query))]
+    GenericQueryError { message: String, query: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+#[derive(Debug)]
 pub struct WriteBufferDatabases {
     databases: RwLock<HashMap<String, Arc<Db>>>,
     base_dir: PathBuf,
 }
 
 impl WriteBufferDatabases {
-    pub async fn write_lines(&self, db_name: &str, lines: &[ParsedLine<'_>]) -> Result<()> {
-        let db: Arc<Db>;
-        {
-            let databases = self.databases.read().await;
-            db = databases
-                .get(db_name)
-                .context(DatabaseNotFound {
-                    database: db_name.to_string(),
-                })?
-                .clone();
+    pub fn new(base_dir: &str) -> WriteBufferDatabases {
+        let base_dir = PathBuf::from(base_dir);
+        Self{
+            databases: RwLock::new(HashMap::new()),
+            base_dir,
+        }
+    }
+
+    /// wal_dirs will traverse the directories fromm the service base directory and return
+    /// the directories that contain WALs for databases, which can be used to restore those DBs.
+    pub fn wal_dirs(&self) -> Result<Vec<PathBuf>> {
+        let entries = fs::read_dir(&self.base_dir).context(ReadError{message: format!("Error loading databases from dir {:?}", self.base_dir)})?;
+
+        let mut dirs = vec![];
+
+        for entry in entries {
+            let entry = entry.context(ReadError{message: format!("error reading dir in database base dir: {:?}", self.base_dir)})?;
+
+            entry.metadata().map(|m| {
+               if m.is_dir() {
+                   entry.path().iter().last().map(|p| {
+                       p.to_str().map(|s| {
+                           if !s.starts_with(".") {
+                               dirs.push(entry.path());
+                           };
+                       });
+                   });
+               };
+            });
         }
 
-        db.write_lines(lines).await
+        Ok(dirs)
+    }
+
+    pub async fn add_db(&self, db: Db) {
+        let mut databases = self.databases.write().await;
+        databases.insert(db.name.clone(), Arc::new(db));
+    }
+
+    pub async fn get_db(&self, org: &str, bucket: &str) -> Option<Arc<Db>> {
+        let databases = self.databases.read().await;
+
+        databases.get(&org_and_bucket_to_database(org, bucket)).map(|d| d.clone())
+    }
+
+    pub async fn get_or_create_db(&self, org: &str, bucket: &str) -> Result<Arc<Db>> {
+        let db_name = org_and_bucket_to_database(org, bucket);
+
+        // get it through a read lock first if we can
+        {
+            let databases = self.databases.read().await;
+
+            if let Some(db) = databases.get(&db_name) {
+                return Ok(db.clone());
+            }
+        }
+
+        // database doesn't exist yet so acquire the write lock and get or insert
+        let mut databases = self.databases.write().await;
+
+        // make sure it didn't get inserted by someone else while we were waiting for the write lock
+        if let Some(db) = databases.get(&db_name) {
+            return Ok(db.clone());
+        }
+
+        let db = Db::new_with_wal(db_name.to_string(), &mut self.base_dir.clone()).await?;
+        let db = Arc::new(db);
+        databases.insert(db_name, db.clone());
+
+        Ok(db)
     }
 }
 
+fn org_and_bucket_to_database(org: &str, bucket: &str) -> String {
+    org.to_owned() + "_" + bucket
+}
+
+#[derive(Debug)]
 pub struct Db {
     name: String,
     // TODO: partitions need to b wrapped in an Arc if they're going to be used without this lock
@@ -149,12 +249,16 @@ impl Db {
         })
     }
 
-    pub async fn restore_from_wal(name: String, wal_dir: PathBuf) -> Result<Self> {
+    pub async fn restore_from_wal(wal_dir: PathBuf) -> Result<Self> {
+        let name=  wal_dir.iter()
+            .last().context(OpenDb {dir: wal_dir.clone()})?
+            .to_str().context(OpenDb {dir: wal_dir.clone()})?;
+
         let wal_builder = WalBuilder::new(wal_dir.clone());
         let wal_details = start_wal_sync_task(wal_builder.clone())
             .await
             .context(OpeningWal {
-                database: name.clone(),
+                database: name.to_string(),
             })?;
 
         // TODO: check wal metadata format
@@ -206,7 +310,7 @@ impl Db {
 
         let partitions = partitions.drain().map(|(_, p)| p).collect();
         Ok(Self {
-            name,
+            name: name.to_string(),
             dir: wal_dir,
             partitions: RwLock::new(partitions),
             next_partition_id: AtomicU32::new(next_partition_id + 1),
@@ -214,6 +318,8 @@ impl Db {
         })
     }
 
+    // TODO: writes lines creates a column named "time" for the timestmap data. If
+    //       we keep this we need to validate that no tag or field has the same name.
     pub async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<()> {
         let partition_keys: Vec<_> = lines
             .into_iter()
@@ -280,6 +386,51 @@ impl Db {
         partition.table_to_arrow(table_name)
     }
 
+    pub async fn query(&self, query: &str) -> Result<Vec<RecordBatch>> {
+        let mut tables = vec![];
+
+        let dialect = GenericDialect {};
+        let ast = Parser::parse_sql(&dialect, query)
+            .context(InvalidSqlQuery {query: query.to_string()})?;
+
+        for statement in ast {
+            match statement {
+                Statement::Query(q) => {
+                    if let SetExpr::Select(q) = q.body {
+                        for item in q.from {
+                            match item.relation {
+                                TableFactor::Table {name: name, .. } => {
+                                    let name = name.to_string();
+                                    let data = self.table_to_arrow(&name, &vec![]).await?;
+                                    tables.push(ArrowTable{name, schema: data.schema().clone(), data});
+                                },
+                                _ => (),
+                            }
+                        }
+                    }
+                },
+                _ => return UnsupportedStatement {query: query.to_string(), statement}.fail(),
+            }
+        }
+
+        let mut ctx = ExecutionContext::new();
+
+        for table in tables {
+            let provider = MemTable::new(
+                table.schema,
+                vec![vec![table.data]])
+                .context(QueryError{query: query.to_string()})?;
+            ctx.register_table(&table.name, Box::new(provider));
+        }
+
+        let plan = ctx.create_logical_plan(&query).context(QueryError { query: query.to_string() })?;
+        let plan = ctx.optimize(&plan).context(QueryError { query: query.to_string() })?;
+        let plan = ctx.create_physical_plan(&plan, 1024 * 1024)
+            .context(QueryError { query: query.to_string() })?;
+
+        ctx.collect(plan.as_ref()).context(QueryError{query: query.to_string()})
+    }
+
     // partition_key returns the partition key for the given line. The key will be the prefix of a
     // partition name (multiple partitions can exist for each key). It uses the user defined
     // partitioning rules to construct this key
@@ -293,6 +444,13 @@ impl Db {
     }
 }
 
+struct ArrowTable {
+    name: String,
+    schema: Arc<Schema>,
+    data: RecordBatch,
+}
+
+#[derive(Debug)]
 struct Partition {
     name: String,
     id: u32,
@@ -444,6 +602,7 @@ fn symbol_to_u32(sym: DefaultSymbol) -> u32 {
     sym.to_usize() as u32
 }
 
+#[derive(Debug)]
 struct Table {
     id: u32,
     partition_id: u32,
@@ -994,6 +1153,7 @@ impl WalEntryBuilder<'_> {
     }
 }
 
+#[derive(Debug)]
 enum Column {
     F64(Vec<Option<f64>>),
     I64(Vec<Option<i64>>),
@@ -1125,7 +1285,8 @@ mod tests {
 
         // check that it recovers from the wal
         {
-            let db = Db::restore_from_wal("mydb".to_string(), dir).await?;
+            dir.push("mydb");
+            let db = Db::restore_from_wal(dir).await?;
 
             let table = db.table_to_arrow("cpu", &vec!["region", "host"]).await?;
             let res = pretty_format_batches(&[table]).unwrap();
