@@ -2,29 +2,25 @@
 
 use tracing::{debug, error, info};
 
-use delorean_line_parser::{parse_lines, ParsedLine};
-use delorean::storage::write_buffer_database::{
-    Error as DatabaseError,
-    WriteBufferDatabases,
-};
+use delorean::storage::write_buffer_database::{Error as DatabaseError, WriteBufferDatabases};
+use delorean_line_parser::parse_lines;
 
-use std::sync::Arc;
 use bytes::BytesMut;
 use futures::{self, StreamExt};
 use hyper::{Body, Method, StatusCode};
 use serde::Deserialize;
 use snafu::{OptionExt, ResultExt, Snafu};
 use std::str;
-use snafu::futures::TryFutureExt;
+use std::sync::Arc;
 
 #[derive(Debug, Snafu)]
 pub enum ApplicationError {
     // Internal (unexpected) errors
     #[snafu(display(
-    "Internal error accessing org {}, bucket {}:  {}",
-    org,
-    bucket_name,
-    source
+        "Internal error accessing org {}, bucket {}:  {}",
+        org,
+        bucket_name,
+        source
     ))]
     BucketByName {
         org: String,
@@ -33,10 +29,10 @@ pub enum ApplicationError {
     },
 
     #[snafu(display(
-    "Internal error writing points into org {}, bucket {}:  {}",
-    org,
-    bucket_name,
-    source
+        "Internal error writing points into org {}, bucket {}:  {}",
+        org,
+        bucket_name,
+        source
     ))]
     WritingPoints {
         org: String,
@@ -45,9 +41,9 @@ pub enum ApplicationError {
     },
 
     #[snafu(display(
-    "Internal error reading points from database {}:  {}",
-    database,
-    source
+        "Internal error reading points from database {}:  {}",
+        database,
+        source
     ))]
     Query {
         database: String,
@@ -108,7 +104,7 @@ impl ApplicationError {
     }
 }
 
-const MAX_SIZE: usize = 1_048_576; // max write request size of 1MB
+const MAX_SIZE: usize = 10_485_760; // max write request size of 10MB
 
 #[derive(Debug, Deserialize)]
 struct WriteInfo {
@@ -117,7 +113,10 @@ struct WriteInfo {
 }
 
 #[tracing::instrument(level = "debug")]
-async fn write(req: hyper::Request<Body>, storage: Arc<WriteBufferDatabases>) -> Result<Option<Body>, ApplicationError> {
+async fn write(
+    req: hyper::Request<Body>,
+    storage: Arc<WriteBufferDatabases>,
+) -> Result<Option<Body>, ApplicationError> {
     let query = req.uri().query().context(ExpectedQueryString)?;
 
     let write_info: WriteInfo = serde_urlencoded::from_str(query).context(InvalidQueryString {
@@ -148,17 +147,15 @@ async fn write(req: hyper::Request<Body>, storage: Arc<WriteBufferDatabases>) ->
     let body = body.freeze();
     let body = str::from_utf8(&body).unwrap();
 
-    let lines: Vec<_> = parse_lines(body).map(|l| l.expect("TODO: handle line parse errors")).collect();
+    let lines: Vec<_> = parse_lines(body)
+        .map(|l| l.expect("TODO: handle line parse errors"))
+        .collect();
     debug!("Parsed {} lines", lines.len());
 
-
-    db
-        .write_lines(&lines)
-        .await
-        .context(WritingPoints {
-            org: write_info.org.clone(),
-            bucket_name: write_info.bucket.clone(),
-        })?;
+    db.write_lines(&lines).await.context(WritingPoints {
+        org: write_info.org.clone(),
+        bucket_name: write_info.bucket.clone(),
+    })?;
 
     Ok(None)
 }
@@ -172,7 +169,10 @@ struct ReadInfo {
 
 // TODO: figure out how to stream read results out rather than rendering the whole thing in mem
 #[tracing::instrument(level = "debug")]
-async fn read(req: hyper::Request<Body>, storage: Arc<WriteBufferDatabases>) -> Result<Option<Body>, ApplicationError> {
+async fn read(
+    req: hyper::Request<Body>,
+    storage: Arc<WriteBufferDatabases>,
+) -> Result<Option<Body>, ApplicationError> {
     let query = req.uri().query().context(ExpectedQueryString {})?;
 
     let read_info: ReadInfo = serde_urlencoded::from_str(query).context(InvalidQueryString {
@@ -182,7 +182,7 @@ async fn read(req: hyper::Request<Body>, storage: Arc<WriteBufferDatabases>) -> 
     let db = storage
         .get_db(&read_info.org, &read_info.bucket)
         .await
-        .context(BucketNotFound{
+        .context(BucketNotFound {
             org: read_info.org.clone(),
             bucket: read_info.bucket.clone(),
         })?;

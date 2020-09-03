@@ -6,18 +6,11 @@ use std::env::VarError;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use delorean::{
-    storage::write_buffer_database::{
-        Db,
-        WriteBufferDatabases,
-        Error as DatabaseError,
-    },
-};
 use crate::server::write_buffer_routes;
+use delorean::storage::write_buffer_database::{Db, WriteBufferDatabases};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::Server;
-
 
 pub async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     dotenv::dotenv().ok();

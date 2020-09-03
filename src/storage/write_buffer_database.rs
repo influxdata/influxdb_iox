@@ -1,4 +1,4 @@
-use tracing::{debug, error, info};
+use tracing::info;
 
 use crate::generated_types::wal as wb;
 use crate::storage::partitioned_store::{
@@ -9,11 +9,11 @@ use delorean_wal::WalBuilder;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::io::{ErrorKind, Write};
+use std::fs;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use std::fs;
 
 use arrow::array::{BooleanBuilder, Float64Builder, Int64Builder};
 use arrow::{
@@ -22,39 +22,48 @@ use arrow::{
     record_batch::RecordBatch,
 };
 use datafusion::{
-    datasource::MemTable,
-    error::ExecutionError,
-    execution::context::ExecutionContext,
+    datasource::MemTable, error::ExecutionError, execution::context::ExecutionContext,
 };
 use sqlparser::{
-    ast::{Statement, SetExpr},
+    ast::{SetExpr, Statement},
     dialect::GenericDialect,
     parser::Parser,
 };
 
+use arrow::datatypes::Schema;
 use chrono::{DateTime, NaiveDateTime, Utc};
-use futures::{channel::mpsc, StreamExt};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
+use sqlparser::ast::TableFactor;
 use string_interner::{
     backend::StringBackend, DefaultHashBuilder, DefaultSymbol, StringInterner, Symbol,
 };
 use tokio::sync::RwLock;
-use arrow::datatypes::Schema;
-use sqlparser::ast::TableFactor;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Error reading {}: {}", message, source))]
-    ReadError { message: String, source: std::io::Error },
+    ReadError {
+        message: String,
+        source: std::io::Error,
+    },
+
+    #[snafu(display("Error reading metadata: {}", source))]
+    ReadMetadataError { source: std::io::Error },
 
     #[snafu(display("Partition error writing to WAL: {}", source))]
     WritingToWal { source: std::io::Error },
 
     #[snafu(display("Dir {:?} invalid for DB", dir))]
-    OpenDb {dir: PathBuf },
+    OpenDb { dir: PathBuf },
 
     #[snafu(display("Error opening WAL for database {}: {}", database, source))]
     OpeningWal {
+        database: String,
+        source: PartitionedStoreError,
+    },
+
+    #[snafu(display("Error writing to WAL for database {}: {}", database, source))]
+    WritingWal {
         database: String,
         source: PartitionedStoreError,
     },
@@ -111,10 +120,16 @@ pub enum Error {
     },
 
     #[snafu(display("error executing query {}: {}", query, source))]
-    QueryError { query: String, source: ExecutionError },
+    QueryError {
+        query: String,
+        source: ExecutionError,
+    },
 
     #[snafu(display("Unsupported SQL statement in query {}: {}", query, statement))]
-    UnsupportedStatement { query: String, statement: Statement },
+    UnsupportedStatement {
+        query: String,
+        statement: Box<Statement>,
+    },
 
     #[snafu(display("query error {} on query {}", message, query))]
     GenericQueryError { message: String, query: String },
@@ -129,9 +144,9 @@ pub struct WriteBufferDatabases {
 }
 
 impl WriteBufferDatabases {
-    pub fn new(base_dir: &str) -> WriteBufferDatabases {
+    pub fn new(base_dir: &str) -> Self {
         let base_dir = PathBuf::from(base_dir);
-        Self{
+        Self {
             databases: RwLock::new(HashMap::new()),
             base_dir,
         }
@@ -140,24 +155,30 @@ impl WriteBufferDatabases {
     /// wal_dirs will traverse the directories fromm the service base directory and return
     /// the directories that contain WALs for databases, which can be used to restore those DBs.
     pub fn wal_dirs(&self) -> Result<Vec<PathBuf>> {
-        let entries = fs::read_dir(&self.base_dir).context(ReadError{message: format!("Error loading databases from dir {:?}", self.base_dir)})?;
+        let entries = fs::read_dir(&self.base_dir).context(ReadError {
+            message: format!("Error loading databases from dir {:?}", self.base_dir),
+        })?;
 
         let mut dirs = vec![];
 
         for entry in entries {
-            let entry = entry.context(ReadError{message: format!("error reading dir in database base dir: {:?}", self.base_dir)})?;
+            let entry = entry.context(ReadError {
+                message: format!(
+                    "error reading dir in database base dir: {:?}",
+                    self.base_dir
+                ),
+            })?;
 
-            entry.metadata().map(|m| {
-               if m.is_dir() {
-                   entry.path().iter().last().map(|p| {
-                       p.to_str().map(|s| {
-                           if !s.starts_with(".") {
-                               dirs.push(entry.path());
-                           };
-                       });
-                   });
-               };
-            });
+            let meta = entry.metadata().context(ReadMetadataError {})?;
+            if meta.is_dir() {
+                if let Some(p) = entry.path().iter().last() {
+                    if let Some(s) = p.to_str() {
+                        if !s.starts_with('.') {
+                            dirs.push(entry.path());
+                        };
+                    }
+                };
+            };
         }
 
         Ok(dirs)
@@ -171,7 +192,9 @@ impl WriteBufferDatabases {
     pub async fn get_db(&self, org: &str, bucket: &str) -> Option<Arc<Db>> {
         let databases = self.databases.read().await;
 
-        databases.get(&org_and_bucket_to_database(org, bucket)).map(|d| d.clone())
+        databases
+            .get(&org_and_bucket_to_database(org, bucket))
+            .cloned()
     }
 
     pub async fn get_or_create_db(&self, org: &str, bucket: &str) -> Result<Arc<Db>> {
@@ -214,6 +237,7 @@ pub struct Db {
     next_partition_id: AtomicU32,
     wal_details: Option<WalDetails>,
     dir: PathBuf,
+    rows_written: AtomicU32,
 }
 
 impl Db {
@@ -246,31 +270,43 @@ impl Db {
             partitions: RwLock::new(vec![]),
             next_partition_id: AtomicU32::new(1),
             wal_details: Some(wal_details),
+            rows_written: AtomicU32::new(0),
         })
     }
 
     pub async fn restore_from_wal(wal_dir: PathBuf) -> Result<Self> {
-        let name=  wal_dir.iter()
-            .last().context(OpenDb {dir: wal_dir.clone()})?
-            .to_str().context(OpenDb {dir: wal_dir.clone()})?;
+        let now = std::time::Instant::now();
+        let name = wal_dir
+            .iter()
+            .last()
+            .with_context(|| OpenDb {
+                dir: wal_dir.clone(),
+            })?
+            .to_str()
+            .with_context(|| OpenDb {
+                dir: wal_dir.clone(),
+            })?
+            .to_string();
 
         let wal_builder = WalBuilder::new(wal_dir.clone());
         let wal_details = start_wal_sync_task(wal_builder.clone())
             .await
-            .context(OpeningWal {
-                database: name.to_string(),
-            })?;
-
-        // TODO: check wal metadata format
-        let entries = wal_builder.entries().context(LoadingWal {
-            database: name.clone(),
-        })?;
-        let mut partitions: HashMap<u32, Partition> = HashMap::new();
-        let next_partition_id = 0;
-        for entry in entries {
-            let entry = entry.context(LoadingWal {
+            .with_context(|| OpeningWal {
                 database: name.clone(),
             })?;
+
+        let mut row_count = 0;
+        let mut dict_values = 0;
+        let mut tables = HashMap::new();
+
+        // TODO: check wal metadata format
+        let entries = wal_builder
+            .entries()
+            .with_context(|| LoadingWal { database: &name })?;
+        let mut partitions: HashMap<u32, Partition> = HashMap::new();
+        let mut next_partition_id = 0;
+        for entry in entries {
+            let entry = entry.context(LoadingWal { database: &name })?;
             let bytes = entry.as_data();
 
             let entry = flatbuffers::get_root::<wb::WriteBufferBatch<'_>>(&bytes);
@@ -279,6 +315,9 @@ impl Db {
                 for entry in entries {
                     if let Some(po) = entry.partition_open() {
                         let id = po.id();
+                        if id > next_partition_id {
+                            next_partition_id = id;
+                        }
                         let p = Partition::new(id, po.name().unwrap().to_string());
                         partitions.insert(id, p);
                     } else if let Some(_ps) = entry.partition_snapshot_started() {
@@ -287,44 +326,63 @@ impl Db {
                         // TODO: handle partition snapshot finished
                     } else if let Some(da) = entry.dictionary_add() {
                         let p = partitions.get_mut(&da.partition_id()).context(WalRecoverError{database: name.clone(), error: format!("couldn't add dictionary item to partition {} with id {} and value {}", da.partition_id(), da.id(), da.value().unwrap())})?;
+                        dict_values += 1;
                         p.intern_new_dict_entry(da.value().unwrap());
                     } else if let Some(sa) = entry.schema_append() {
+                        let tid = sa.table_id();
+                        tables.insert(tid, true);
                         let p = partitions.get_mut(&sa.partition_id()).context(WalRecoverError{database: name.clone(), error: format!("couldn't append schema to partition {} in table id {} and column id {}", sa.partition_id(), sa.table_id(), sa.column_id())})?;
                         p.append_wal_schema(sa.table_id(), sa.column_id(), sa.column_type())?;
                     } else if let Some(row) = entry.write() {
-                        let p =
-                            partitions
-                                .get_mut(&row.partition_id())
-                                .context(WalRecoverError {
-                                    database: name.clone(),
-                                    error: format!(
-                                        "couldn't add row because partition {} wasn't found",
-                                        row.partition_id()
-                                    ),
-                                })?;
+                        let p = partitions.get_mut(&row.partition_id()).with_context(|| {
+                            WalRecoverError {
+                                database: &name,
+                                error: format!(
+                                    "couldn't add row because partition {} wasn't found",
+                                    row.partition_id()
+                                ),
+                            }
+                        })?;
+                        row_count += 1;
                         p.add_wal_row(row.table_id(), &row.values().unwrap())?;
                     }
                 }
             }
         }
+        let elapsed = now.elapsed();
+        info!(
+            "{} databse loaded {} rows in {}.{:03} seconds with {} dictionary adds in {} tables",
+            &name,
+            row_count,
+            elapsed.as_secs(),
+            elapsed.subsec_millis(),
+            dict_values,
+            tables.len()
+        );
 
-        let partitions = partitions.drain().map(|(_, p)| p).collect();
+        let partitions: Vec<_> = partitions.drain().map(|(_, p)| p).collect();
+
+        info!(
+            "{} database partition count: {}, next_id {}",
+            &name,
+            partitions.len(),
+            next_partition_id
+        );
+
         Ok(Self {
-            name: name.to_string(),
+            name,
             dir: wal_dir,
             partitions: RwLock::new(partitions),
             next_partition_id: AtomicU32::new(next_partition_id + 1),
             wal_details: Some(wal_details),
+            rows_written: AtomicU32::new(0),
         })
     }
 
     // TODO: writes lines creates a column named "time" for the timestmap data. If
     //       we keep this we need to validate that no tag or field has the same name.
     pub async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<()> {
-        let partition_keys: Vec<_> = lines
-            .into_iter()
-            .map(|l| (l, self.partition_key(l)))
-            .collect();
+        let partition_keys: Vec<_> = lines.iter().map(|l| (l, self.partition_key(l))).collect();
         let mut partitions = self.partitions.write().await;
 
         let mut builder = match &self.wal_details {
@@ -354,81 +412,100 @@ impl Db {
             }
         }
 
-        if let Some(WalDetails { wal, .. }) = &self.wal_details {
-            let builder = &mut builder.unwrap();
+        self.rows_written
+            .fetch_add(lines.len() as u32, Ordering::SeqCst);
 
-            let (ingest_done_tx, mut ingest_done_rx) = mpsc::channel(1);
-
-            let mut w = wal.append();
-
+        if let Some(wal) = &self.wal_details {
+            let mut builder = builder.unwrap();
             builder.create_batch();
 
-            w.write_all(builder.fbb.finished_data())
-                .context(WritingToWal)?;
-            w.finalize(ingest_done_tx).expect("TODO handle errors");
-
-            ingest_done_rx
-                .next()
-                .await
-                .expect("TODO handle errors")
-                .expect("TODO handle errors");
+            let (mut data, idx) = builder.fbb.collapse();
+            let data = data.split_off(idx);
+            wal.write_and_sync(data).await.context(WritingWal {
+                database: self.name.clone(),
+            })?;
         }
 
         Ok(())
     }
 
-    pub async fn table_to_arrow(&self, table_name: &str, _columns: &[&str]) -> Result<RecordBatch> {
+    pub async fn table_to_arrow(
+        &self,
+        table_name: &str,
+        _columns: &[&str],
+    ) -> Result<Vec<RecordBatch>> {
         // TODO: have this work with multiple partitions
         let partitions = self.partitions.read().await;
-        let partition = partitions.first().context(TableNotFound {
-            table: table_name.to_string(),
-        })?;
-        partition.table_to_arrow(table_name)
+
+        let mut batches = Vec::with_capacity(partitions.len());
+
+        for p in partitions.iter() {
+            let batch = p.table_to_arrow(table_name)?;
+            batches.push(batch);
+        }
+
+        Ok(batches)
     }
 
     pub async fn query(&self, query: &str) -> Result<Vec<RecordBatch>> {
         let mut tables = vec![];
 
         let dialect = GenericDialect {};
-        let ast = Parser::parse_sql(&dialect, query)
-            .context(InvalidSqlQuery {query: query.to_string()})?;
+        let ast = Parser::parse_sql(&dialect, query).context(InvalidSqlQuery {
+            query: query.to_string(),
+        })?;
 
         for statement in ast {
             match statement {
                 Statement::Query(q) => {
                     if let SetExpr::Select(q) = q.body {
                         for item in q.from {
-                            match item.relation {
-                                TableFactor::Table {name: name, .. } => {
-                                    let name = name.to_string();
-                                    let data = self.table_to_arrow(&name, &vec![]).await?;
-                                    tables.push(ArrowTable{name, schema: data.schema().clone(), data});
-                                },
-                                _ => (),
+                            if let TableFactor::Table { name, .. } = item.relation {
+                                let name = name.to_string();
+                                let data = self.table_to_arrow(&name, &[]).await?;
+                                tables.push(ArrowTable {
+                                    name,
+                                    schema: data[0].schema().clone(),
+                                    data,
+                                });
                             }
                         }
                     }
-                },
-                _ => return UnsupportedStatement {query: query.to_string(), statement}.fail(),
+                }
+                _ => {
+                    return UnsupportedStatement {
+                        query: query.to_string(),
+                        statement,
+                    }
+                    .fail()
+                }
             }
         }
 
         let mut ctx = ExecutionContext::new();
 
         for table in tables {
-            let provider = MemTable::new(
-                table.schema,
-                vec![vec![table.data]])
-                .context(QueryError{query: query.to_string()})?;
+            let provider = MemTable::new(table.schema, vec![table.data]).context(QueryError {
+                query: query.to_string(),
+            })?;
             ctx.register_table(&table.name, Box::new(provider));
         }
 
-        let plan = ctx.create_logical_plan(&query).context(QueryError { query: query.to_string() })?;
-        let plan = ctx.optimize(&plan).context(QueryError { query: query.to_string() })?;
-        let plan = ctx.create_physical_plan(&plan, 1024 * 1024)
-            .context(QueryError { query: query.to_string() })?;
+        let plan = ctx.create_logical_plan(&query).context(QueryError {
+            query: query.to_string(),
+        })?;
+        let plan = ctx.optimize(&plan).context(QueryError {
+            query: query.to_string(),
+        })?;
+        let plan = ctx
+            .create_physical_plan(&plan, 1024 * 1024)
+            .context(QueryError {
+                query: query.to_string(),
+            })?;
 
-        ctx.collect(plan.as_ref()).context(QueryError{query: query.to_string()})
+        ctx.collect(plan.as_ref()).context(QueryError {
+            query: query.to_string(),
+        })
     }
 
     // partition_key returns the partition key for the given line. The key will be the prefix of a
@@ -447,7 +524,7 @@ impl Db {
 struct ArrowTable {
     name: String,
     schema: Arc<Schema>,
-    data: RecordBatch,
+    data: Vec<RecordBatch>,
 }
 
 #[derive(Debug)]
@@ -461,8 +538,8 @@ struct Partition {
 }
 
 impl Partition {
-    fn new(id: u32, name: String) -> Partition {
-        Partition {
+    fn new(id: u32, name: String) -> Self {
+        Self {
             name,
             id,
             dictionary: StringInterner::new(),
@@ -481,10 +558,12 @@ impl Partition {
         column_id: u32,
         column_type: wb::ColumnType,
     ) -> Result<()> {
+        let partition_id = self.id;
+
         let t = self
             .tables
             .entry(table_id)
-            .or_insert(Table::new(table_id, self.id));
+            .or_insert_with(|| Table::new(table_id, partition_id));
         t.append_schema(column_id, column_type);
         Ok(())
     }
@@ -501,7 +580,7 @@ impl Partition {
         t.add_wal_row(values)
     }
 
-    fn write_line<'a>(
+    fn write_line(
         &mut self,
         line: &ParsedLine<'_>,
         builder: &mut Option<WalEntryBuilder<'_>>,
@@ -549,7 +628,7 @@ impl Partition {
         Ok(())
     }
 
-    fn get_or_insert_dict<'a>(
+    fn get_or_insert_dict(
         &mut self,
         value: &str,
         builder: &mut Option<WalEntryBuilder<'_>>,
@@ -611,7 +690,7 @@ struct Table {
 }
 
 impl Table {
-    fn new(id: u32, partition_id: u32) -> Table {
+    fn new(id: u32, partition_id: u32) -> Self {
         Self {
             id,
             partition_id,
@@ -724,7 +803,7 @@ impl Table {
         }
     }
 
-    fn add_row<'a>(
+    fn add_row(
         &mut self,
         values: &[ColumnValue<'_>],
         builder: &mut Option<WalEntryBuilder<'_>>,
@@ -1176,12 +1255,12 @@ impl Column {
     // TODO: have type mismatches return helpful error
     fn matches_type(&self, val: &ColumnValue<'_>) -> bool {
         match (self, &val.value) {
-            (Column::Tag(_), Value::TagValueId(_)) => true,
+            (Self::Tag(_), Value::TagValueId(_)) => true,
             (col, Value::FieldValue(field)) => match (col, field) {
-                (Column::F64(_), FieldValue::F64(_)) => true,
-                (Column::I64(_), FieldValue::I64(_)) => true,
-                (Column::Bool(_), FieldValue::Boolean(_)) => true,
-                (Column::String(_), FieldValue::String(_)) => true,
+                (Self::F64(_), FieldValue::F64(_)) => true,
+                (Self::I64(_), FieldValue::I64(_)) => true,
+                (Self::Bool(_), FieldValue::Boolean(_)) => true,
+                (Self::String(_), FieldValue::String(_)) => true,
                 _ => false,
             },
             _ => false,
@@ -1272,30 +1351,29 @@ mod tests {
                 .collect();
             db.write_lines(&lines).await?;
 
-            let table = db.table_to_arrow("cpu", &vec!["region", "host"]).await?;
-            let res = pretty_format_batches(&[table]).unwrap();
+            let partitions = db.table_to_arrow("cpu", &["region", "host"]).await?;
+            let res = pretty_format_batches(&partitions).unwrap();
             assert_eq!(expected_cpu_table, res);
-            let table = db.table_to_arrow("mem", &vec![]).await?;
-            let res = pretty_format_batches(&[table]).unwrap();
+            let partitions = db.table_to_arrow("mem", &[]).await?;
+            let res = pretty_format_batches(&partitions).unwrap();
             assert_eq!(expected_mem_table, res);
-            let table = db.table_to_arrow("disk", &vec![]).await?;
-            let res = pretty_format_batches(&[table]).unwrap();
+            let partitions = db.table_to_arrow("disk", &[]).await?;
+            let res = pretty_format_batches(&partitions).unwrap();
             assert_eq!(expected_disk_table, res);
         }
 
         // check that it recovers from the wal
         {
-            dir.push("mydb");
             let db = Db::restore_from_wal(dir).await?;
 
-            let table = db.table_to_arrow("cpu", &vec!["region", "host"]).await?;
-            let res = pretty_format_batches(&[table]).unwrap();
+            let partitions = db.table_to_arrow("cpu", &["region", "host"]).await?;
+            let res = pretty_format_batches(&partitions).unwrap();
             assert_eq!(expected_cpu_table, res);
-            let table = db.table_to_arrow("mem", &vec![]).await?;
-            let res = pretty_format_batches(&[table]).unwrap();
+            let partitions = db.table_to_arrow("mem", &[]).await?;
+            let res = pretty_format_batches(&partitions).unwrap();
             assert_eq!(expected_mem_table, res);
-            let table = db.table_to_arrow("disk", &vec![]).await?;
-            let res = pretty_format_batches(&[table]).unwrap();
+            let partitions = db.table_to_arrow("disk", &[]).await?;
+            let res = pretty_format_batches(&partitions).unwrap();
             assert_eq!(expected_disk_table, res);
         }
 
