@@ -29,13 +29,11 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let storage = WriteBufferDatabases::new(&db_dir);
     let dirs = storage.wal_dirs()?;
 
-    // TODO: make recovery of multiple databases multithreaded
+    // TODO: make recovery of multiple databases multi-threaded
     for dir in dirs {
         let db = Db::restore_from_wal(dir).await?;
         storage.add_db(db).await;
     }
-
-    // TODO: restore datbases
 
     let bind_addr: SocketAddr = match std::env::var("DELOREAN_BIND_ADDR") {
         Ok(addr) => addr

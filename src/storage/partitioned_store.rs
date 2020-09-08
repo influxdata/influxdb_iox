@@ -98,8 +98,8 @@ impl WalDetails {
             serde_json::to_string(&self.metadata).context(SerializeMetadata)?,
         )
         .await
-        .with_context(|| WritingMetadata {
-            metadata_path: self.metadata_path.clone(),
+        .context(WritingMetadata {
+            metadata_path: &self.metadata_path,
         })?)
     }
 
@@ -111,12 +111,13 @@ impl WalDetails {
         let write = WalWrite { payload, notify_tx };
 
         let mut tx = self.write_tx.clone();
-        tx.send(write).await.unwrap();
+        tx.send(write).await
+            .expect("The WAL thread should always be running to receive a write");
 
         let _ = notify_rx
             .next()
             .await
-            .unwrap()
+            .expect("The WAL thread should always be running to send a response.")
             .context(UnderlyingWalError {})?;
 
         Ok(())

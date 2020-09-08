@@ -257,7 +257,6 @@ impl Wal {
     /// single or batch of append operations.
     pub fn append(&mut self, payload: WritePayload) -> Result<SequenceNumber> {
         let sequence_number = self.sequence_number;
-        self.sequence_number += 1;
 
         let mut f = match self.active_file.take() {
             Some(f) => f,
@@ -271,11 +270,11 @@ impl Wal {
         };
 
         h.write(&mut f)?;
-        f.write_all(&payload.data).context(UnableToWriteData {})?;
+        f.write_all(&payload.data).context(UnableToWriteData)?;
 
-        self.total_size = self.total_size + Header::LEN + payload.len as u64;
-
+        self.total_size += Header::LEN + payload.len as u64;
         self.active_file = Some(f);
+        self.sequence_number += 1;
 
         Ok(sequence_number)
     }
@@ -312,9 +311,9 @@ impl Wal {
         let f = self.active_file.take();
 
         if let Some(f) = f {
-            f.sync_all().context(UnableToSync {})?;
+            f.sync_all().context(UnableToSync)?;
 
-            let meta = f.metadata().context(UnableToReadFileMetadata {})?;
+            let meta = f.metadata().context(UnableToReadFileMetadata)?;
             if meta.len() < self.file_rollover_size {
                 self.active_file = Some(f);
             }
@@ -701,7 +700,6 @@ mod tests {
         let data = Vec::from("other");
         let data = WritePayload::new(data)?;
         let seq = wal.append(data)?;
-        wal.sync_all()?;
         assert_eq!(1, seq);
 
         let data = Vec::from("again");

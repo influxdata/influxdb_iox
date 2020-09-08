@@ -7,7 +7,7 @@ use crate::storage::partitioned_store::{
 use delorean_line_parser::{FieldValue, ParsedLine};
 use delorean_wal::WalBuilder;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fs;
 use std::io::ErrorKind;
@@ -41,9 +41,9 @@ use tokio::sync::RwLock;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Error reading {}: {}", message, source))]
+    #[snafu(display("Error reading from dir {:?}: {}", dir, source))]
     ReadError {
-        message: String,
+        dir: PathBuf,
         source: std::io::Error,
     },
 
@@ -74,17 +74,17 @@ pub enum Error {
         source: delorean_wal::Error,
     },
 
-    #[snafu(display("Error recovering WAL for database {}: {}", database, error))]
-    WalRecoverError { database: String, error: String },
+    #[snafu(display("Error recovering WAL for database {} on partition {}", database, partition_id))]
+    WalRecoverError { database: String, partition_id: u32 },
 
-    #[snafu(display("Error recovering WAL for partition {}: {}", partition_id, error))]
-    WalPartitionError { partition_id: u32, error: String },
+    #[snafu(display("Error recovering WAL for partition {} on table {}", partition_id, table_id))]
+    WalPartitionError { partition_id: u32, table_id: u32 },
 
     #[snafu(display("Error recovering write from WAL, column id {} not found", column_id))]
     WalColumnError { column_id: u16 },
 
     #[snafu(display("Error creating db dir for {}: {}", database, err))]
-    CreatingWalDir { database: String, err: String },
+    CreatingWalDir { database: String, err: std::io::Error },
 
     #[snafu(display("Schema mismatch: Write with the following errors: {}", error))]
     SchemaMismatch { error: String },
@@ -99,7 +99,7 @@ pub enum Error {
     TableNotFound { table: String },
 
     #[snafu(display("Unexpected insert error"))]
-    InsertError {},
+    InsertError,
 
     #[snafu(display("arrow conversion error"))]
     ArrowError { source: arrow::error::ArrowError },
@@ -144,29 +144,25 @@ pub struct WriteBufferDatabases {
 }
 
 impl WriteBufferDatabases {
-    pub fn new(base_dir: &str) -> Self {
-        let base_dir = PathBuf::from(base_dir);
+    pub fn new(base_dir: impl Into<PathBuf>) -> Self {
         Self {
             databases: RwLock::new(HashMap::new()),
-            base_dir,
+            base_dir: base_dir.into(),
         }
     }
 
-    /// wal_dirs will traverse the directories fromm the service base directory and return
+    /// wal_dirs will traverse the directories from the service base directory and return
     /// the directories that contain WALs for databases, which can be used to restore those DBs.
     pub fn wal_dirs(&self) -> Result<Vec<PathBuf>> {
         let entries = fs::read_dir(&self.base_dir).context(ReadError {
-            message: format!("Error loading databases from dir {:?}", self.base_dir),
+            dir: &self.base_dir,
         })?;
 
         let mut dirs = vec![];
 
         for entry in entries {
             let entry = entry.context(ReadError {
-                message: format!(
-                    "error reading dir in database base dir: {:?}",
-                    self.base_dir
-                ),
+                dir: &self.base_dir,
             })?;
 
             let meta = entry.metadata().context(ReadMetadataError {})?;
@@ -232,12 +228,11 @@ fn org_and_bucket_to_database(org: &str, bucket: &str) -> String {
 #[derive(Debug)]
 pub struct Db {
     name: String,
-    // TODO: partitions need to b wrapped in an Arc if they're going to be used without this lock
+    // TODO: partitions need to be wrapped in an Arc if they're going to be used without this lock
     partitions: RwLock<Vec<Partition>>,
     next_partition_id: AtomicU32,
     wal_details: Option<WalDetails>,
     dir: PathBuf,
-    rows_written: AtomicU32,
 }
 
 impl Db {
@@ -249,7 +244,7 @@ impl Db {
                 _ => {
                     return CreatingWalDir {
                         database: name,
-                        err: e.to_string(),
+                        err: e,
                     }
                     .fail()
                 }
@@ -261,7 +256,7 @@ impl Db {
             database: name.clone(),
         })?;
         wal_details.write_metadata().await.context(OpeningWal {
-            database: name.clone(),
+            database: &name,
         })?;
 
         Ok(Self {
@@ -270,7 +265,6 @@ impl Db {
             partitions: RwLock::new(vec![]),
             next_partition_id: AtomicU32::new(1),
             wal_details: Some(wal_details),
-            rows_written: AtomicU32::new(0),
         })
     }
 
@@ -280,29 +274,29 @@ impl Db {
             .iter()
             .last()
             .with_context(|| OpenDb {
-                dir: wal_dir.clone(),
+                dir: &wal_dir,
             })?
             .to_str()
             .with_context(|| OpenDb {
-                dir: wal_dir.clone(),
+                dir: &wal_dir,
             })?
             .to_string();
 
         let wal_builder = WalBuilder::new(wal_dir.clone());
         let wal_details = start_wal_sync_task(wal_builder.clone())
             .await
-            .with_context(|| OpeningWal {
-                database: name.clone(),
+            .context(OpeningWal {
+                database: &name,
             })?;
 
         let mut row_count = 0;
         let mut dict_values = 0;
-        let mut tables = HashMap::new();
+        let mut tables = HashSet::new();
 
         // TODO: check wal metadata format
         let entries = wal_builder
             .entries()
-            .with_context(|| LoadingWal { database: &name })?;
+            .context(LoadingWal { database: &name })?;
         let mut partitions: HashMap<u32, Partition> = HashMap::new();
         let mut next_partition_id = 0;
         for entry in entries {
@@ -321,28 +315,32 @@ impl Db {
                         let p = Partition::new(id, po.name().unwrap().to_string());
                         partitions.insert(id, p);
                     } else if let Some(_ps) = entry.partition_snapshot_started() {
-                        // TODO: handle partition snapshot
+                        todo!("handle partition snapshot");
                     } else if let Some(_pf) = entry.partition_snapshot_finished() {
-                        // TODO: handle partition snapshot finished
+                        todo!("handle partition snapshot finished")
                     } else if let Some(da) = entry.dictionary_add() {
-                        let p = partitions.get_mut(&da.partition_id()).context(WalRecoverError{database: name.clone(), error: format!("couldn't add dictionary item to partition {} with id {} and value {}", da.partition_id(), da.id(), da.value().unwrap())})?;
+                        let p = partitions.get_mut(&da.partition_id())
+                            .context(WalRecoverError{
+                                database: &name,
+                                partition_id: da.partition_id(),
+                            })?;
                         dict_values += 1;
                         p.intern_new_dict_entry(da.value().unwrap());
                     } else if let Some(sa) = entry.schema_append() {
                         let tid = sa.table_id();
-                        tables.insert(tid, true);
-                        let p = partitions.get_mut(&sa.partition_id()).context(WalRecoverError{database: name.clone(), error: format!("couldn't append schema to partition {} in table id {} and column id {}", sa.partition_id(), sa.table_id(), sa.column_id())})?;
+                        tables.insert(tid);
+                        let p = partitions.get_mut(&sa.partition_id())
+                            .context(WalRecoverError{
+                                database: &name,
+                                partition_id: sa.partition_id(),
+                            })?;
                         p.append_wal_schema(sa.table_id(), sa.column_id(), sa.column_type())?;
                     } else if let Some(row) = entry.write() {
-                        let p = partitions.get_mut(&row.partition_id()).with_context(|| {
-                            WalRecoverError {
+                        let p = partitions.get_mut(&row.partition_id())
+                            .context(WalRecoverError {
                                 database: &name,
-                                error: format!(
-                                    "couldn't add row because partition {} wasn't found",
-                                    row.partition_id()
-                                ),
-                            }
-                        })?;
+                                partition_id: row.partition_id(),
+                            })?;
                         row_count += 1;
                         p.add_wal_row(row.table_id(), &row.values().unwrap())?;
                     }
@@ -351,7 +349,7 @@ impl Db {
         }
         let elapsed = now.elapsed();
         info!(
-            "{} databse loaded {} rows in {}.{:03} seconds with {} dictionary adds in {} tables",
+            "{} database loaded {} rows in {}.{:03} seconds with {} dictionary adds in {} tables",
             &name,
             row_count,
             elapsed.as_secs(),
@@ -360,7 +358,7 @@ impl Db {
             tables.len()
         );
 
-        let partitions: Vec<_> = partitions.drain().map(|(_, p)| p).collect();
+        let partitions: Vec<_> = partitions.into_iter().map(|(_, p)| p).collect();
 
         info!(
             "{} database partition count: {}, next_id {}",
@@ -375,7 +373,6 @@ impl Db {
             partitions: RwLock::new(partitions),
             next_partition_id: AtomicU32::new(next_partition_id + 1),
             wal_details: Some(wal_details),
-            rows_written: AtomicU32::new(0),
         })
     }
 
@@ -412,9 +409,6 @@ impl Db {
             }
         }
 
-        self.rows_written
-            .fetch_add(lines.len() as u32, Ordering::SeqCst);
-
         if let Some(wal) = &self.wal_details {
             let mut builder = builder.unwrap();
             builder.create_batch();
@@ -434,26 +428,19 @@ impl Db {
         table_name: &str,
         _columns: &[&str],
     ) -> Result<Vec<RecordBatch>> {
-        // TODO: have this work with multiple partitions
         let partitions = self.partitions.read().await;
 
-        let mut batches = Vec::with_capacity(partitions.len());
-
-        for p in partitions.iter() {
-            let batch = p.table_to_arrow(table_name)?;
-            batches.push(batch);
-        }
-
-        Ok(batches)
+        partitions.iter().map(|p| p.table_to_arrow(table_name)).collect()
     }
 
     pub async fn query(&self, query: &str) -> Result<Vec<RecordBatch>> {
         let mut tables = vec![];
 
         let dialect = GenericDialect {};
-        let ast = Parser::parse_sql(&dialect, query).context(InvalidSqlQuery {
-            query: query.to_string(),
-        })?;
+        let ast = Parser::parse_sql(&dialect, query)
+            .context(InvalidSqlQuery {
+                query,
+            })?;
 
         for statement in ast {
             match statement {
@@ -517,7 +504,7 @@ impl Db {
         let secs = ts / 1_000_000_000;
         let nsecs = (ts % 1_000_000_000) as u32;
         let dt = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(secs, nsecs), Utc);
-        dt.format("%Y/%m/%d").to_string()
+        dt.format("%Y-%m-%dT%H").to_string()
     }
 }
 
@@ -575,7 +562,7 @@ impl Partition {
     ) -> Result<()> {
         let t = self.tables.get_mut(&table_id).context(WalPartitionError {
             partition_id: self.id,
-            error: format!("error: table id {} not found to add row", table_id),
+            table_id,
         })?;
         t.add_wal_row(values)
     }
@@ -721,7 +708,7 @@ impl Table {
                 self.columns.push(Column::F64(v));
             }
             wb::ColumnType::U64 => {
-                // TODO: handle this (write it out, in mem, and recover)
+                todo!("handle this (write it out, in mem, and recover");
             }
             wb::ColumnType::String => {
                 let mut v = Vec::with_capacity(row_count + 1);
@@ -797,10 +784,7 @@ impl Table {
     }
 
     fn row_count(&self) -> usize {
-        match self.columns.first() {
-            Some(v) => v.len(),
-            None => 0,
-        }
+        self.columns.first().map_or(0, |v| v.len())
     }
 
     fn add_row(
