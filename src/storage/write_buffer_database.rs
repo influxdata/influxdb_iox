@@ -7,7 +7,7 @@ use crate::storage::partitioned_store::{
 use delorean_line_parser::{FieldValue, ParsedLine};
 use delorean_wal::WalBuilder;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fs;
 use std::io::ErrorKind;
@@ -15,9 +15,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use arrow::array::{BooleanBuilder, Float64Builder, Int64Builder};
 use arrow::{
-    array::{ArrayRef, StringBuilder},
+    array::{ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, StringBuilder},
     datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema},
     record_batch::RecordBatch,
 };
@@ -30,7 +29,6 @@ use sqlparser::{
     parser::Parser,
 };
 
-use arrow::datatypes::Schema;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use sqlparser::ast::TableFactor;
@@ -150,14 +148,14 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug)]
 pub struct WriteBufferDatabases {
-    databases: RwLock<HashMap<String, Arc<Db>>>,
+    databases: RwLock<BTreeMap<String, Arc<Db>>>,
     base_dir: PathBuf,
 }
 
 impl WriteBufferDatabases {
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
         Self {
-            databases: RwLock::new(HashMap::new()),
+            databases: RwLock::new(BTreeMap::new()),
             base_dir: base_dir.into(),
         }
     }
@@ -196,7 +194,7 @@ impl WriteBufferDatabases {
         databases.insert(db.name.clone(), Arc::new(db));
     }
 
-    pub async fn get_db(&self, org: &str, bucket: &str) -> Option<Arc<Db>> {
+    pub async fn db(&self, org: &str, bucket: &str) -> Option<Arc<Db>> {
         let databases = self.databases.read().await;
 
         databases
@@ -204,7 +202,7 @@ impl WriteBufferDatabases {
             .cloned()
     }
 
-    pub async fn get_or_create_db(&self, org: &str, bucket: &str) -> Result<Arc<Db>> {
+    pub async fn db_or_create(&self, org: &str, bucket: &str) -> Result<Arc<Db>> {
         let db_name = org_and_bucket_to_database(org, bucket);
 
         // get it through a read lock first if we can
@@ -224,7 +222,7 @@ impl WriteBufferDatabases {
             return Ok(db.clone());
         }
 
-        let db = Db::new_with_wal(db_name.to_string(), &mut self.base_dir.clone()).await?;
+        let db = Db::try_with_wal(db_name.to_string(), &mut self.base_dir.clone()).await?;
         let db = Arc::new(db);
         databases.insert(db_name, db.clone());
 
@@ -247,7 +245,7 @@ pub struct Db {
 }
 
 impl Db {
-    pub async fn new_with_wal(name: String, wal_dir: &mut PathBuf) -> Result<Self> {
+    pub async fn try_with_wal(name: String, wal_dir: &mut PathBuf) -> Result<Self> {
         wal_dir.push(&name);
         if let Err(e) = std::fs::create_dir(wal_dir.clone()) {
             match e.kind() {
@@ -303,7 +301,7 @@ impl Db {
         let entries = wal_builder
             .entries()
             .context(LoadingWal { database: &name })?;
-        let mut partitions: HashMap<u32, Partition> = HashMap::new();
+        let mut partitions = HashMap::new();
         let mut next_partition_id = 0;
         for entry in entries {
             let entry = entry.context(LoadingWal { database: &name })?;
@@ -344,7 +342,7 @@ impl Db {
                                     database: &name,
                                     partition_id: sa.partition_id(),
                                 })?;
-                        p.append_wal_schema(sa.table_id(), sa.column_id(), sa.column_type())?;
+                        p.append_wal_schema(sa.table_id(), sa.column_id(), sa.column_type());
                     } else if let Some(row) = entry.write() {
                         let p =
                             partitions
@@ -361,11 +359,10 @@ impl Db {
         }
         let elapsed = now.elapsed();
         info!(
-            "{} database loaded {} rows in {}.{:03} seconds with {} dictionary adds in {} tables",
+            "{} database loaded {} rows in {:?} with {} dictionary adds in {} tables",
             &name,
             row_count,
-            elapsed.as_secs(),
-            elapsed.subsec_millis(),
+            elapsed,
             dict_values,
             tables.len()
         );
@@ -394,14 +391,11 @@ impl Db {
         let partition_keys: Vec<_> = lines.iter().map(|l| (l, self.partition_key(l))).collect();
         let mut partitions = self.partitions.write().await;
 
-        let mut builder = match &self.wal_details {
-            Some(_) => Some(WalEntryBuilder {
-                fbb: flatbuffers::FlatBufferBuilder::new_with_capacity(1024),
-                entries: vec![],
-                row_values: vec![],
-            }),
-            None => None,
-        };
+        let mut builder = self.wal_details.as_ref().map(|_| WalEntryBuilder {
+            fbb: flatbuffers::FlatBufferBuilder::new_with_capacity(1024),
+            entries: vec![],
+            row_values: vec![],
+        });
 
         // TODO: rollback writes to partitions on validation failures
         for (line, key) in partition_keys {
@@ -522,7 +516,7 @@ impl Db {
 
 struct ArrowTable {
     name: String,
-    schema: Arc<Schema>,
+    schema: Arc<ArrowSchema>,
     data: Vec<RecordBatch>,
 }
 
@@ -551,12 +545,7 @@ impl Partition {
         self.dictionary.get_or_intern(name);
     }
 
-    fn append_wal_schema(
-        &mut self,
-        table_id: u32,
-        column_id: u32,
-        column_type: wb::ColumnType,
-    ) -> Result<()> {
+    fn append_wal_schema(&mut self, table_id: u32, column_id: u32, column_type: wb::ColumnType) {
         let partition_id = self.id;
 
         let t = self
@@ -564,7 +553,6 @@ impl Partition {
             .entry(table_id)
             .or_insert_with(|| Table::new(table_id, partition_id));
         t.append_schema(column_id, column_type);
-        Ok(())
     }
 
     fn add_wal_row(
@@ -585,7 +573,7 @@ impl Partition {
         builder: &mut Option<WalEntryBuilder<'_>>,
     ) -> Result<()> {
         let measurement = line.series.measurement.as_str();
-        let table_id = self.get_or_insert_dict(measurement, builder);
+        let table_id = self.dict_or_insert(measurement, builder);
         let partition_id = self.id;
 
         let column_count =
@@ -595,8 +583,8 @@ impl Partition {
         // Make sure the time, tag and field names exist in the dictionary
         if let Some(tags) = &line.series.tag_set {
             for (k, v) in tags {
-                let tag_column_id = self.get_or_insert_dict(k.as_str(), builder);
-                let tag_value_id = self.get_or_insert_dict(v.as_str(), builder);
+                let tag_column_id = self.dict_or_insert(k.as_str(), builder);
+                let tag_value_id = self.dict_or_insert(v.as_str(), builder);
                 values.push(ColumnValue {
                     id: tag_column_id,
                     value: Value::TagValueId(tag_value_id),
@@ -604,13 +592,13 @@ impl Partition {
             }
         }
         for (field_name, value) in &line.field_set {
-            let field_id = self.get_or_insert_dict(field_name.as_str(), builder);
+            let field_id = self.dict_or_insert(field_name.as_str(), builder);
             values.push(ColumnValue {
                 id: field_id,
                 value: Value::FieldValue(value),
             });
         }
-        let time_id = self.get_or_insert_dict("time", builder);
+        let time_id = self.dict_or_insert("time", builder);
         let time = line.timestamp.unwrap_or(0);
         let time_value = FieldValue::I64(time);
         values.push(ColumnValue {
@@ -627,11 +615,7 @@ impl Partition {
         Ok(())
     }
 
-    fn get_or_insert_dict(
-        &mut self,
-        value: &str,
-        builder: &mut Option<WalEntryBuilder<'_>>,
-    ) -> u32 {
+    fn dict_or_insert(&mut self, value: &str, builder: &mut Option<WalEntryBuilder<'_>>) -> u32 {
         match self.dictionary.get(value) {
             Some(id) => symbol_to_u32(id),
             None => {
@@ -673,7 +657,7 @@ struct ColumnValue<'a> {
 #[derive(Debug)]
 enum Value<'a> {
     TagValueId(u32),
-    FieldValue(&'a FieldValue<'a>),
+    FieldValue(&'a delorean_line_parser::FieldValue<'a>),
 }
 
 fn symbol_to_u32(sym: DefaultSymbol) -> u32 {
@@ -1111,16 +1095,7 @@ impl WalEntryBuilder<'_> {
     fn add_tag_value(&mut self, column_index: u16, value: u32) {
         let tv = wb::TagValue::create(&mut self.fbb, &wb::TagValueArgs { value });
 
-        let row_value = wb::Value::create(
-            &mut self.fbb,
-            &wb::ValueArgs {
-                column_index,
-                value_type: wb::ColumnValue::TagValue,
-                value: Some(tv.as_union_value()),
-            },
-        );
-
-        self.row_values.push(row_value);
+        self.add_value(column_index, wb::ColumnValue::TagValue, tv.as_union_value());
     }
 
     fn add_string_value(&mut self, column_index: u16, value: &str) {
@@ -1133,57 +1108,47 @@ impl WalEntryBuilder<'_> {
             },
         );
 
-        let row_value = wb::Value::create(
-            &mut self.fbb,
-            &wb::ValueArgs {
-                column_index,
-                value_type: wb::ColumnValue::StringValue,
-                value: Some(sv.as_union_value()),
-            },
+        self.add_value(
+            column_index,
+            wb::ColumnValue::StringValue,
+            sv.as_union_value(),
         );
-
-        self.row_values.push(row_value);
     }
 
     fn add_f64_value(&mut self, column_index: u16, value: f64) {
         let fv = wb::F64Value::create(&mut self.fbb, &wb::F64ValueArgs { value });
 
-        let row_value = wb::Value::create(
-            &mut self.fbb,
-            &wb::ValueArgs {
-                column_index,
-                value_type: wb::ColumnValue::F64Value,
-                value: Some(fv.as_union_value()),
-            },
-        );
-
-        self.row_values.push(row_value);
+        self.add_value(column_index, wb::ColumnValue::F64Value, fv.as_union_value());
     }
 
     fn add_i64_value(&mut self, column_index: u16, value: i64) {
         let iv = wb::I64Value::create(&mut self.fbb, &wb::I64ValueArgs { value });
 
-        let row_value = wb::Value::create(
-            &mut self.fbb,
-            &wb::ValueArgs {
-                column_index,
-                value_type: wb::ColumnValue::I64Value,
-                value: Some(iv.as_union_value()),
-            },
-        );
-
-        self.row_values.push(row_value);
+        self.add_value(column_index, wb::ColumnValue::I64Value, iv.as_union_value());
     }
 
     fn add_bool_value(&mut self, column_index: u16, value: bool) {
         let bv = wb::BoolValue::create(&mut self.fbb, &wb::BoolValueArgs { value });
 
+        self.add_value(
+            column_index,
+            wb::ColumnValue::BoolValue,
+            bv.as_union_value(),
+        );
+    }
+
+    fn add_value(
+        &mut self,
+        column_index: u16,
+        value_type: wb::ColumnValue,
+        value: flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>,
+    ) {
         let row_value = wb::Value::create(
             &mut self.fbb,
             &wb::ValueArgs {
                 column_index,
-                value_type: wb::ColumnValue::BoolValue,
-                value: Some(bv.as_union_value()),
+                value_type,
+                value: Some(value),
             },
         );
 
@@ -1331,7 +1296,7 @@ mod tests {
 "#;
 
         {
-            let db = Db::new_with_wal("mydb".to_string(), &mut dir).await?;
+            let db = Db::try_with_wal("mydb".to_string(), &mut dir).await?;
             let lines: Vec<_> = parse_lines("cpu,region=west,host=A user=23.2,other=1i,str=\"some string\",b=true 10\ndisk,region=west,host=A bytes=23432323i,used_percent=76.2 10").map(|l| l.unwrap()).collect();
             db.write_lines(&lines).await?;
             let lines: Vec<_> = parse_lines("cpu,region=west,host=B user=23.1 15")

@@ -124,7 +124,7 @@ async fn write(
     })?;
 
     let db = storage
-        .get_or_create_db(&write_info.org, &write_info.bucket)
+        .db_or_create(&write_info.org, &write_info.bucket)
         .await
         .context(BucketByName {
             org: write_info.org.clone(),
@@ -180,7 +180,7 @@ async fn read(
     })?;
 
     let db = storage
-        .get_db(&read_info.org, &read_info.bucket)
+        .db(&read_info.org, &read_info.bucket)
         .await
         .context(BucketNotFound {
             org: read_info.org.clone(),

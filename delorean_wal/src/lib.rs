@@ -384,13 +384,12 @@ impl FileLocator {
             // If there is no file or the file is over the file size limit, start a new file.
             .unwrap_or_else(|| self.filename_starting_at_sequence_number(starting_sequence_number));
 
-        let f = OpenOptions::new()
+        Ok(OpenOptions::new()
             .read(false)
             .append(true)
             .create(true)
             .open(&file_name)
-            .context(UnableToOpenFile { path: file_name })?;
-        Ok(f)
+            .context(UnableToOpenFile { path: file_name })?)
     }
 
     fn active_filename(&self) -> Result<Option<PathBuf>> {
