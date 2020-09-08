@@ -74,17 +74,28 @@ pub enum Error {
         source: delorean_wal::Error,
     },
 
-    #[snafu(display("Error recovering WAL for database {} on partition {}", database, partition_id))]
+    #[snafu(display(
+        "Error recovering WAL for database {} on partition {}",
+        database,
+        partition_id
+    ))]
     WalRecoverError { database: String, partition_id: u32 },
 
-    #[snafu(display("Error recovering WAL for partition {} on table {}", partition_id, table_id))]
+    #[snafu(display(
+        "Error recovering WAL for partition {} on table {}",
+        partition_id,
+        table_id
+    ))]
     WalPartitionError { partition_id: u32, table_id: u32 },
 
     #[snafu(display("Error recovering write from WAL, column id {} not found", column_id))]
     WalColumnError { column_id: u16 },
 
     #[snafu(display("Error creating db dir for {}: {}", database, err))]
-    CreatingWalDir { database: String, err: std::io::Error },
+    CreatingWalDir {
+        database: String,
+        err: std::io::Error,
+    },
 
     #[snafu(display("Schema mismatch: Write with the following errors: {}", error))]
     SchemaMismatch { error: String },
@@ -255,9 +266,10 @@ impl Db {
         let wal_details = start_wal_sync_task(wal_builder).await.context(OpeningWal {
             database: name.clone(),
         })?;
-        wal_details.write_metadata().await.context(OpeningWal {
-            database: &name,
-        })?;
+        wal_details
+            .write_metadata()
+            .await
+            .context(OpeningWal { database: &name })?;
 
         Ok(Self {
             name,
@@ -273,21 +285,15 @@ impl Db {
         let name = wal_dir
             .iter()
             .last()
-            .with_context(|| OpenDb {
-                dir: &wal_dir,
-            })?
+            .with_context(|| OpenDb { dir: &wal_dir })?
             .to_str()
-            .with_context(|| OpenDb {
-                dir: &wal_dir,
-            })?
+            .with_context(|| OpenDb { dir: &wal_dir })?
             .to_string();
 
         let wal_builder = WalBuilder::new(wal_dir.clone());
         let wal_details = start_wal_sync_task(wal_builder.clone())
             .await
-            .context(OpeningWal {
-                database: &name,
-            })?;
+            .context(OpeningWal { database: &name })?;
 
         let mut row_count = 0;
         let mut dict_values = 0;
@@ -319,28 +325,34 @@ impl Db {
                     } else if let Some(_pf) = entry.partition_snapshot_finished() {
                         todo!("handle partition snapshot finished")
                     } else if let Some(da) = entry.dictionary_add() {
-                        let p = partitions.get_mut(&da.partition_id())
-                            .context(WalRecoverError{
-                                database: &name,
-                                partition_id: da.partition_id(),
-                            })?;
+                        let p =
+                            partitions
+                                .get_mut(&da.partition_id())
+                                .context(WalRecoverError {
+                                    database: &name,
+                                    partition_id: da.partition_id(),
+                                })?;
                         dict_values += 1;
                         p.intern_new_dict_entry(da.value().unwrap());
                     } else if let Some(sa) = entry.schema_append() {
                         let tid = sa.table_id();
                         tables.insert(tid);
-                        let p = partitions.get_mut(&sa.partition_id())
-                            .context(WalRecoverError{
-                                database: &name,
-                                partition_id: sa.partition_id(),
-                            })?;
+                        let p =
+                            partitions
+                                .get_mut(&sa.partition_id())
+                                .context(WalRecoverError {
+                                    database: &name,
+                                    partition_id: sa.partition_id(),
+                                })?;
                         p.append_wal_schema(sa.table_id(), sa.column_id(), sa.column_type())?;
                     } else if let Some(row) = entry.write() {
-                        let p = partitions.get_mut(&row.partition_id())
-                            .context(WalRecoverError {
-                                database: &name,
-                                partition_id: row.partition_id(),
-                            })?;
+                        let p =
+                            partitions
+                                .get_mut(&row.partition_id())
+                                .context(WalRecoverError {
+                                    database: &name,
+                                    partition_id: row.partition_id(),
+                                })?;
                         row_count += 1;
                         p.add_wal_row(row.table_id(), &row.values().unwrap())?;
                     }
@@ -430,17 +442,17 @@ impl Db {
     ) -> Result<Vec<RecordBatch>> {
         let partitions = self.partitions.read().await;
 
-        partitions.iter().map(|p| p.table_to_arrow(table_name)).collect()
+        partitions
+            .iter()
+            .map(|p| p.table_to_arrow(table_name))
+            .collect()
     }
 
     pub async fn query(&self, query: &str) -> Result<Vec<RecordBatch>> {
         let mut tables = vec![];
 
         let dialect = GenericDialect {};
-        let ast = Parser::parse_sql(&dialect, query)
-            .context(InvalidSqlQuery {
-                query,
-            })?;
+        let ast = Parser::parse_sql(&dialect, query).context(InvalidSqlQuery { query })?;
 
         for statement in ast {
             match statement {

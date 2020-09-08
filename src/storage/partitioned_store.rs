@@ -111,7 +111,8 @@ impl WalDetails {
         let write = WalWrite { payload, notify_tx };
 
         let mut tx = self.write_tx.clone();
-        tx.send(write).await
+        tx.send(write)
+            .await
             .expect("The WAL thread should always be running to receive a write");
 
         let _ = notify_rx
