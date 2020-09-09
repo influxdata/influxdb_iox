@@ -1,11 +1,18 @@
-//! partitioned_store is an enum and set of helper functions and structs to define Partitions
-//! that store data. The helper funcs and structs merge results from multiple partitions together.
+//! partitioned_store contains an enum and set of helper functions and
+//! structs to define Partitions that store data. The helper funcs and
+//! structs merge results from multiple partitions together.
+//!
+//! The `PartitionStore` enum functions as a trait, except that at the
+//! time of writing (Sep 2020), Rust did not support `async` methods
+//! in traits.
+
 use crate::generated_types::{wal, Predicate, TimestampRange};
 use crate::line_parser::{self, PointType};
 use crate::storage::{
     memdb::{Error as MemDBError, MemDB},
     remote_partition::RemotePartition,
     s3_partition::S3Partition,
+    write_buffer_database::Partition as WriteBufferPartition,
     ReadPoint, SeriesDataType,
 };
 
@@ -54,14 +61,16 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PartitionStore {
     MemDB(Box<MemDB>),
     S3(Box<S3Partition>),
     Remote(Box<RemotePartition>),
+    WriteBuffer(Box<WriteBufferPartition>),
 }
 
-/// A Partition is a block of data. It has methods for reading the metadata like which measurements,
+/// A Partition represents the data for a particular part of a bucket.
+/// It has methods for reading the metadata like which measurements,
 /// tags, tag values, and fields exist, along with the raw time series data. It is designed to work
 /// as a stream so that it can be used safely in an asynchronous context. A partition is the
 /// lowest level organization scheme. Above it, you will have a database which keeps track of
@@ -74,7 +83,9 @@ pub enum PartitionStore {
 /// A Partition may optionally have a write-ahead log.
 #[derive(Debug)]
 pub struct Partition {
+    /// The underlying storage locations for this partition
     store: PartitionStore,
+    /// Information about the WAL for this partition
     wal_details: Option<WalDetails>,
 }
 
@@ -86,6 +97,8 @@ pub struct WalDetails {
 }
 
 #[derive(Debug)]
+/// Represents an outstanding write to the WAL. Upon completion,
+/// the result of the write operation is sent via `notify_tx`
 struct WalWrite {
     payload: WritePayload,
     notify_tx: mpsc::Sender<Result<SequenceNumber, WalError>>,
@@ -208,6 +221,7 @@ impl Partition {
             PartitionStore::MemDB(db) => db.write_points(points).context(UnderlyingMemDBError),
             PartitionStore::S3(_) => panic!("s3 partition not implemented!"),
             PartitionStore::Remote(_) => panic!("remote partition not implemented!"),
+            PartitionStore::WriteBuffer(_) => panic!("write buffer store not implemented!"),
         }
     }
 
@@ -216,6 +230,7 @@ impl Partition {
             PartitionStore::MemDB(db) => &db.id,
             PartitionStore::S3(_) => panic!("s3 partition not implemented!"),
             PartitionStore::Remote(_) => panic!("remote partition not implemented!"),
+            PartitionStore::WriteBuffer(_) => panic!("write buffer store not implemented!"),
         }
     }
 
@@ -224,6 +239,7 @@ impl Partition {
             PartitionStore::MemDB(db) => db.size(),
             PartitionStore::S3(_) => panic!("s3 partition not implemented!"),
             PartitionStore::Remote(_) => panic!("remote partition not implemented!"),
+            PartitionStore::WriteBuffer(_) => panic!("write buffer store not implemented!"),
         }
     }
 
@@ -238,6 +254,7 @@ impl Partition {
                 .context(UnderlyingMemDBError),
             PartitionStore::S3(_) => panic!("s3 partition not implemented!"),
             PartitionStore::Remote(_) => panic!("remote partition not implemented!"),
+            PartitionStore::WriteBuffer(_) => panic!("write buffer store not implemented!"),
         }
     }
 
@@ -253,6 +270,7 @@ impl Partition {
                 .context(UnderlyingMemDBError),
             PartitionStore::S3(_) => panic!("s3 partition not implemented!"),
             PartitionStore::Remote(_) => panic!("remote partition not implemented!"),
+            PartitionStore::WriteBuffer(_) => panic!("write buffer store not implemented!"),
         }
     }
 
@@ -268,6 +286,7 @@ impl Partition {
                 .context(UnderlyingMemDBError),
             PartitionStore::S3(_) => panic!("s3 partition not implemented!"),
             PartitionStore::Remote(_) => panic!("remote partition not implemented!"),
+            PartitionStore::WriteBuffer(_) => panic!("write buffer store not implemented!"),
         }
     }
 
@@ -281,6 +300,7 @@ impl Partition {
                 .context(UnderlyingMemDBError),
             PartitionStore::S3(_) => panic!("s3 partition not implemented!"),
             PartitionStore::Remote(_) => panic!("remote partition not implemented!"),
+            PartitionStore::WriteBuffer(_) => panic!("write buffer store not implemented!"),
         }
     }
 
@@ -296,6 +316,7 @@ impl Partition {
                 .context(UnderlyingMemDBError),
             PartitionStore::S3(_) => panic!("s3 partition not implemented!"),
             PartitionStore::Remote(_) => panic!("remote partition not implemented!"),
+            PartitionStore::WriteBuffer(_) => panic!("write buffer store not implemented!"),
         }
     }
 
@@ -312,6 +333,7 @@ impl Partition {
                 .context(UnderlyingMemDBError),
             PartitionStore::S3(_) => panic!("s3 partition not implemented!"),
             PartitionStore::Remote(_) => panic!("remote partition not implemented!"),
+            PartitionStore::WriteBuffer(_) => panic!("write buffer store not implemented!"),
         }
     }
 
@@ -327,6 +349,7 @@ impl Partition {
                 .context(UnderlyingMemDBError),
             PartitionStore::S3(_) => panic!("s3 partition not implemented!"),
             PartitionStore::Remote(_) => panic!("remote partition not implemented!"),
+            PartitionStore::WriteBuffer(_) => panic!("write buffer store not implemented!"),
         }
     }
 }
@@ -1167,7 +1190,7 @@ mod tests {
 
         let wal_metadata_path = {
             // Create a new Partition to get the WAL metadata path, then drop it
-            let partition = Partition::new_with_wal(store.clone(), dir.clone()).await?;
+            let partition = Partition::new_with_wal(store, dir.clone()).await?;
             partition.wal_details.unwrap().metadata_path
         };
 

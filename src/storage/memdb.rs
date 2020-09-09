@@ -1,3 +1,9 @@
+//! MemDB implements an in memory database for a Partition. It assumes
+//! that data arrives in time ascending order per series. It has no
+//! limits on the number of series or the amount of data per
+//! series. It is up to the higher level database to decide when to
+//! stop writing into a given MemDB.
+
 use crate::generated_types::{Node, Predicate, TimestampRange};
 use crate::line_parser::{self, index_pairs, Error as LineParserError, Point, PointType};
 use crate::storage::partitioned_store::{ReadBatch, ReadValues};
@@ -9,11 +15,6 @@ use futures::stream::{self, BoxStream};
 use futures::StreamExt;
 use snafu::{ResultExt, Snafu};
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet, HashMap};
-
-/// memdb implements an in memory database for the Partition trait. It currently assumes that
-/// data arrives in time ascending order per series. It has no limits on the number of series
-/// or the amount of data per series. It is up to the higher level database to decide when to
-/// stop writing into a given MemDB.
 
 // TODO: return errors if trying to insert data out of order in an individual series
 

@@ -521,7 +521,7 @@ struct ArrowTable {
 }
 
 #[derive(Debug)]
-struct Partition {
+pub struct Partition {
     name: String,
     id: u32,
     dictionary: StringInterner<DefaultSymbol, StringBackend<DefaultSymbol>, DefaultHashBuilder>,

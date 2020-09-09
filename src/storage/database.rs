@@ -151,8 +151,11 @@ impl Organization {
 
 #[derive(Debug)]
 struct BucketData {
+    /// Confiuguration information from the storage RPC.
     config: Bucket,
+
     // TODO: wire up rules for partitioning data and storing and reading from multiple partitions
+    /// The storage for this particular paritition
     partition: RwLock<Partition>,
 }
 
