@@ -9,7 +9,7 @@
 use http::header::CONTENT_ENCODING;
 use tracing::{debug, error, info};
 
-use delorean::storage::write_buffer_database::{Error as DatabaseError, WriteBufferDatabases};
+use delorean::storage::traits::{DatabaseStore, Error as DatabaseError};
 use delorean_line_parser::parse_lines;
 
 use bytes::{Bytes, BytesMut};
@@ -198,7 +198,7 @@ async fn parse_body(req: hyper::Request<Body>) -> Result<Bytes, ApplicationError
 #[tracing::instrument(level = "debug")]
 async fn write(
     req: hyper::Request<Body>,
-    storage: Arc<WriteBufferDatabases>,
+    storage: Arc<dyn DatabaseStore>,
 ) -> Result<Option<Body>, ApplicationError> {
     let query = req.uri().query().context(ExpectedQueryString)?;
 
@@ -218,7 +218,7 @@ async fn write(
 
     let body = str::from_utf8(&body).context(ReadingBodyAsUtf8)?;
 
-    let lines: Vec<_> = parse_lines(body)
+    let lines = parse_lines(body)
         .collect::<Result<Vec<_>, delorean_line_parser::Error>>()
         .context(ParsingLineProtocol)?;
 
@@ -246,7 +246,7 @@ struct ReadInfo {
 #[tracing::instrument(level = "debug")]
 async fn read(
     req: hyper::Request<Body>,
-    storage: Arc<WriteBufferDatabases>,
+    storage: Arc<dyn DatabaseStore>,
 ) -> Result<Option<Body>, ApplicationError> {
     let query = req.uri().query().context(ExpectedQueryString {})?;
 
@@ -282,7 +282,7 @@ fn no_op(name: &str) -> Result<Option<Body>, ApplicationError> {
 
 pub async fn service(
     req: hyper::Request<Body>,
-    storage: Arc<WriteBufferDatabases>,
+    storage: Arc<dyn DatabaseStore>,
 ) -> http::Result<hyper::Response<Body>> {
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -317,4 +317,222 @@ pub async fn service(
     };
     info!(method = ?method, uri = ?uri, status = ?result.status(), "Handled request");
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{any::Any, collections::BTreeMap, net::SocketAddr};
+
+    use arrow::record_batch::RecordBatch;
+    use delorean_line_parser::ParsedLine;
+    use reqwest::{Client, Response};
+    use tonic::async_trait;
+
+    use hyper::service::{make_service_fn, service_fn};
+    use hyper::Server;
+    use tokio::sync::Mutex;
+    use traits::org_and_bucket_to_database;
+
+    use delorean::storage::traits;
+    use delorean::storage::traits::Database;
+
+    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+    type Result<T, E = Error> = std::result::Result<T, E>;
+
+    #[tokio::test]
+    async fn test_write() -> Result<()> {
+        let test_storage = Arc::new(TestDatabaseStore::new());
+        let server_url = test_server(test_storage.clone());
+        println!("Started server at {}", server_url);
+        // now, make a http client and send some requests
+
+        let client = Client::new();
+        let response = client
+            .request(Method::GET, &format!("{}/ping", server_url))
+            .send()
+            .await;
+
+        // Print the response so if the test fails, we have a log of what went wrong
+        check_response("ping", response, StatusCode::OK, "PONG").await;
+
+        let lp_data = "h2o_temperature,location=santa_monica,state=CA surface_degrees=65.2,bottom_degrees=50.4 1568756160";
+
+        // send write data
+        let bucket_name = "MyBucket";
+        let org_name = "MyOrg";
+        let response = client
+            .request(
+                Method::POST,
+                &format!(
+                    "{}/api/v2/write?bucket={}&org={}",
+                    server_url, bucket_name, org_name
+                ),
+            )
+            .body(lp_data)
+            .send()
+            .await;
+
+        check_response("write", response, StatusCode::NO_CONTENT, "").await;
+
+        // Check that the data got into the right bucket
+        let db = test_storage
+            .db("MyOrg", "MyBucket")
+            .await
+            .expect("Database exists");
+
+        let test_db = db
+            .as_any()
+            .downcast_ref::<TestDatabase>()
+            .expect("the type was correct");
+
+        // Ensure the same line protocol data gets through
+        assert_eq!(test_db.get_lines().await, vec![lp_data]);
+        Ok(())
+    }
+
+    /// checks a http response against expected results
+    async fn check_response(
+        description: &str,
+        response: Result<Response, reqwest::Error>,
+        expected_status: StatusCode,
+        expected_body: &str,
+    ) {
+        // Print the response so if the test fails, we have a log of
+        // what went wrong
+        println!("{} response: {:?}", description, response);
+
+        if let Ok(response) = response {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .expect("Converting request body to string");
+
+            assert_eq!(status, expected_status);
+            assert_eq!(body, expected_body);
+        } else {
+            panic!("Unexpected error response: {:?}", response);
+        }
+    }
+
+    /// creates an instance of the http service backed by a in-memory
+    /// testable database.  Returns the url of the server
+    fn test_server(storage: Arc<dyn traits::DatabaseStore>) -> String {
+        let make_svc = make_service_fn(move |_conn| {
+            let storage = storage.clone();
+            async move {
+                Ok::<_, http::Error>(service_fn(move |req| {
+                    let state = storage.clone();
+                    super::service(req, state)
+                }))
+            }
+        });
+
+        // TODO pick the port dynamically and return it
+        let bind_addr: SocketAddr = "127.0.0.1:18080".parse().unwrap();
+        let server = Server::bind(&bind_addr).serve(make_svc);
+        let server_url = format!("http://{}", bind_addr);
+        tokio::task::spawn(server);
+        server_url
+    }
+
+    #[derive(Debug)]
+    struct TestDatabase {
+        // lines which have been written to this database, in order
+        saved_lines: Mutex<Vec<String>>,
+    }
+
+    impl TestDatabase {
+        fn new() -> Self {
+            Self {
+                saved_lines: Mutex::new(Vec::new()),
+            }
+        }
+
+        /// Get all lines written to this database
+        async fn get_lines(&self) -> Vec<String> {
+            self.saved_lines.lock().await.clone()
+        }
+    }
+
+    #[async_trait]
+    impl traits::Database for TestDatabase {
+        /// writes parsed lines into this database
+        async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), traits::Error> {
+            let mut saved_lines = self.saved_lines.lock().await;
+            for line in lines {
+                saved_lines.push(line.to_string())
+            }
+            Ok(())
+        }
+
+        /// Execute the specified query and return arrow record batches with the result
+        async fn query(&self, _query: &str) -> Result<Vec<RecordBatch>, traits::Error> {
+            unimplemented!("query Not yet implemented");
+        }
+
+        /// Fetch the specified table names and columns as Arrow RecordBatches
+        async fn table_to_arrow(
+            &self,
+            _table_name: &str,
+            _columns: &[&str],
+        ) -> Result<Vec<RecordBatch>, traits::Error> {
+            unimplemented!("table_to_arrow Not yet implemented");
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestDatabaseStore {
+        databases: Mutex<BTreeMap<String, Arc<dyn Database>>>,
+    }
+
+    impl TestDatabaseStore {
+        fn new() -> Self {
+            Self {
+                databases: Mutex::new(BTreeMap::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl traits::DatabaseStore for TestDatabaseStore {
+        /// Retrieve the database specified by the org and bucket name,
+        /// returning None if no such database exists
+        ///
+        /// TODO: change this to take a single database name, and move the
+        /// computation of org/bucket to the callers
+        async fn db(&self, org: &str, bucket: &str) -> Option<Arc<dyn Database>> {
+            let db_name = org_and_bucket_to_database(org, bucket);
+            let databases = self.databases.lock().await;
+
+            databases.get(&db_name).cloned()
+        }
+
+        /// Retrieve the database specified by the org and bucket name,
+        /// creating it if it doesn't exist.
+        ///
+        /// TODO: change this to take a single database name, and move the computation of org/bucket
+        /// to the callers
+        async fn db_or_create(
+            &self,
+            org: &str,
+            bucket: &str,
+        ) -> Result<Arc<dyn Database>, traits::Error> {
+            let db_name = org_and_bucket_to_database(org, bucket);
+            let mut databases = self.databases.lock().await;
+
+            if let Some(db) = databases.get(&db_name) {
+                Ok(db.clone())
+            } else {
+                let new_db = Arc::new(TestDatabase::new());
+                databases.insert(db_name, new_db.clone());
+                Ok(new_db)
+            }
+        }
+    }
 }

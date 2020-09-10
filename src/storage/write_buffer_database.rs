@@ -1,4 +1,6 @@
+use tonic::async_trait;
 use tracing::info;
+use traits::org_and_bucket_to_database;
 
 use crate::generated_types::wal as wb;
 use crate::storage::partitioned_store::{
@@ -7,13 +9,16 @@ use crate::storage::partitioned_store::{
 use delorean_line_parser::{FieldValue, ParsedLine};
 use delorean_wal::WalBuilder;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::{
+    any::Any,
+    collections::{BTreeMap, HashMap, HashSet},
+};
 
 use arrow::{
     array::{ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, StringBuilder},
@@ -36,6 +41,8 @@ use string_interner::{
     backend::StringBackend, DefaultHashBuilder, DefaultSymbol, StringInterner, Symbol,
 };
 use tokio::sync::RwLock;
+
+use super::traits;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -146,9 +153,18 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// Automatically wrap Database errors in generic trait Error
+impl From<Error> for traits::Error {
+    fn from(e: Error) -> Self {
+        Self::DatabaseError {
+            source: Box::new(e),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct WriteBufferDatabases {
-    databases: RwLock<BTreeMap<String, Arc<Db>>>,
+    databases: RwLock<BTreeMap<String, Arc<dyn traits::Database>>>,
     base_dir: PathBuf,
 }
 
@@ -193,8 +209,11 @@ impl WriteBufferDatabases {
         let mut databases = self.databases.write().await;
         databases.insert(db.name.clone(), Arc::new(db));
     }
+}
 
-    pub async fn db(&self, org: &str, bucket: &str) -> Option<Arc<Db>> {
+#[async_trait]
+impl traits::DatabaseStore for WriteBufferDatabases {
+    async fn db(&self, org: &str, bucket: &str) -> Option<Arc<dyn traits::Database>> {
         let databases = self.databases.read().await;
 
         databases
@@ -202,7 +221,11 @@ impl WriteBufferDatabases {
             .cloned()
     }
 
-    pub async fn db_or_create(&self, org: &str, bucket: &str) -> Result<Arc<Db>> {
+    async fn db_or_create(
+        &self,
+        org: &str,
+        bucket: &str,
+    ) -> Result<Arc<dyn traits::Database>, traits::Error> {
         let db_name = org_and_bucket_to_database(org, bucket);
 
         // get it through a read lock first if we can
@@ -228,10 +251,6 @@ impl WriteBufferDatabases {
 
         Ok(db)
     }
-}
-
-fn org_and_bucket_to_database(org: &str, bucket: &str) -> String {
-    org.to_owned() + "_" + bucket
 }
 
 #[derive(Debug)]
@@ -384,10 +403,13 @@ impl Db {
             wal_details: Some(wal_details),
         })
     }
+}
 
+#[async_trait]
+impl traits::Database for Db {
     // TODO: writes lines creates a column named "time" for the timestmap data. If
     //       we keep this we need to validate that no tag or field has the same name.
-    pub async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<()> {
+    async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), traits::Error> {
         let partition_keys: Vec<_> = lines.iter().map(|l| (l, self.partition_key(l))).collect();
         let mut partitions = self.partitions.write().await;
 
@@ -429,20 +451,21 @@ impl Db {
         Ok(())
     }
 
-    pub async fn table_to_arrow(
+    async fn table_to_arrow(
         &self,
         table_name: &str,
         _columns: &[&str],
-    ) -> Result<Vec<RecordBatch>> {
+    ) -> Result<Vec<RecordBatch>, traits::Error> {
         let partitions = self.partitions.read().await;
 
         partitions
             .iter()
             .map(|p| p.table_to_arrow(table_name))
-            .collect()
+            .collect::<Result<Vec<_>>>()
+            .map_err(|e| e.into())
     }
 
-    pub async fn query(&self, query: &str) -> Result<Vec<RecordBatch>> {
+    async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, traits::Error> {
         let mut tables = vec![];
 
         let dialect = GenericDialect {};
@@ -471,6 +494,7 @@ impl Db {
                         statement,
                     }
                     .fail()
+                    .map_err(|e| e.into())
                 }
             }
         }
@@ -496,11 +520,19 @@ impl Db {
                 query: query.to_string(),
             })?;
 
-        ctx.collect(plan.as_ref()).context(QueryError {
-            query: query.to_string(),
-        })
+        ctx.collect(plan.as_ref())
+            .context(QueryError {
+                query: query.to_string(),
+            })
+            .map_err(|e| e.into())
     }
 
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Db {
     // partition_key returns the partition key for the given line. The key will be the prefix of a
     // partition name (multiple partitions can exist for each key). It uses the user defined
     // partitioning rules to construct this key
@@ -1263,6 +1295,7 @@ impl Column {
 
 #[cfg(test)]
 mod tests {
+    use super::traits::*;
     use super::*;
     use arrow::util::pretty::pretty_format_batches;
     use delorean_line_parser::parse_lines;
