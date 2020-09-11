@@ -150,15 +150,6 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Automatically wrap Database errors in generic trait Error
-impl From<Error> for traits::Error {
-    fn from(e: Error) -> Self {
-        Self::DatabaseError {
-            source: Box::new(e),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct WriteBufferDatabases {
     databases: RwLock<BTreeMap<String, Arc<Db>>>,
@@ -211,6 +202,7 @@ impl WriteBufferDatabases {
 #[async_trait]
 impl traits::DatabaseStore for WriteBufferDatabases {
     type Database = Db;
+    type Error = Error;
 
     async fn db(&self, org: &str, bucket: &str) -> Option<Arc<Self::Database>> {
         let databases = self.databases.read().await;
@@ -224,7 +216,7 @@ impl traits::DatabaseStore for WriteBufferDatabases {
         &self,
         org: &str,
         bucket: &str,
-    ) -> Result<Arc<Self::Database>, traits::Error> {
+    ) -> Result<Arc<Self::Database>, Self::Error> {
         let db_name = org_and_bucket_to_database(org, bucket);
 
         // get it through a read lock first if we can
@@ -406,9 +398,11 @@ impl Db {
 
 #[async_trait]
 impl traits::Database for Db {
+    type Error = Error;
+
     // TODO: writes lines creates a column named "time" for the timestmap data. If
     //       we keep this we need to validate that no tag or field has the same name.
-    async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), traits::Error> {
+    async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), Self::Error> {
         let partition_keys: Vec<_> = lines.iter().map(|l| (l, self.partition_key(l))).collect();
         let mut partitions = self.partitions.write().await;
 
@@ -454,17 +448,16 @@ impl traits::Database for Db {
         &self,
         table_name: &str,
         _columns: &[&str],
-    ) -> Result<Vec<RecordBatch>, traits::Error> {
+    ) -> Result<Vec<RecordBatch>, Self::Error> {
         let partitions = self.partitions.read().await;
 
         partitions
             .iter()
             .map(|p| p.table_to_arrow(table_name))
             .collect::<Result<Vec<_>>>()
-            .map_err(|e| e.into())
     }
 
-    async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, traits::Error> {
+    async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, Self::Error> {
         let mut tables = vec![];
 
         let dialect = GenericDialect {};
@@ -493,7 +486,6 @@ impl traits::Database for Db {
                         statement,
                     }
                     .fail()
-                    .map_err(|e| e.into())
                 }
             }
         }
@@ -523,7 +515,6 @@ impl traits::Database for Db {
             .context(QueryError {
                 query: query.to_string(),
             })
-            .map_err(|e| e.into())
     }
 }
 

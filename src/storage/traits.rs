@@ -8,36 +8,29 @@ use std::{fmt::Debug, sync::Arc};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use delorean_line_parser::ParsedLine;
-use snafu::Snafu;
-
-#[derive(Debug, Snafu)]
-/// Opaque error type that holds an actual implementation's error
-pub enum Error {
-    #[snafu(display("Underlying Database Error: {:?}", source))]
-    DatabaseError {
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
-}
 
 #[async_trait]
 pub trait Database: Debug + Send + Sync {
+    type Error: std::error::Error + Send + Sync + 'static;
+
     /// writes parsed lines into this database
-    async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), Error>;
+    async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), Self::Error>;
 
     /// Execute the specified query and return arrow record batches with the result
-    async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, Error>;
+    async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, Self::Error>;
 
     /// Fetch the specified table names and columns as Arrow RecordBatches
     async fn table_to_arrow(
         &self,
         table_name: &str,
         columns: &[&str],
-    ) -> Result<Vec<RecordBatch>, Error>;
+    ) -> Result<Vec<RecordBatch>, Self::Error>;
 }
 
 #[async_trait]
 pub trait DatabaseStore: Debug + Send + Sync {
     type Database: Database;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     /// Retrieve the database specified by the org and bucket name,
     /// returning None if no such database exists
@@ -51,7 +44,11 @@ pub trait DatabaseStore: Debug + Send + Sync {
     ///
     /// TODO: change this to take a single database name, and move the computation of org/bucket
     /// to the callers
-    async fn db_or_create(&self, org: &str, bucket: &str) -> Result<Arc<Self::Database>, Error>;
+    async fn db_or_create(
+        &self,
+        org: &str,
+        bucket: &str,
+    ) -> Result<Arc<Self::Database>, Self::Error>;
 }
 
 /// return the database name to use for the specified org and bucket name.

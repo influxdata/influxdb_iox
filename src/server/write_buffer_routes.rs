@@ -9,7 +9,7 @@
 use http::header::CONTENT_ENCODING;
 use tracing::{debug, error, info};
 
-use delorean::storage::traits::{Database, DatabaseStore, Error as DatabaseError};
+use delorean::storage::traits::{Database, DatabaseStore};
 use delorean_line_parser::parse_lines;
 
 use bytes::{Bytes, BytesMut};
@@ -32,7 +32,7 @@ pub enum ApplicationError {
     BucketByName {
         org: String,
         bucket_name: String,
-        source: DatabaseError,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 
     #[snafu(display(
@@ -44,7 +44,7 @@ pub enum ApplicationError {
     WritingPoints {
         org: String,
         bucket_name: String,
-        source: DatabaseError,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 
     #[snafu(display(
@@ -54,7 +54,7 @@ pub enum ApplicationError {
     ))]
     Query {
         database: String,
-        source: DatabaseError,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 
     // Application level errors
@@ -74,7 +74,9 @@ pub enum ApplicationError {
     },
 
     #[snafu(display("Query error: {}", source))]
-    QueryError { source: DatabaseError },
+    QueryError {
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     #[snafu(display("Invalid request body '{}': {}", request_body, source))]
     InvalidRequestBody {
@@ -209,6 +211,7 @@ async fn write<T: DatabaseStore>(
     let db = storage
         .db_or_create(&write_info.org, &write_info.bucket)
         .await
+        .map_err(|e| Box::new(e) as _)
         .context(BucketByName {
             org: write_info.org.clone(),
             bucket_name: write_info.bucket.clone(),
@@ -224,10 +227,13 @@ async fn write<T: DatabaseStore>(
 
     debug!("Parsed {} lines", lines.len());
 
-    db.write_lines(&lines).await.context(WritingPoints {
-        org: write_info.org.clone(),
-        bucket_name: write_info.bucket.clone(),
-    })?;
+    db.write_lines(&lines)
+        .await
+        .map_err(|e| Box::new(e) as _)
+        .context(WritingPoints {
+            org: write_info.org.clone(),
+            bucket_name: write_info.bucket.clone(),
+        })?;
 
     Ok(None)
 }
@@ -262,7 +268,11 @@ async fn read<T: DatabaseStore>(
             bucket: read_info.bucket.clone(),
         })?;
 
-    let results = db.query(&read_info.query).await.context(QueryError {})?;
+    let results = db
+        .query(&read_info.query)
+        .await
+        .map_err(|e| Box::new(e) as _)
+        .context(QueryError {})?;
     let results = arrow::util::pretty::pretty_format_batches(&results).unwrap();
 
     Ok(Some(results.into_bytes().into()))
@@ -437,6 +447,9 @@ mod tests {
         saved_lines: Mutex<Vec<String>>,
     }
 
+    #[derive(Snafu, Debug)]
+    enum TestError {}
+
     impl TestDatabase {
         fn new() -> Self {
             Self {
@@ -452,8 +465,10 @@ mod tests {
 
     #[async_trait]
     impl traits::Database for TestDatabase {
+        type Error = TestError;
+
         /// writes parsed lines into this database
-        async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), traits::Error> {
+        async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), Self::Error> {
             let mut saved_lines = self.saved_lines.lock().await;
             for line in lines {
                 saved_lines.push(line.to_string())
@@ -462,7 +477,7 @@ mod tests {
         }
 
         /// Execute the specified query and return arrow record batches with the result
-        async fn query(&self, _query: &str) -> Result<Vec<RecordBatch>, traits::Error> {
+        async fn query(&self, _query: &str) -> Result<Vec<RecordBatch>, Self::Error> {
             unimplemented!("query Not yet implemented");
         }
 
@@ -471,7 +486,7 @@ mod tests {
             &self,
             _table_name: &str,
             _columns: &[&str],
-        ) -> Result<Vec<RecordBatch>, traits::Error> {
+        ) -> Result<Vec<RecordBatch>, Self::Error> {
             unimplemented!("table_to_arrow Not yet implemented");
         }
     }
@@ -492,6 +507,7 @@ mod tests {
     #[async_trait]
     impl traits::DatabaseStore for TestDatabaseStore {
         type Database = TestDatabase;
+        type Error = TestError;
         /// Retrieve the database specified by the org and bucket name,
         /// returning None if no such database exists
         ///
@@ -513,7 +529,7 @@ mod tests {
             &self,
             org: &str,
             bucket: &str,
-        ) -> Result<Arc<Self::Database>, traits::Error> {
+        ) -> Result<Arc<Self::Database>, Self::Error> {
             let db_name = org_and_bucket_to_database(org, bucket);
             let mut databases = self.databases.lock().await;
 
