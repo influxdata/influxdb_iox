@@ -9,7 +9,7 @@
 use http::header::CONTENT_ENCODING;
 use tracing::{debug, error, info};
 
-use delorean::storage::traits::{DatabaseStore, Error as DatabaseError};
+use delorean::storage::traits::{Database, DatabaseStore, Error as DatabaseError};
 use delorean_line_parser::parse_lines;
 
 use bytes::{Bytes, BytesMut};
@@ -322,7 +322,7 @@ pub async fn service<T: DatabaseStore>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{any::Any, collections::BTreeMap, net::SocketAddr};
+    use std::{collections::BTreeMap, net::SocketAddr};
 
     use arrow::record_batch::RecordBatch;
     use delorean_line_parser::ParsedLine;
@@ -335,7 +335,6 @@ mod tests {
     use traits::org_and_bucket_to_database;
 
     use delorean::storage::traits;
-    use delorean::storage::traits::Database;
 
     type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
     type Result<T, E = Error> = std::result::Result<T, E>;
@@ -376,15 +375,10 @@ mod tests {
         check_response("write", response, StatusCode::NO_CONTENT, "").await;
 
         // Check that the data got into the right bucket
-        let db = test_storage
+        let test_db = test_storage
             .db("MyOrg", "MyBucket")
             .await
             .expect("Database exists");
-
-        let test_db = db
-            .as_any()
-            .downcast_ref::<TestDatabase>()
-            .expect("the type was correct");
 
         // Ensure the same line protocol data gets through
         assert_eq!(test_db.get_lines().await, vec![lp_data]);
@@ -480,15 +474,11 @@ mod tests {
         ) -> Result<Vec<RecordBatch>, traits::Error> {
             unimplemented!("table_to_arrow Not yet implemented");
         }
-
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
     }
 
     #[derive(Debug)]
     struct TestDatabaseStore {
-        databases: Mutex<BTreeMap<String, Arc<dyn Database>>>,
+        databases: Mutex<BTreeMap<String, Arc<TestDatabase>>>,
     }
 
     impl TestDatabaseStore {
@@ -501,12 +491,13 @@ mod tests {
 
     #[async_trait]
     impl traits::DatabaseStore for TestDatabaseStore {
+        type Database = TestDatabase;
         /// Retrieve the database specified by the org and bucket name,
         /// returning None if no such database exists
         ///
         /// TODO: change this to take a single database name, and move the
         /// computation of org/bucket to the callers
-        async fn db(&self, org: &str, bucket: &str) -> Option<Arc<dyn Database>> {
+        async fn db(&self, org: &str, bucket: &str) -> Option<Arc<Self::Database>> {
             let db_name = org_and_bucket_to_database(org, bucket);
             let databases = self.databases.lock().await;
 
@@ -522,7 +513,7 @@ mod tests {
             &self,
             org: &str,
             bucket: &str,
-        ) -> Result<Arc<dyn Database>, traits::Error> {
+        ) -> Result<Arc<Self::Database>, traits::Error> {
             let db_name = org_and_bucket_to_database(org, bucket);
             let mut databases = self.databases.lock().await;
 

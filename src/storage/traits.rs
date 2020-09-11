@@ -3,7 +3,7 @@
 //! interface as well as being able to test other parts of Delorean
 //! using mockups that conform to these traits
 
-use std::{any::Any, fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
@@ -33,26 +33,25 @@ pub trait Database: Debug + Send + Sync {
         table_name: &str,
         columns: &[&str],
     ) -> Result<Vec<RecordBatch>, Error>;
-
-    /// Return a references to self as Any to support dynamic downcasting
-    fn as_any(&self) -> &dyn Any;
 }
 
 #[async_trait]
 pub trait DatabaseStore: Debug + Send + Sync {
+    type Database: Database;
+
     /// Retrieve the database specified by the org and bucket name,
     /// returning None if no such database exists
     ///
     /// TODO: change this to take a single database name, and move the
     /// computation of org/bucket to the callers
-    async fn db(&self, org: &str, bucket: &str) -> Option<Arc<dyn Database>>;
+    async fn db(&self, org: &str, bucket: &str) -> Option<Arc<Self::Database>>;
 
     /// Retrieve the database specified by the org and bucket name,
     /// creating it if it doesn't exist.
     ///
     /// TODO: change this to take a single database name, and move the computation of org/bucket
     /// to the callers
-    async fn db_or_create(&self, org: &str, bucket: &str) -> Result<Arc<dyn Database>, Error>;
+    async fn db_or_create(&self, org: &str, bucket: &str) -> Result<Arc<Self::Database>, Error>;
 }
 
 /// return the database name to use for the specified org and bucket name.

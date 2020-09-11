@@ -9,16 +9,13 @@ use crate::storage::partitioned_store::{
 use delorean_line_parser::{FieldValue, ParsedLine};
 use delorean_wal::WalBuilder;
 
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use std::{
-    any::Any,
-    collections::{BTreeMap, HashMap, HashSet},
-};
 
 use arrow::{
     array::{ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, StringBuilder},
@@ -164,7 +161,7 @@ impl From<Error> for traits::Error {
 
 #[derive(Debug)]
 pub struct WriteBufferDatabases {
-    databases: RwLock<BTreeMap<String, Arc<dyn traits::Database>>>,
+    databases: RwLock<BTreeMap<String, Arc<Db>>>,
     base_dir: PathBuf,
 }
 
@@ -213,7 +210,9 @@ impl WriteBufferDatabases {
 
 #[async_trait]
 impl traits::DatabaseStore for WriteBufferDatabases {
-    async fn db(&self, org: &str, bucket: &str) -> Option<Arc<dyn traits::Database>> {
+    type Database = Db;
+
+    async fn db(&self, org: &str, bucket: &str) -> Option<Arc<Self::Database>> {
         let databases = self.databases.read().await;
 
         databases
@@ -225,7 +224,7 @@ impl traits::DatabaseStore for WriteBufferDatabases {
         &self,
         org: &str,
         bucket: &str,
-    ) -> Result<Arc<dyn traits::Database>, traits::Error> {
+    ) -> Result<Arc<Self::Database>, traits::Error> {
         let db_name = org_and_bucket_to_database(org, bucket);
 
         // get it through a read lock first if we can
@@ -525,10 +524,6 @@ impl traits::Database for Db {
                 query: query.to_string(),
             })
             .map_err(|e| e.into())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 
