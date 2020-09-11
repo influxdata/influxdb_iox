@@ -1,6 +1,6 @@
+use super::org_and_bucket_to_database;
 use tonic::async_trait;
 use tracing::info;
-use traits::org_and_bucket_to_database;
 
 use crate::generated_types::wal as wb;
 use crate::storage::partitioned_store::{
@@ -38,8 +38,6 @@ use string_interner::{
     backend::StringBackend, DefaultHashBuilder, DefaultSymbol, StringInterner, Symbol,
 };
 use tokio::sync::RwLock;
-
-use super::traits;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -200,7 +198,7 @@ impl WriteBufferDatabases {
 }
 
 #[async_trait]
-impl traits::DatabaseStore for WriteBufferDatabases {
+impl super::DatabaseStore for WriteBufferDatabases {
     type Database = Db;
     type Error = Error;
 
@@ -397,7 +395,7 @@ impl Db {
 }
 
 #[async_trait]
-impl traits::Database for Db {
+impl super::Database for Db {
     type Error = Error;
 
     // TODO: writes lines creates a column named "time" for the timestmap data. If
@@ -1273,8 +1271,8 @@ impl Column {
 
 #[cfg(test)]
 mod tests {
-    use super::traits::*;
     use super::*;
+    use crate::storage::Database;
     use arrow::util::pretty::pretty_format_batches;
     use delorean_line_parser::parse_lines;
 
