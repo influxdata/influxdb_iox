@@ -493,28 +493,20 @@ impl traits::Database for Db {
         let mut ctx = ExecutionContext::new();
 
         for table in tables {
-            let provider = MemTable::new(table.schema, vec![table.data]).context(QueryError {
-                query: query.to_string(),
-            })?;
+            let provider =
+                MemTable::new(table.schema, vec![table.data]).context(QueryError { query })?;
             ctx.register_table(&table.name, Box::new(provider));
         }
 
-        let plan = ctx.create_logical_plan(&query).context(QueryError {
-            query: query.to_string(),
-        })?;
-        let plan = ctx.optimize(&plan).context(QueryError {
-            query: query.to_string(),
-        })?;
+        let plan = ctx
+            .create_logical_plan(&query)
+            .context(QueryError { query })?;
+        let plan = ctx.optimize(&plan).context(QueryError { query })?;
         let plan = ctx
             .create_physical_plan(&plan, 1024 * 1024)
-            .context(QueryError {
-                query: query.to_string(),
-            })?;
+            .context(QueryError { query })?;
 
-        ctx.collect(plan.as_ref())
-            .context(QueryError {
-                query: query.to_string(),
-            })
+        ctx.collect(plan.as_ref()).context(QueryError { query })
     }
 }
 
