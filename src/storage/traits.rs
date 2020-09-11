@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use delorean_line_parser::ParsedLine;
 
 #[async_trait]
+/// A `Database` stores data and provides an interface to query that data.
 pub trait Database: Debug + Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -28,8 +29,12 @@ pub trait Database: Debug + Send + Sync {
 }
 
 #[async_trait]
+/// Storage for `Databases` which can be retrieved by name
 pub trait DatabaseStore: Debug + Send + Sync {
+    /// The type of database that is stored by this DatabaseStore
     type Database: Database;
+
+    /// The type of error this DataBase store generates
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Retrieve the database specified by the org and bucket name,
