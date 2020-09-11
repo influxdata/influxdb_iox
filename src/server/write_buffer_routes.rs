@@ -196,9 +196,9 @@ async fn parse_body(req: hyper::Request<Body>) -> Result<Bytes, ApplicationError
 }
 
 #[tracing::instrument(level = "debug")]
-async fn write(
+async fn write<T: DatabaseStore>(
     req: hyper::Request<Body>,
-    storage: Arc<dyn DatabaseStore>,
+    storage: Arc<T>,
 ) -> Result<Option<Body>, ApplicationError> {
     let query = req.uri().query().context(ExpectedQueryString)?;
 
@@ -244,9 +244,9 @@ struct ReadInfo {
 
 // TODO: figure out how to stream read results out rather than rendering the whole thing in mem
 #[tracing::instrument(level = "debug")]
-async fn read(
+async fn read<T: DatabaseStore>(
     req: hyper::Request<Body>,
-    storage: Arc<dyn DatabaseStore>,
+    storage: Arc<T>,
 ) -> Result<Option<Body>, ApplicationError> {
     let query = req.uri().query().context(ExpectedQueryString {})?;
 
@@ -280,9 +280,9 @@ fn no_op(name: &str) -> Result<Option<Body>, ApplicationError> {
     Ok(None)
 }
 
-pub async fn service(
+pub async fn service<T: DatabaseStore>(
     req: hyper::Request<Body>,
-    storage: Arc<dyn DatabaseStore>,
+    storage: Arc<T>,
 ) -> http::Result<hyper::Response<Body>> {
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -418,7 +418,7 @@ mod tests {
 
     /// creates an instance of the http service backed by a in-memory
     /// testable database.  Returns the url of the server
-    fn test_server(storage: Arc<dyn traits::DatabaseStore>) -> String {
+    fn test_server(storage: Arc<TestDatabaseStore>) -> String {
         let make_svc = make_service_fn(move |_conn| {
             let storage = storage.clone();
             async move {
