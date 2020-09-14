@@ -1,8 +1,6 @@
 //! This module contains gRPC service implementatations for the WriteBuffer
 //! storage implementation
 
-//#![allow("")]
-
 use std::sync::Arc;
 
 use delorean::storage::DatabaseStore;
@@ -52,7 +50,6 @@ where
         Err(Status::unimplemented("create_bucket"))
     }
 
-    // Something in instrument is causing lint warnings about unused braces
     async fn delete_bucket(
         &self,
         _req: tonic::Request<DeleteBucketRequest>,
