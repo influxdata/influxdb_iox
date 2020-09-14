@@ -30,7 +30,7 @@ use sqlparser::{
     parser::Parser,
 };
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{offset::TimeZone, Utc};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use sqlparser::ast::TableFactor;
 use string_interner::{
@@ -640,9 +640,7 @@ impl Db {
     fn partition_key(&self, line: &ParsedLine<'_>) -> String {
         // TODO - wire this up to use partitioning rules, for now just partition by day
         let ts = line.timestamp.unwrap();
-        let secs = ts / 1_000_000_000;
-        let nsecs = (ts % 1_000_000_000) as u32;
-        let dt = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(secs, nsecs), Utc);
+        let dt = Utc.timestamp_nanos(ts);
         dt.format("%Y-%m-%dT%H").to_string()
     }
 }
@@ -1809,6 +1807,24 @@ mod tests {
             let partitions = db.table_to_arrow("disk", &[]).await?;
             assert_table_eq("", &partitions);
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn db_partition_key() -> Result {
+        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let db = Db::try_with_wal("mydb", &mut dir).await?;
+
+        let partition_keys: Vec<_> = parse_lines(
+            "\
+cpu user=23.2 1600107710000000000
+disk bytes=23432323i 1600136510000000000",
+        )
+        .map(|line| db.partition_key(&line.unwrap()))
+        .collect();
+
+        assert_eq!(partition_keys, vec!["2020-09-14T18", "2020-09-15T02"]);
 
         Ok(())
     }
