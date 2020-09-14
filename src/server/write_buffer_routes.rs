@@ -333,9 +333,10 @@ pub async fn service<T: DatabaseStore>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::SocketAddr;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use delorean::storage::{test_fixtures::TestDatabaseStore, DatabaseStore};
+    use http::header;
     use reqwest::{Client, Response};
 
     use hyper::service::{make_service_fn, service_fn};
