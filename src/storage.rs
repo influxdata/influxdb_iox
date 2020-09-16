@@ -83,10 +83,6 @@ pub trait Database: Debug + Send + Sync {
     async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, Self::Error>;
 
     /// Returns the list of table names in this database.
-    ///
-    /// TODO: return a ref to an `Arc` so that the caller may get an
-    /// owned reference if needed and minimize the time a reference to
-    /// the Database must be held.
     async fn table_names(&self) -> Result<Arc<BTreeSet<String>>, Self::Error>;
 
     /// Fetch the specified table names and columns as Arrow RecordBatches
