@@ -8,6 +8,7 @@
 // warning about complex types
 #![allow(clippy::type_complexity)]
 
+use arrow::{array::UInt64Array, datatypes::DataType, record_batch::RecordBatch};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tracing::warn;
 
@@ -26,7 +27,7 @@ use delorean::generated_types::{
 use crate::server::rpc::input::GrpcInputs;
 use delorean::storage::{org_and_bucket_to_database, Database, DatabaseStore};
 
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinHandle};
 use tonic::Status;
 
 #[derive(Debug, Snafu)]
@@ -37,14 +38,33 @@ pub enum Error {
     #[snafu(display("Database not found: {}", db_name))]
     DatabaseNotFound { db_name: String },
 
+    #[snafu(display("Joining task: {}", source))]
+    JoinError { source: tokio::task::JoinError },
+
     #[snafu(display("Can not retrieve table list for '{}': {}", db_name, source))]
     GettingTables {
         db_name: String,
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    // TODO add db_name
+    #[snafu(display("Can not execute metadata query for '{}': {}", table_name, source))]
+    ExecutingMetadataQuery {
+        table_name: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Something already created an existing tonic Status which we
+    /// need to pass back
+    #[snafu(display("TonicWrappper: {}", status))]
+    TonicWrapper { status: tonic::Status },
+
     #[snafu(display("Operation not yet implemented:  {}", operation))]
     NotYetImplemented { operation: String },
+
+    // generic errors that "should never happen"
+    #[snafu(display("Internal Error:  {}", description))]
+    InternalError { description: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -55,9 +75,19 @@ impl Error {
         match &self {
             Self::ServerError { .. } => Status::internal(self.to_string()),
             Self::DatabaseNotFound { .. } => Status::not_found(self.to_string()),
+            Self::JoinError { .. } => Status::internal(self.to_string()),
             Self::GettingTables { .. } => Status::internal(self.to_string()),
+            Self::ExecutingMetadataQuery { .. } => Status::internal(self.to_string()),
+            Self::TonicWrapper { status } => status.clone(),
             Self::NotYetImplemented { .. } => Status::internal(self.to_string()),
+            Self::InternalError { .. } => Status::internal(self.to_string()),
         }
+    }
+}
+
+impl From<tonic::Status> for Error {
+    fn from(status: Status) -> Self {
+        Self::TonicWrapper { status }
     }
 }
 
@@ -175,25 +205,7 @@ where
     ) -> Result<tonic::Response<Self::MeasurementNamesStream>, Status> {
         let (mut tx, rx) = mpsc::channel(4);
 
-        let measurement_names_request = req.into_inner();
-
-        let db_name = org_and_bucket_to_database(
-            measurement_names_request.org_id()?,
-            &measurement_names_request.bucket_name()?,
-        );
-
-        // This request can also have a time range. TODO handle this
-        // reasonably somehow (select count(*) from table_name where <PREDICATE>???).
-        // For now, return all measurements.
-        if let Some(range) = measurement_names_request.range {
-            warn!(
-                "Timestamp ranges not yet supported in measurement_names storage gRPC request,\
-                   ignoring: {:?}",
-                range
-            );
-        }
-
-        let response = measurement_name_impl(self.db_store.clone(), db_name)
+        let response = measurement_name_impl(self.db_store.clone(), req.into_inner())
             .await
             .map_err(|e| e.to_status());
 
@@ -241,34 +253,160 @@ where
 // to the appropriate tonic Status
 //
 // TODO: Do this work on a separate worker pool, not the main tokio task pool
-async fn measurement_name_impl<T>(db_store: Arc<T>, db_name: String) -> Result<StringValuesResponse>
+async fn measurement_name_impl<T>(
+    db_store: Arc<T>,
+    request: MeasurementNamesRequest,
+) -> Result<StringValuesResponse>
 where
-    T: DatabaseStore,
+    T: DatabaseStore + 'static,
 {
-    let table_names = db_store
+    let db_name = org_and_bucket_to_database(request.org_id()?, &request.bucket_name()?);
+
+    let db = db_store
         .db(&db_name)
         .await
         .ok_or_else(|| Error::DatabaseNotFound {
             db_name: db_name.clone(),
-        })?
-        .table_names()
-        .await
-        .map_err(|e| Error::GettingTables {
-            db_name: db_name.clone(),
-            source: Box::new(e),
         })?;
+
+    let table_names = db.table_names().await.map_err(|e| Error::GettingTables {
+        db_name: db_name.clone(),
+        source: Box::new(e),
+    })?;
 
     // In theory this could be combined with the chain above, but
     // we break it into its own statement here for readability
 
-    // Map the resulting collection of Strings into a Vec<Vec<u8>>for return
-    let values = table_names
-        .iter()
-        .map(|name| name.bytes().collect())
-        .collect::<Vec<_>>();
+    // This request can also have a time range. TODO handle this
+    // reasonably somehow (select count(*) from table_name where <PREDICATE>???).
+    // For now, return all measurements.
+    if let Some(range) = request.range {
+        warn!(
+            "Timestamp ranges not yet supported in measurement_names storage gRPC request,\
+             ignoring: {:?}",
+            range
+        );
+    }
+
+    // run a metadata query for each table to see if it has any rows
+    // that match the predicates
+    let mut values_futures = Vec::new();
+    for table_name in table_names.iter() {
+        let table_name = table_name.clone();
+        let db = db.clone();
+        let join_handle: JoinHandle<Result<Option<String>>> = tokio::task::spawn(async move {
+            if has_any_rows(db, &table_name).await? {
+                Ok(Some(table_name))
+            } else {
+                Ok(None)
+            }
+        });
+        values_futures.push(join_handle);
+    }
+
+    let mut values: Vec<Vec<u8>> = Vec::new();
+
+    // now, wait for all the values to resolve and build up the response
+    for f in values_futures {
+        let table_name = f.await.context(JoinError)??;
+
+        // Convert into Vec<u8> for return
+        if let Some(table_name) = table_name {
+            values.push(table_name.bytes().collect())
+        }
+    }
 
     Ok(StringValuesResponse { values })
 }
+
+/// returns true if the specified table in the database
+/// has any rows that match the predicate
+///
+/// TODO: actual predicate support
+async fn has_any_rows<T>(db: Arc<T>, table_name: &str) -> Result<bool>
+where
+    T: Database,
+{
+    // TODO: build up a logical plan directly and avoid SQL
+    // as building strings up is a potential security hole
+    let sql = format!(r#"SELECT COUNT(*) FROM "{}""#, table_name);
+
+    println!("Running SQL: {}", sql);
+
+    let results = db
+        .query(&sql)
+        .await
+        .map_err(|e| Error::ExecutingMetadataQuery {
+            table_name: table_name.into(),
+            source: Box::new(e),
+        })?;
+
+    // we expect a single record batch with a single count column
+    match results.len() {
+        1 => {
+            // expect a schema with a single uint64 result
+            let record_batch = &results[0];
+            Ok(extract_row_count(record_batch)? > 0)
+        }
+        num => Err(Error::InternalError {
+            description: format!(
+                "Expected exactly 1 result when retrieving results of metadata query, got {}",
+                num
+            ),
+        }),
+    }
+}
+
+/// Expects a single u64 column with a single row and returns it
+fn extract_row_count(record_batch: &RecordBatch) -> Result<u64> {
+    let schema = record_batch.schema();
+    let fields = schema.fields();
+    match fields.len() {
+        1 => {
+            let field = &fields[0];
+            match field.data_type() {
+                DataType::UInt64 => {
+                    let array = record_batch
+                        .column(0)
+                        .as_any()
+                        .downcast_ref::<UInt64Array>();
+                    match array {
+                        Some(array) => extract_value(array),
+                        None => Err(Error::InternalError {
+                            description: "Can't downcast field to u64 metadata query".into(),
+                        }),
+                    }
+                }
+                dt => Err(Error::InternalError {
+                    description: format!(
+                        "Expected UInt64 field in result of metadata query, got {:?}",
+                        dt
+                    ),
+                }),
+            }
+        }
+        num => Err(Error::InternalError {
+            description: format!(
+                "Expected exactly 1 row in result of metadata query, got {}",
+                num
+            ),
+        }),
+    }
+}
+
+fn extract_value(array: &UInt64Array) -> Result<u64> {
+    match array.len() {
+        // here is the actual value we care about....
+        1 => Ok(array.value(0)),
+        num => Err(Error::InternalError {
+            description: format!(
+                "Expected exactly 1 row in result of metadata query, got {}",
+                num
+            ),
+        }),
+    }
+}
+
 /// Instantiate a server listening on the specified address
 /// implementing the Delorean and Storage gRPC interfaces, the
 /// underlying hyper server instance. Resolves when the server has
@@ -288,6 +426,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::{
+        array::ArrayRef,
+        array::UInt64Array,
+        datatypes::{DataType, Field, Schema},
+        record_batch::RecordBatch,
+    };
     use delorean::{id::Id, storage::test_fixtures::TestDatabaseStore};
     use std::{
         convert::TryFrom,
@@ -355,7 +499,33 @@ mod tests {
         let db_info = OrgAndBucket::new(123, 456);
         let partition_id = 1;
 
-        let lp_data = "h2o,state=CA temp=50.4 1568756160\no2,state=MA temp=50.4 1568756160";
+        // Tell the system there are rows in h2o and o2, but not co2
+        fixture
+            .test_storage
+            .add_query_answer(
+                &db_info.db_name,
+                r#"SELECT COUNT(*) FROM "h2o""#,
+                Ok(vec![make_count_record_batch(&["count"], &[1])]),
+            )
+            .await;
+        fixture
+            .test_storage
+            .add_query_answer(
+                &db_info.db_name,
+                r#"SELECT COUNT(*) FROM "o2""#,
+                Ok(vec![make_count_record_batch(&["count"], &[1])]),
+            )
+            .await;
+        fixture
+            .test_storage
+            .add_query_answer(
+                &db_info.db_name,
+                r#"SELECT COUNT(*) FROM "co2""#,
+                Ok(vec![make_count_record_batch(&["count"], &[0])]),
+            )
+            .await;
+
+        let lp_data = "h2o,state=CA temp=50.4 1568756160\no2,state=MA temp=50.4 1568756160\nco2,state=RI temp=50.4 1568756160";
         fixture
             .test_storage
             .add_lp_string(&db_info.db_name, lp_data)
@@ -552,5 +722,23 @@ mod tests {
         async fn connect(addr: String) -> Result<Self, tonic::transport::Error> {
             Self::connect(addr).await
         }
+    }
+
+    /// Returns a record batch with column names and counts as specified in the argument
+    fn make_count_record_batch(column_names: &[&str], counts: &[u64]) -> RecordBatch {
+        let schema = Arc::new(Schema::new(
+            column_names
+                .iter()
+                .map(|col_name| Field::new(col_name, DataType::UInt64, false))
+                .collect::<Vec<_>>(),
+        ));
+
+        // now build the columns (with one int apiece for each of the columns)
+        let columns = counts
+            .iter()
+            .map(|count| Arc::new(UInt64Array::from(vec![*count])) as ArrayRef)
+            .collect::<Vec<ArrayRef>>();
+
+        RecordBatch::try_new(schema, columns).expect("creatng record batch")
     }
 }

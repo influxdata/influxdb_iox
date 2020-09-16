@@ -148,6 +148,9 @@ pub mod test_fixtures {
     pub struct TestDatabase {
         // lines which have been written to this database, in order
         saved_lines: Mutex<Vec<String>>,
+
+        // precanned answers to queries.
+        query_answers: Mutex<BTreeMap<String, Result<Vec<RecordBatch>, TestError>>>,
     }
 
     #[derive(Snafu, Debug, Clone, Copy)]
@@ -157,6 +160,7 @@ pub mod test_fixtures {
         fn default() -> Self {
             Self {
                 saved_lines: Mutex::new(Vec::new()),
+                query_answers: Mutex::new(BTreeMap::new()),
             }
         }
     }
@@ -182,6 +186,18 @@ pub mod test_fixtures {
                 .await
                 .expect("writing lines");
         }
+
+        /// Add pre-canned answers for the specific query
+        pub async fn add_query_answer(
+            &self,
+            sql: &str,
+            answer: Result<Vec<RecordBatch>, TestError>,
+        ) {
+            self.query_answers
+                .lock()
+                .await
+                .insert(sql.to_string(), answer);
+        }
     }
 
     #[async_trait]
@@ -198,8 +214,18 @@ pub mod test_fixtures {
         }
 
         /// Execute the specified query and return arrow record batches with the result
-        async fn query(&self, _query: &str) -> Result<Vec<RecordBatch>, Self::Error> {
-            unimplemented!("query Not yet implemented");
+        async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, Self::Error> {
+            let query_answers = self.query_answers.lock().await;
+
+            match query_answers.get(query) {
+                Some(stored_result) => match stored_result {
+                    Ok(v) => Ok(v.clone()),
+                    Err(e) => Err(*e),
+                },
+                None => {
+                    unimplemented!("No stored answer for '{}' in TestDatabase", query);
+                }
+            }
         }
 
         /// Return all measurement names that are saved in this database
@@ -242,6 +268,20 @@ pub mod test_fixtures {
                 .await
                 .expect("db_or_create suceeeds")
                 .add_lp_string(lp_data)
+                .await
+        }
+
+        /// Add pre-canned answers for the specific query to a specific database
+        pub async fn add_query_answer(
+            &self,
+            db_name: &str,
+            sql: &str,
+            answer: Result<Vec<RecordBatch>, TestError>,
+        ) {
+            self.db_or_create(db_name)
+                .await
+                .expect("db_or_create suceeeds")
+                .add_query_answer(sql, answer)
                 .await
         }
     }
