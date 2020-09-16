@@ -489,12 +489,7 @@ impl Database for Db {
         let partition_keys: Vec<_> = lines.iter().map(|l| (l, self.partition_key(l))).collect();
         let mut partitions = self.partitions.write().await;
 
-        let mut builder = self.wal_details.as_ref().map(|_| WalEntryBuilder {
-            fbb: flatbuffers::FlatBufferBuilder::new_with_capacity(1024),
-            entries: vec![],
-            row_values: vec![],
-            partitions: BTreeSet::new(),
-        });
+        let mut builder = self.wal_details.as_ref().map(|_| WalEntryBuilder::new());
 
         // TODO: rollback writes to partitions on validation failures
         for (line, key) in partition_keys {
@@ -1237,6 +1232,15 @@ struct WalEntryBuilder<'a> {
 }
 
 impl WalEntryBuilder<'_> {
+    fn new() -> Self {
+        Self {
+            fbb: flatbuffers::FlatBufferBuilder::new_with_capacity(1024),
+            entries: vec![],
+            row_values: vec![],
+            partitions: BTreeSet::new(),
+        }
+    }
+
     fn add_dictionary_entry(&mut self, partition_id: u32, value: &str, id: u32) {
         let value_offset = self.fbb.create_string(value);
 
