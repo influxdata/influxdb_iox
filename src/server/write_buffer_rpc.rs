@@ -269,7 +269,6 @@ where
 
     Ok(StringValuesResponse { values })
 }
-
 /// Instantiate a server listening on the specified address
 /// implementing the Delorean and Storage gRPC interfaces, the
 /// underlying hyper server instance. Resolves when the server has
@@ -304,13 +303,6 @@ mod tests {
 
     type DeloreanClient = delorean_client::DeloreanClient<tonic::transport::Channel>;
     type StorageClient = storage_client::StorageClient<tonic::transport::Channel>;
-
-    // Wrapper around raw clients and test database
-    struct Fixture {
-        delorean_client: DeloreanClient,
-        storage_client: UsableStorageClient,
-        test_storage: Arc<TestDatabaseStore>,
-    }
 
     #[tokio::test]
     async fn test_delorean_rpc() -> Result<()> {
@@ -369,7 +361,7 @@ mod tests {
             .add_lp_string(&db_info.db_name, lp_data)
             .await;
 
-        let source = Some(UsableStorageClient::read_source(
+        let source = Some(StorageClientWrapper::read_source(
             db_info.org_id,
             db_info.bucket_id,
             partition_id,
@@ -418,11 +410,11 @@ mod tests {
 
     /// Wrapper around a StorageClient that does the various tonic /
     /// futures dance
-    struct UsableStorageClient {
+    struct StorageClientWrapper {
         inner: StorageClient,
     }
 
-    impl UsableStorageClient {
+    impl StorageClientWrapper {
         fn new(inner: StorageClient) -> Self {
             Self { inner }
         }
@@ -509,6 +501,13 @@ mod tests {
         }
     }
 
+    // Wrapper around raw clients and test database
+    struct Fixture {
+        delorean_client: DeloreanClient,
+        storage_client: StorageClientWrapper,
+        test_storage: Arc<TestDatabaseStore>,
+    }
+
     impl Fixture {
         /// Start up a test rpc server listening on `port`, returning
         /// a fixture with the test server and clients
@@ -525,7 +524,7 @@ mod tests {
 
             let delorean_client = connect_to_server::<DeloreanClient>(bind_addr).await?;
             let storage_client =
-                UsableStorageClient::new(connect_to_server::<StorageClient>(bind_addr).await?);
+                StorageClientWrapper::new(connect_to_server::<StorageClient>(bind_addr).await?);
 
             Ok(Self {
                 delorean_client,
