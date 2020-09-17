@@ -510,11 +510,10 @@ impl Database for Db {
         }
 
         if let Some(wal) = &self.wal_details {
-            let mut builder = builder.unwrap();
-            builder.create_batch();
+            let data = builder
+                .expect("Where there's wal_details, there's a builder")
+                .data();
 
-            let (mut data, idx) = builder.fbb.collapse();
-            let data = data.split_off(idx);
             wal.write_and_sync(data).await.context(WritingWal {
                 database: self.name.clone(),
             })?;
@@ -1419,6 +1418,13 @@ impl WalEntryBuilder<'_> {
         );
 
         self.fbb.finish(batch, None);
+    }
+
+    fn data(mut self) -> Vec<u8> {
+        self.create_batch();
+
+        let (mut data, idx) = self.fbb.collapse();
+        data.split_off(idx)
     }
 }
 
