@@ -486,13 +486,13 @@ impl Database for Db {
     // TODO: writes lines creates a column named "time" for the timestmap data. If
     //       we keep this we need to validate that no tag or field has the same name.
     async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), Self::Error> {
-        let partition_keys: Vec<_> = lines.iter().map(|l| (l, self.partition_key(l))).collect();
         let mut partitions = self.partitions.write().await;
 
         let mut builder = self.wal_details.as_ref().map(|_| WalEntryBuilder::new());
 
         // TODO: rollback writes to partitions on validation failures
-        for (line, key) in partition_keys {
+        for line in lines {
+            let key = self.partition_key(line);
             match partitions.iter_mut().find(|p| p.should_write(&key)) {
                 Some(p) => p.write_line(line, &mut builder)?,
                 None => {
