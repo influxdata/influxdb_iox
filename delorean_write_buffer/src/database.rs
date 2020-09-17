@@ -727,8 +727,7 @@ impl Partition {
         let table_id = self.dict_or_insert(measurement, builder);
         let partition_id = self.id;
 
-        let column_count =
-            1 + line.field_set.len() + line.series.tag_set.as_ref().map(|t| t.len()).unwrap_or(0);
+        let column_count = line.column_count();
         let mut values: Vec<ColumnValue<'_>> = Vec::with_capacity(column_count);
 
         // Make sure the time, tag and field names exist in the dictionary
