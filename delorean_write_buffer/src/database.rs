@@ -1,10 +1,6 @@
-use async_trait::async_trait;
-use tracing::info;
-
 use delorean_generated_types::wal as wb;
-
 use delorean_line_parser::{FieldValue, ParsedLine};
-use delorean_storage_interface::{Database, DatabaseStore};
+use delorean_storage_interface::{Database, DatabaseStore, TimestampRange};
 use delorean_wal::{Entry as WalEntry, Result as WalResult, WalBuilder};
 use delorean_wal_writer::{start_wal_sync_task, Error as WalWriterError, WalDetails};
 
@@ -21,24 +17,22 @@ use arrow::{
     datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema},
     record_batch::RecordBatch,
 };
+use async_trait::async_trait;
+use chrono::{offset::TimeZone, Utc};
 use datafusion::{
     datasource::MemTable, error::ExecutionError, execution::context::ExecutionContext,
 };
+use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use sqlparser::{
-    ast::{SetExpr, Statement},
+    ast::{SetExpr, Statement, TableFactor},
     dialect::GenericDialect,
     parser::Parser,
 };
-
-use chrono::{offset::TimeZone, Utc};
-use snafu::{ensure, OptionExt, ResultExt, Snafu};
-use sqlparser::ast::TableFactor;
 use string_interner::{
     backend::StringBackend, DefaultHashBuilder, DefaultSymbol, StringInterner, Symbol,
 };
 use tokio::sync::RwLock;
-
-use delorean_storage_interface::TimestampRange;
+use tracing::info;
 
 const TIME_COLUMN_NAME: &str = "time";
 
