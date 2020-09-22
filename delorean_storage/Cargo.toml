@@ -7,6 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+tracing = "0.1"
 snafu = "0.6.2"
 async-trait = "0.1.40"
 tokio = { version = "0.2", features = ["full"] }

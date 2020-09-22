@@ -4,11 +4,14 @@
 //! Note: this module is only compiled in  the 'test' cfg,
 use delorean_arrow::arrow::record_batch::RecordBatch;
 
-use crate::{Database, DatabaseStore, Predicate, TimestampRange};
+use crate::{
+    exec::{Error as ExecutionError, Predicate, StringSetPlan},
+    Database, DatabaseStore, TimestampRange,
+};
 use delorean_line_parser::{parse_lines, ParsedLine};
 
 use async_trait::async_trait;
-use snafu::{OptionExt, Snafu};
+use snafu::Snafu;
 use std::{collections::BTreeMap, collections::BTreeSet, sync::Arc};
 
 use tokio::sync::Mutex;
@@ -30,13 +33,16 @@ pub struct TestDatabase {
 pub struct ColumnNamesRequest {
     pub table: Option<String>,
     pub range: Option<TimestampRange>,
-    pub predicate: Option<Predicate>,
+    pub predicate: Option<String>, // stringified version of the predicate
 }
 
-#[derive(Snafu, Debug, Clone)]
+#[derive(Snafu, Debug)]
 pub enum TestError {
     #[snafu(display("Test database error:  {}", message))]
     General { message: String },
+
+    #[snafu(display("Test database execution:  {:?}", source))]
+    Execution { source: ExecutionError },
 }
 
 impl Default for TestDatabase {
@@ -81,30 +87,6 @@ impl TestDatabase {
     /// Get the parameters from the last column name request
     pub async fn get_column_names_request(&self) -> Option<ColumnNamesRequest> {
         self.column_names_request.clone().lock_owned().await.take()
-    }
-
-    // Common implementation for column names
-    async fn tag_column_names_impl(
-        &self,
-        table: Option<String>,
-        range: Option<TimestampRange>,
-        predicate: Option<Predicate>,
-    ) -> Result<Arc<BTreeSet<String>>, TestError> {
-        // save the request
-        let mut column_name_request = self.column_names_request.clone().lock_owned().await;
-
-        *column_name_request = Some(ColumnNamesRequest {
-            table,
-            range,
-            predicate,
-        });
-
-        // pull out the saved columns
-        let column_names = self.column_names.clone().lock_owned().await.take();
-
-        column_names.map(Arc::new).context(General {
-            message: "No saved column_names in TestDatabase",
-        })
     }
 }
 
@@ -158,24 +140,41 @@ impl Database for TestDatabase {
         ))
     }
 
-    /// return the mocked out column names, recording the request
+    // return all column names with a predicate
     async fn tag_column_names(
         &self,
         table: Option<String>,
         range: Option<TimestampRange>,
-    ) -> Result<Arc<BTreeSet<String>>, Self::Error> {
-        self.tag_column_names_impl(table, range, None).await
-    }
+        predicate: Option<Predicate>,
+    ) -> Result<StringSetPlan, TestError> {
+        // save the request
+        let mut column_name_request = self.column_names_request.clone().lock_owned().await;
 
-    // return all column names with a predicate
-    async fn tag_column_names_with_predicate(
-        &self,
-        table: Option<String>,
-        range: Option<TimestampRange>,
-        predicate: Predicate,
-    ) -> Result<Arc<BTreeSet<String>>, Self::Error> {
-        self.tag_column_names_impl(table, range, Some(predicate))
-            .await
+        // save stringified version of the predicate, for testing
+        let predicate = predicate.map(|p| format!("{:?}", p));
+
+        *column_name_request = Some(ColumnNamesRequest {
+            table,
+            range,
+            predicate,
+        });
+
+        // And pull out the saved columns
+        let column_names = self.column_names.clone().lock_owned().await.take();
+
+        let res = column_names
+            // convert Vec --> BTreeSet
+            .map(|names| {
+                let names = names.into_iter().collect::<BTreeSet<String>>();
+
+                Arc::new(names)
+            })
+            // Turn None into an error
+            .ok_or_else(|| TestError::General {
+                message: "No saved column_names in TestDatabase".into(),
+            });
+
+        Ok(StringSetPlan::from_result(res))
     }
 
     /// Fetch the specified table names and columns as Arrow RecordBatches

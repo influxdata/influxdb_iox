@@ -236,7 +236,7 @@ async fn write<T: DatabaseStore>(
         .collect::<Result<Vec<_>, delorean_line_parser::Error>>()
         .context(ParsingLineProtocol)?;
 
-    debug!("Parsed {} lines", lines.len());
+    debug!("Writing {} lines into database {}", lines.len(), db_name);
 
     db.write_lines(&lines)
         .await

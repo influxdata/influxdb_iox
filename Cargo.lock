@@ -786,6 +786,7 @@ dependencies = [
  "serde_urlencoded",
  "snafu",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -878,6 +879,7 @@ dependencies = [
  "delorean_test_helpers",
  "delorean_wal",
  "delorean_wal_writer",
+ "env_logger",
  "flatbuffers",
  "snafu",
  "sqlparser",

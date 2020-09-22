@@ -1,6 +1,11 @@
+use delorean_arrow::datafusion::logical_plan::LogicalPlan;
 use delorean_generated_types::wal as wb;
 use delorean_line_parser::{FieldValue, ParsedLine};
-use delorean_storage::{Database, DatabaseStore, Predicate, TimestampRange};
+use delorean_storage::{
+    exec::plans::make_schema_pivot,
+    exec::{Predicate, StringSetPlan},
+    Database, DatabaseStore, TimestampRange,
+};
 use delorean_wal::{Entry as WalEntry, Result as WalResult, WalBuilder};
 use delorean_wal_writer::{start_wal_sync_task, Error as WalWriterError, WalDetails};
 
@@ -145,6 +150,17 @@ pub enum Error {
     },
 
     #[snafu(display(
+        "Internal error: Column ID {} not found in dictionary of partition {}",
+        column,
+        partition
+    ))]
+    InternalColumnIdNotFoundInDictionary {
+        column: u32,
+        partition: u32,
+        source: DictionaryError,
+    },
+
+    #[snafu(display(
         "Column name {} not found in dictionary of partition {}",
         column,
         partition
@@ -212,28 +228,14 @@ pub enum Error {
         statement: Box<Statement>,
     },
 
+    #[snafu(display("Multiple executions of plan are not supported"))]
+    MultipleExecutionsNotSupported {},
+
     #[snafu(display("query error {} on query {}", message, query))]
     GenericQueryError { message: String, query: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-
-trait ToInternalError<T>: Sized {
-    /// Converts e into an internal error with human readable
-    /// description, as opposed to panic!
-    fn to_internal(self, description: &str) -> Result<T>;
-}
-
-// Add a "to_internal" method to Result to transform errrors to
-// something interpretable
-impl<T> ToInternalError<T> for Result<T> {
-    fn to_internal(self, description: &str) -> Self {
-        self.map_err(|e| Error::InternalUnderlyingError {
-            description: description.into(),
-            source: Box::new(e),
-        })
-    }
-}
 
 #[derive(Debug)]
 pub struct WriteBufferDatabases {
@@ -602,76 +604,29 @@ impl Database for Db {
         Ok(Arc::new(table_names))
     }
 
-    // return all column names in this database, while applying optional predicates
+    // return all column names with a predicate
     async fn tag_column_names(
         &self,
         table: Option<String>,
         range: Option<TimestampRange>,
-    ) -> Result<Arc<BTreeSet<String>>, Self::Error> {
-        let partitions = self.partitions.read().await;
-
-        let mut column_names = BTreeSet::new();
-
-        for partition in partitions.iter() {
-            // ids are relative to a specific partition
-            let table_symbol = match &table {
-                Some(name) => Some(partition.dictionary.lookup_value(&name).context(
-                    TableNameNotFoundInDictionary {
-                        table: name,
-                        partition: partition.generation,
-                    },
-                )?),
-                None => None,
-            };
-
-            let timestamp_predicate = partition.make_timestamp_predicate(range)?;
-
-            // Find all columns ids in all partition's tables so that we
-            // can look up id --> String conversion once
-            let mut partition_column_ids = BTreeSet::new();
-
-            let table_iter = partition
-                .tables
-                .values()
-                // filter out any tables that don't pass the predicates
-                .filter(|table| table.matches_id_predicate(&table_symbol));
-
-            for table in table_iter {
-                for (column_id, column_index) in &table.column_id_to_index {
-                    if let Column::Tag(col) = &table.columns[*column_index] {
-                        if table.column_matches_timestamp_predicate(col, &timestamp_predicate)? {
-                            partition_column_ids.insert(column_id);
-                        }
-                    }
-                }
+        predicate: Option<Predicate>,
+    ) -> Result<StringSetPlan, Self::Error> {
+        match predicate {
+            // Special case when there is no general purpose predicate
+            None => {
+                let strings = self
+                    .tag_column_names_no_predicate(table, range)
+                    .await
+                    .map(Arc::new);
+                Ok(StringSetPlan::from_result(strings))
             }
-
-            // convert all the partition's column_ids to Strings
-            for column_id in partition_column_ids {
-                let column_name = partition.dictionary.lookup_id(*column_id).context(
-                    ColumnIdNotFoundInDictionary {
-                        column: *column_id,
-                        partition: partition.generation,
-                    },
-                )?;
-
-                if !column_names.contains(column_name) {
-                    column_names.insert(column_name.to_string());
-                }
+            Some(predicate) => {
+                let plans = self
+                    .tag_column_names_with_predicate(table, range, predicate)
+                    .await?;
+                Ok(StringSetPlan::from_plans(plans))
             }
-        } // next partition
-
-        Ok(Arc::new(column_names))
-    }
-
-    // return all column names with a predicate
-    async fn tag_column_names_with_predicate(
-        &self,
-        _table: Option<String>,
-        _range: Option<TimestampRange>,
-        _predicate: Predicate,
-    ) -> Result<Arc<BTreeSet<String>>, Self::Error> {
-        unimplemented!("tag_column_names_with_predicate in WriteBufferDatabase");
+        }
     }
 
     async fn table_to_arrow(
@@ -750,6 +705,120 @@ impl Db {
         let ts = line.timestamp.unwrap();
         let dt = Utc.timestamp_nanos(ts);
         dt.format("%Y-%m-%dT%H").to_string()
+    }
+
+    /// This is a special (fast) case for when there are no predicates
+    async fn tag_column_names_no_predicate(
+        &self,
+        table: Option<String>,
+        range: Option<TimestampRange>,
+    ) -> Result<BTreeSet<String>, Error> {
+        let partitions = self.partitions.read().await;
+
+        let mut column_names = BTreeSet::new();
+
+        for partition in partitions.iter() {
+            // ids are relative to a specific partition
+            let table_symbol = match &table {
+                Some(name) => {
+                    let table_symbol = partition.dictionary.lookup_value(&name).context(
+                        TableNameNotFoundInDictionary {
+                            table: name,
+                            partition: partition.generation,
+                        },
+                    )?;
+                    Some(table_symbol)
+                }
+
+                None => None,
+            };
+
+            let timestamp_predicate = partition.make_timestamp_predicate(range)?;
+
+            // Find all columns ids in all partition's tables so that we
+            // can look up id --> String conversion once
+            let mut partition_column_ids = BTreeSet::new();
+
+            let table_iter = partition
+                .tables
+                .values()
+                // filter out any tables that don't pass the predicates
+                .filter(|table| table.matches_id_predicate(&table_symbol));
+
+            for table in table_iter {
+                for (column_id, column_index) in &table.column_id_to_index {
+                    if let Column::Tag(col) = &table.columns[*column_index] {
+                        if table.column_matches_timestamp_predicate(col, &timestamp_predicate)? {
+                            partition_column_ids.insert(*column_id);
+                        }
+                    }
+                }
+            }
+
+            // convert all the partition's column_ids to Strings
+            for column in partition_column_ids {
+                let column_name = partition.dictionary.lookup_id(column).context(
+                    InternalColumnIdNotFoundInDictionary {
+                        column,
+                        partition: partition.generation,
+                    },
+                )?;
+
+                if !column_names.contains(column_name) {
+                    column_names.insert(column_name.to_string());
+                }
+            }
+        } // next partition
+
+        Ok(column_names)
+    }
+
+    /// Produce plans for executing when an arbitrary predicate must
+    /// be applied. Tries to prune as many tables as possible before hand
+    async fn tag_column_names_with_predicate(
+        &self,
+        table: Option<String>,
+        range: Option<TimestampRange>,
+        predicate: Predicate,
+    ) -> Result<Vec<LogicalPlan>, Error> {
+        // TODO remove copy/paste redundancy between this and
+        // tag_column_names_no_predicate
+        let mut plans = Vec::new();
+
+        let partitions = self.partitions.read().await;
+
+        for partition in partitions.iter() {
+            // ids are relative to a specific partition
+            let table_symbol = match &table {
+                Some(name) => {
+                    let table_symbol = partition.dictionary.lookup_value(&name).context(
+                        TableNameNotFoundInDictionary {
+                            table: name,
+                            partition: partition.generation,
+                        },
+                    )?;
+                    Some(table_symbol)
+                }
+                None => None,
+            };
+
+            let timestamp_predicate = partition.make_timestamp_predicate(range)?;
+
+            let table_iter = partition
+                .tables
+                .values()
+                // filter out any tables that don't pass table predicates
+                .filter(|table| table.matches_id_predicate(&table_symbol));
+
+            for table in table_iter {
+                // skip table entirely if there are no rows that fall in the timestamp
+                if table.matches_timestamp_predicate(&timestamp_predicate)? {
+                    plans.push(table.tag_column_names_plan(&predicate, &partition)?);
+                }
+            }
+        } // next partition
+
+        Ok(plans)
     }
 }
 
@@ -1230,6 +1299,8 @@ impl Table {
         Ok(())
     }
 
+    /// Convert the contents of this table to an Arrow RecordBatch
+    /// lookup_id is a function that can translate from ids -> &str
     fn to_arrow(&self, partition: &Partition) -> Result<RecordBatch> {
         let mut index: Vec<_> = self.column_id_to_index.iter().collect();
         index.sort_by(|a, b| a.1.cmp(b.1));
@@ -1322,6 +1393,49 @@ impl Table {
         let schema = ArrowSchema::new(fields);
 
         RecordBatch::try_new(Arc::new(schema), columns).context(ArrowError {})
+    }
+
+    /// Creates a LogicalPlan that returns tag names as a single column of Strings
+    ///
+    /// lookup_id is a function that looks up ids and turns them into str
+    ///
+    /// The created plan looks like:
+    ///
+    ///  Extension(PivotSchema)
+    ///    Filter(predicate)
+    ///      InMemoryScan
+    fn tag_column_names_plan(
+        &self,
+        predicate: &Predicate,
+        partition: &Partition,
+    ) -> Result<LogicalPlan> {
+        // TODO: use data fusion optimizaton here to avoid
+        // materializating all columns
+        println!("AAL input table: {:?}", self);
+
+        let data = self.to_arrow(partition)?;
+
+        println!("AAL input data schema is: {:?}", data.schema());
+
+        let schema = data.schema();
+
+        let projection = None;
+        let projected_schema = schema.clone();
+
+        let scan = LogicalPlan::InMemoryScan {
+            data: vec![vec![data]],
+            schema,
+            projection,
+            projected_schema,
+        };
+
+        let filter = LogicalPlan::Filter {
+            predicate: predicate.expr.clone(),
+            input: Arc::new(scan),
+        };
+
+        let pivot = make_schema_pivot(filter);
+        Ok(pivot)
     }
 
     /// returns true if this table should be included in a query that
@@ -1717,7 +1831,8 @@ impl Column {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use delorean_storage::{Database, TimestampRange};
+    use delorean_arrow::datafusion::logical_plan::{self, Literal};
+    use delorean_storage::{exec::Executor, Database, TimestampRange};
 
     use arrow::util::pretty::pretty_format_batches;
     use delorean_line_parser::parse_lines;
@@ -2154,15 +2269,14 @@ disk bytes=23432323i 1600136510000000000",
             let test_case_str = format!("{:#?}", test_case);
             println!("Running test case: {:?}", test_case);
 
-            let actual_tag_keys = match test_case.predicate {
-                Some(predicate) => db.tag_column_names_with_predicate(
-                    test_case.measurement,
-                    test_case.range,
-                    predicate,
-                ),
-                None => db.tag_column_names(test_case.measurement, test_case.range),
-            }
-            .await;
+            let tag_keys_plan = db
+                .tag_column_names(test_case.measurement, test_case.range, test_case.predicate)
+                .await
+                .expect("Created plan successfully");
+
+            // run the execution plan (
+            let executor = Executor::default();
+            let actual_tag_keys = executor.to_string_set(tag_keys_plan).await;
 
             let is_match = if let Ok(expected_tag_keys) = &test_case.expected_tag_keys {
                 let expected_tag_keys = to_set(expected_tag_keys);
@@ -2191,6 +2305,49 @@ disk bytes=23432323i 1600136510000000000",
             );
         }
 
+        Ok(())
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn list_column_names_predicate() -> Result {
+        // Demonstration test to show column names with predicate working
+
+        // temp enable logging:
+        std::env::set_var("RUST_LOG", "debug");
+        env_logger::init();
+
+        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let db = Db::try_with_wal("column_namedb", &mut dir).await?;
+
+        let lp_data = "h2o,state=CA,city=LA,county=LA temp=70.4 100\n\
+                       h2o,state=MA,city=Boston,county=Suffolk temp=72.4 250\n\
+                       o2,state=MA,city=Boston temp=50.4 200\n\
+                       o2,state=CA temp=79.0 300\n\
+                       o2,state=NY,city=NYC,borough=Brooklyn temp=60.8 400\n";
+
+        let lines: Vec<_> = parse_lines(lp_data).map(|l| l.unwrap()).collect();
+        db.write_lines(&lines).await?;
+
+        let measurement = None;
+        let range = None;
+
+        // Predicate: state=MA
+        let expr = logical_plan::col("state").eq("MA".lit());
+        let predicate = Some(Predicate { expr });
+
+        let tag_keys_plan = db
+            .tag_column_names(measurement, range, predicate)
+            .await
+            .expect("Created plan successfully");
+
+        // run the execution plan (
+        let executor = Executor::default();
+        let actual_tag_keys = executor
+            .to_string_set(tag_keys_plan)
+            .await
+            .expect("Execution of predicate plan");
+
+        assert_eq!(to_set(&["state", "city", "county"]), *actual_tag_keys);
         Ok(())
     }
 }
