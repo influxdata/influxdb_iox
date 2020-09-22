@@ -27,7 +27,6 @@ pub mod id;
 pub struct TimestampRange {
     /// Start defines the inclusive lower bound.
     pub start: i64,
-
     /// End defines the exclusive upper bound.
     pub end: i64,
 }

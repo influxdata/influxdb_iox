@@ -1625,13 +1625,13 @@ impl Column {
     }
 
     /// Returns true if any rows are within the range [min_value,
-    /// max_value], inclusive
+    /// max_value). Inclusive of `start`, exclusive of `end`
     fn has_i64_range(&self, start: i64, end: i64) -> Result<bool> {
         match self {
             Self::I64(v) => {
                 for val in v.iter() {
                     if let Some(val) = val {
-                        if start <= *val && *val <= end {
+                        if start <= *val && *val < end {
                             return Ok(true);
                         }
                     }
@@ -1646,7 +1646,8 @@ impl Column {
     }
 
     /// Returns true if there exists at least one row idx where this
-    /// self[i] is within the range [min_value, max_value] and where col[i] is non null
+    /// self[i] is within the range [min_value, max_value). Inclusive
+    /// of `start`, exclusive of `end` and where col[i] is non null
     fn has_non_null_i64_range<T>(
         &self,
         column: &[Option<T>],
@@ -1657,7 +1658,7 @@ impl Column {
             Self::I64(v) => {
                 for (index, val) in v.iter().enumerate() {
                     if let Some(val) = val {
-                        if start <= *val && *val <= end && column[index].is_some() {
+                        if start <= *val && *val < end && column[index].is_some() {
                             return Ok(true);
                         }
                     }
@@ -1694,14 +1695,14 @@ mod tests {
 
         let col = Column::I64(vec![Some(1), None, Some(2)]);
         assert!(!col.has_i64_range(-1, 0)?);
-        assert!(col.has_i64_range(0, 1)?);
+        assert!(!col.has_i64_range(0, 1)?);
         assert!(col.has_i64_range(1, 2)?);
         assert!(col.has_i64_range(2, 3)?);
         assert!(!col.has_i64_range(3, 4)?);
 
         let col = Column::I64(vec![Some(2), None, Some(1)]);
         assert!(!col.has_i64_range(-1, 0)?);
-        assert!(col.has_i64_range(0, 1)?);
+        assert!(!col.has_i64_range(0, 1)?);
         assert!(col.has_i64_range(1, 2)?);
         assert!(col.has_i64_range(2, 3)?);
         assert!(!col.has_i64_range(3, 4)?);
@@ -1737,7 +1738,7 @@ mod tests {
         let col = Column::I64(vec![Some(1), None, Some(2)]);
 
         assert!(!col.has_non_null_i64_range(&some_col, -1, 0)?);
-        assert!(col.has_non_null_i64_range(&some_col, 0, 1)?);
+        assert!(!col.has_non_null_i64_range(&some_col, 0, 1)?);
         assert!(col.has_non_null_i64_range(&some_col, 1, 2)?);
         assert!(col.has_non_null_i64_range(&some_col, 2, 3)?);
         assert!(!col.has_non_null_i64_range(&some_col, 3, 4)?);
@@ -1797,17 +1798,17 @@ mod tests {
         db.write_lines(&lines).await?;
 
         // Cover all times
-        let range = Some(TimestampRange { start: 0, end: 200 });
+        let range = Some(TimestampRange { start: 0, end: 201 });
         assert_eq!(*db.table_names(range).await?, to_set(&["cpu", "disk"]));
 
         // Right before disk
-        let range = Some(TimestampRange { start: 0, end: 199 });
+        let range = Some(TimestampRange { start: 0, end: 200 });
         assert_eq!(*db.table_names(range).await?, to_set(&["cpu"]));
 
         // only one point of cpu
         let range = Some(TimestampRange {
             start: 50,
-            end: 100,
+            end: 101,
         });
         assert_eq!(*db.table_names(range).await?, to_set(&["cpu"]));
 
@@ -2007,7 +2008,7 @@ disk bytes=23432323i 1600136510000000000",
     }
 
     #[tokio::test(threaded_scheduler)]
-    async fn test_column_names() -> Result {
+    async fn list_column_names() -> Result {
         let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
         let db = Db::try_with_wal("column_namedb", &mut dir).await?;
 
@@ -2037,7 +2038,7 @@ disk bytes=23432323i 1600136510000000000",
             },
             TestCase {
                 measurement: None,
-                range: Some(TimestampRange::new(150, 200)),
+                range: Some(TimestampRange::new(150, 201)),
                 predicate: None,
                 expected_tag_keys: Ok(vec!["city", "state"]),
             },
@@ -2068,7 +2069,7 @@ disk bytes=23432323i 1600136510000000000",
             // TODO timestamp and predicate
             // TestCase {
             //     measurement: None,
-            //     range: Some(TimestampRange::new(150, 200)),
+            //     range: Some(TimestampRange::new(150, 201)),
             //     predicate: None, // TODO: state=MA
             //     expected_tag_keys: Ok(vec!["city", "state"]),
             // },
@@ -2081,7 +2082,7 @@ disk bytes=23432323i 1600136510000000000",
             },
             TestCase {
                 measurement: Some("o2".to_string()),
-                range: Some(TimestampRange::new(150, 200)),
+                range: Some(TimestampRange::new(150, 201)),
                 predicate: None,
                 expected_tag_keys: Ok(vec!["city", "state"]),
             },
@@ -2095,7 +2096,7 @@ disk bytes=23432323i 1600136510000000000",
             // // TODO timestamp and predicate
             // TestCase {
             //     measurement: Some("o2".to_string()),
-            //     range: Some(TimestampRange::new(150, 200)),
+            //     range: Some(TimestampRange::new(150, 201)),
             //     predicate: None, // TODO: state=CA
             //     expected_tag_keys: Ok(vec!["city"]),
             // },
