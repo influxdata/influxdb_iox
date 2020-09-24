@@ -1410,12 +1410,10 @@ impl Table {
         partition: &Partition,
     ) -> Result<LogicalPlan> {
         // TODO: use data fusion optimizaton here to avoid
-        // materializating all columns
-        println!("AAL input table: {:?}", self);
+        // materializating all columns (would have to delay actually
+        // creating record batches until DF plan execution)
 
         let data = self.to_arrow(partition)?;
-
-        println!("AAL input data schema is: {:?}", data.schema());
 
         let schema = data.schema();
 

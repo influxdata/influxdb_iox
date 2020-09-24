@@ -8,6 +8,7 @@ use std::{
 };
 
 use delorean_arrow::{
+    arrow::array::Array,
     arrow::array::StringArray,
     arrow::datatypes::{DataType, Field, Schema, SchemaRef},
     arrow::record_batch::RecordBatch,
@@ -21,12 +22,12 @@ use delorean_arrow::{
     datafusion::physical_plan::ExecutionPlan,
     datafusion::physical_plan::{Distribution, Partitioning, PhysicalPlanner},
     datafusion::prelude::*,
-arrow::array::Array};
+};
 
 // publically export an opaque error type
 pub use delorean_arrow::datafusion::error::{ExecutionError, ExecutionError as Error, Result};
 
-/// Implements a SchemaPivot node.
+/// A SchemaPivot node.
 ///
 /// It takes an arbitrary input like
 ///  ColA | ColB | ColC
@@ -35,7 +36,8 @@ pub use delorean_arrow::datafusion::error::{ExecutionError, ExecutionError as Er
 ///   2   | 2    | NULL
 ///   3   | 2    | NULL
 ///
-/// And pivots it to a table with a single string column:
+/// And pivots it to a table with a single string column for any
+/// columns that had non null values.
 ///
 ///   non_null_column
 ///  -----------------
@@ -179,8 +181,6 @@ impl ExecutionPlan for SchemaPivotExec {
             )));
         }
 
-        println!("AAL Schema pivot executing, schema is {:?}", self.schema());
-
         let input_reader = self.input.execute(partition)?;
 
         // the algorithm here is simple and generic - for each column we
@@ -188,7 +188,6 @@ impl ExecutionPlan for SchemaPivotExec {
         // most cases, we'll have values for most columns and so
         // terminating early is a good idea.
         let input_schema = self.input.schema();
-        println!("AAL input schema is: {:#?}", input_schema);
         let input_fields = input_schema.fields();
         let num_fields = input_fields.len();
         let mut field_indexes_with_seen_values = vec![false; num_fields];
@@ -204,10 +203,6 @@ impl ExecutionPlan for SchemaPivotExec {
             keep_searching = match input_batch {
                 Some(input_batch) => {
                     let num_rows = input_batch.num_rows();
-                    println!("AAL: Got an input batch of {} rows", num_rows);
-                    println!("     field_indexes_with_seen_values: {:?}",
-                        field_indexes_with_seen_values
-                    );
 
                     // track if we had to look at any column values,
                     // and if we have nothing else to do, stop
@@ -217,16 +212,11 @@ impl ExecutionPlan for SchemaPivotExec {
                         // only check fields we haven't seen values for
                         if !field_indexes_with_seen_values[i] {
                             let column = input_batch.column(i);
-                            println!("AAL: checking column[{}] '{}': null_count {}, num_rows {}: {:?}",
-                                     i , input_fields[i].name(), column.null_count(), num_rows, column);
 
-                            let has_values = !column.is_empty() &&
-                                column.null_count() < num_rows &&
-                                check_for_string_nulls(column, num_rows);
+                            let has_values = !column.is_empty()
+                                && column.null_count() < num_rows
+                                && check_for_string_nulls(column, num_rows);
 
-
-
-                            println!("AAL has values: {}", has_values);
                             if has_values {
                                 field_indexes_with_seen_values[i] = true;
                             } else {
@@ -241,11 +231,6 @@ impl ExecutionPlan for SchemaPivotExec {
                 None => false,
             };
         }
-
-        println!("AAL DONE: field_indexes_with_seen_values: {:?}",
-                 field_indexes_with_seen_values
-        );
-
 
         // now, output a string for each column in the input schema
         // that we saw values for
@@ -284,21 +269,20 @@ impl ExecutionPlan for SchemaPivotExec {
 // (the write buffer produces them as empty strings right now).
 //
 // Return true if there are any non-empty string values
-fn check_for_string_nulls(column: &Arc<dyn Array>, num_rows:usize) -> bool {
+fn check_for_string_nulls(column: &Arc<dyn Array>, num_rows: usize) -> bool {
     use delorean_arrow::arrow::array::StringArrayOps;
     let string_array = column.as_any().downcast_ref::<StringArray>();
 
     if let Some(string_array) = string_array {
         for i in 0..num_rows {
             if string_array.value(i) != "" {
-                return true
+                return true;
             }
         }
     }
 
     false
 }
-
 
 // ---- Planning plumbing
 
@@ -317,7 +301,6 @@ impl QueryPlanner for DeloreanQueryPlanner {
         logical_plan: &LogicalPlan,
         ctx_state: &ExecutionContextState,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        println!("Creating physical plan for: {:#?}", logical_plan);
         // Teach the default physical planner how to plan SchemaPivot nodes.
         let physical_planner =
             DefaultPhysicalPlanner::with_extension_planner(Arc::new(DeloreanExtensionPlanner {}));

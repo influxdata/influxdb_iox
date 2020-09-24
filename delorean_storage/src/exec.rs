@@ -174,7 +174,6 @@ fn run_logical_plan(
     let logical_plan = plan.clone();
     debug!("Running plan, optimized:\n{:?}", logical_plan);
 
-
     let physical_plan = ctx
         .create_physical_plan(&logical_plan)
         .context(DataFusionPhysicalPlanningError)?;
