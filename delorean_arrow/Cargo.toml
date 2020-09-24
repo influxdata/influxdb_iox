@@ -1,0 +1,16 @@
+[package]
+name = "delorean_arrow"
+version = "0.1.0"
+authors = ["alamb <andrew@nerdnetworks.org>"]
+edition = "2018"
+description = "Apache Arrow / Parquet / DataFusion dependencies for delorean, to ensure consistent versions and unified updates"
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+arrow = { git = "https://github.com/apache/arrow.git", rev = "62dfa114d6683172927fab40fa6c4ddabae8fef4"}
+datafusion = { git = "https://github.com/apache/arrow.git", rev = "62dfa114d6683172927fab40fa6c4ddabae8fef4" }
+# Turn off the "arrow" feature; it currently has a bug that causes the crate to rebuild every time
+# and we're not currently using it anyway
+parquet = { git = "https://github.com/apache/arrow.git", rev = "62dfa114d6683172927fab40fa6c4ddabae8fef4", default-features = false, features = ["snap", "brotli", "flate2", "lz4", "zstd"] }

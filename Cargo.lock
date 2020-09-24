@@ -615,7 +615,7 @@ dependencies = [
  "clap",
  "crossbeam",
  "fnv",
- "parquet 2.0.0-SNAPSHOT",
+ "parquet",
  "paste",
  "prettytable-rs",
  "rustyline",
@@ -626,13 +626,13 @@ dependencies = [
 name = "delorean"
 version = "0.1.0"
 dependencies = [
- "arrow",
  "assert_cmd",
  "byteorder",
  "bytes",
  "clap",
  "criterion",
  "csv",
+ "delorean_arrow",
  "delorean_generated_types",
  "delorean_ingest",
  "delorean_line_parser",
@@ -670,6 +670,15 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-futures",
+]
+
+[[package]]
+name = "delorean_arrow"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "datafusion",
+ "parquet",
 ]
 
 [[package]]
@@ -733,11 +742,11 @@ dependencies = [
 name = "delorean_parquet"
 version = "0.1.0"
 dependencies = [
+ "delorean_arrow",
  "delorean_table",
  "delorean_table_schema",
  "delorean_test_helpers",
  "log",
- "parquet 1.0.0",
  "snafu",
 ]
 
@@ -769,9 +778,8 @@ dependencies = [
 name = "delorean_storage"
 version = "0.1.0"
 dependencies = [
- "arrow",
  "async-trait",
- "datafusion",
+ "delorean_arrow",
  "delorean_line_parser",
  "serde",
  "serde_urlencoded",
@@ -783,12 +791,12 @@ dependencies = [
 name = "delorean_table"
 version = "0.1.0"
 dependencies = [
+ "delorean_arrow",
  "delorean_table_schema",
  "delorean_test_helpers",
  "delorean_tsm",
  "human_format",
  "log",
- "parquet 1.0.0",
  "rand",
  "snafu",
 ]
@@ -862,6 +870,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "criterion",
+ "delorean_arrow",
  "delorean_generated_types",
  "delorean_line_parser",
  "delorean_storage",
@@ -1965,25 +1974,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18869315e81473c951eb56ad5558bbc56978562d3ecfb87abb7a1e944cea4518"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "parquet"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "234036500c16044c0f7c96bcd77c6655762c7663264a4ef154c52eeab6235003"
-dependencies = [
- "brotli",
- "byteorder",
- "chrono",
- "flate2",
- "lz4",
- "num-bigint 0.3.0",
- "parquet-format",
- "serde_json",
- "snap",
- "thrift",
- "zstd",
 ]
 
 [[package]]
