@@ -87,7 +87,7 @@ checksum = "cff77d8686867eceff3105329d4698d96c2391c176d5d03adc90c7389162b5b8"
 [[package]]
 name = "arrow"
 version = "2.0.0-SNAPSHOT"
-source = "git+https://github.com/apache/arrow.git?rev=62dfa114d6683172927fab40fa6c4ddabae8fef4#62dfa114d6683172927fab40fa6c4ddabae8fef4"
+source = "git+https://github.com/apache/arrow.git?rev=171e8bfe5fe13467a1763227e495fae6bc5d011d#171e8bfe5fe13467a1763227e495fae6bc5d011d"
 dependencies = [
  "chrono",
  "csv",
@@ -609,15 +609,16 @@ dependencies = [
 [[package]]
 name = "datafusion"
 version = "2.0.0-SNAPSHOT"
-source = "git+https://github.com/apache/arrow.git?rev=62dfa114d6683172927fab40fa6c4ddabae8fef4#62dfa114d6683172927fab40fa6c4ddabae8fef4"
+source = "git+https://github.com/apache/arrow.git?rev=171e8bfe5fe13467a1763227e495fae6bc5d011d#171e8bfe5fe13467a1763227e495fae6bc5d011d"
 dependencies = [
  "arrow",
+ "chrono",
  "clap",
  "crossbeam",
  "fnv",
+ "num_cpus",
  "parquet",
  "paste",
- "prettytable-rs",
  "rustyline",
  "sqlparser",
 ]
@@ -1979,7 +1980,7 @@ dependencies = [
 [[package]]
 name = "parquet"
 version = "2.0.0-SNAPSHOT"
-source = "git+https://github.com/apache/arrow.git?rev=62dfa114d6683172927fab40fa6c4ddabae8fef4#62dfa114d6683172927fab40fa6c4ddabae8fef4"
+source = "git+https://github.com/apache/arrow.git?rev=171e8bfe5fe13467a1763227e495fae6bc5d011d#171e8bfe5fe13467a1763227e495fae6bc5d011d"
 dependencies = [
  "arrow",
  "brotli",
@@ -1989,7 +1990,6 @@ dependencies = [
  "lz4",
  "num-bigint 0.3.0",
  "parquet-format",
- "serde_json",
  "snap",
  "thrift",
  "zstd",
