@@ -137,7 +137,8 @@ Examples:
         .get_matches();
 
     setup_logging(matches.occurrences_of("verbose"));
-    // Install custom panic handler
+    // Install custom panic handler (note can not use `_` otherwise
+    // drop will be called immediately).
     let _f = SendPanicsToTracing::new();
 
     match matches.subcommand() {

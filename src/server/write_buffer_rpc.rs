@@ -899,7 +899,7 @@ mod tests {
         // message ends up in the log system
 
         // Normally, the global panic logger is set at program start
-        let _f = SendPanicsToTracing::new();
+        let f = SendPanicsToTracing::new();
 
         // capture all tracing messages
         let tracing_capture = TracingCapture::new();
@@ -928,7 +928,11 @@ mod tests {
             }
         };
 
-        // Ensure that the logs captured the panic (and drop f beforehand)
+        // Ensure that the logs captured the panic (and drop f
+        // beforehand -- if assert fails, it panics and during that
+        // panic `f` gets dropped causing a nasty error message)
+        drop(f);
+
         let captured_logs = tracing_capture.to_string();
         // Note we don't include the actual line / column in the
         // expected panic message to avoid needing to update the test
