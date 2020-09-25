@@ -138,7 +138,7 @@ Examples:
 
     setup_logging(matches.occurrences_of("verbose"));
     // Install custom panic handler
-    let panics = SendPanicsToTracing::new();
+    let _f = SendPanicsToTracing::new();
 
     match matches.subcommand() {
         ("convert", Some(sub_matches)) => {
@@ -200,9 +200,6 @@ Examples:
             }
         }
     }
-
-    // Explicitly refer to `panics` here to ensure it lives until this point
-    std::mem::drop(panics);
 }
 
 /// Default debug level is debug for everything except

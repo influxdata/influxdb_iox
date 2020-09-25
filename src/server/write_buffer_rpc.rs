@@ -899,7 +899,7 @@ mod tests {
         // message ends up in the log system
 
         // Normally, the global panic logger is set at progarm start
-        let f = SendPanicsToTracing::new();
+        let _f = SendPanicsToTracing::new();
 
         // capture all tracing messages
         let tracing_capture = TracingCapture::new();
@@ -927,9 +927,6 @@ mod tests {
                 );
             }
         };
-
-        // Note: use f here to ensure it live at least this long
-        std::mem::drop(f);
 
         // Ensure that the logs captured the panic (and drop f beforehand)
         let captured_logs = tracing_capture.to_string();

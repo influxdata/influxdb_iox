@@ -68,24 +68,23 @@ impl Subscriber for TracingCaptureSubscriber {
     fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
 
     fn event(&self, event: &Event<'_>) {
-        let mut s = String::new();
-        {
-            let mut v = StringVisitor { string: &mut s };
-            event.record(&mut v);
-        }
+        let mut v = StringVisitor {
+            string: String::new(),
+        };
+        event.record(&mut v);
         let mut logs = self.logs.lock().expect("got span mutex lock");
-        logs.push(s);
+        logs.push(v.string);
     }
 
     fn enter(&self, _span: &Id) {}
     fn exit(&self, _span: &Id) {}
 }
 
-struct StringVisitor<'a> {
-    string: &'a mut String,
+struct StringVisitor {
+    string: String,
 }
 
-impl<'a> tracing::field::Visit for StringVisitor<'a> {
+impl<'a> tracing::field::Visit for StringVisitor {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         use std::fmt::Write;
         write!(self.string, "{} = {:?}; ", field.name(), value).unwrap();
