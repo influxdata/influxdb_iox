@@ -26,7 +26,7 @@ impl SendPanicsToTracing {
         let current_panic_hook: PanicFunctionPtr = Arc::new(panic::take_hook());
         let old_panic_hook = Some(current_panic_hook.clone());
         panic::set_hook(Box::new(move |info| {
-            tracing_panic_hook(current_panic_hook.clone(), info)
+            tracing_panic_hook(&current_panic_hook, info)
         }));
 
         Self { old_panic_hook }
@@ -61,7 +61,7 @@ impl Drop for SendPanicsToTracing {
     }
 }
 
-fn tracing_panic_hook(other_hook: PanicFunctionPtr, panic_info: &PanicInfo<'_>) {
+fn tracing_panic_hook(other_hook: &PanicFunctionPtr, panic_info: &PanicInfo<'_>) {
     // Attempt to replicate the standard format:
     // thread 'main' panicked at 'foo', src/libstd/panicking.rs:106:9
     let log_panic = |s: &str| {

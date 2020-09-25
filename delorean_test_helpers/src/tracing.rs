@@ -27,7 +27,7 @@ impl TracingCapture {
     /// Create a new TracingCapture object and register it as a subscriber
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let logs = Default::default();
+        let logs = Arc::new(Mutex::new(Vec::new()));
 
         // Register a subscriber to actually capture the log messages
         let my_subscriber = TracingCaptureSubscriber { logs: logs.clone() };
@@ -51,7 +51,6 @@ impl fmt::Display for TracingCapture {
 struct TracingCaptureSubscriber {
     logs: Arc<Mutex<Vec<String>>>,
 }
-
 
 impl Subscriber for TracingCaptureSubscriber {
     fn new_span(&self, _span: &Attributes<'_>) -> Id {
