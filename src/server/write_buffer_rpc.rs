@@ -898,7 +898,7 @@ mod tests {
         // 1. We don't use up all executors 2. The panic message
         // message ends up in the log system
 
-        // Normally, the global panic logger is set at progarm start
+        // Normally, the global panic logger is set at program start
         let f = SendPanicsToTracing::new();
 
         // capture all tracing messages

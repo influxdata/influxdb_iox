@@ -7,7 +7,7 @@ use tracing::{error, warn};
 
 type PanicFunctionPtr = Arc<Box<dyn Fn(&PanicInfo<'_>) + Sync + Send + 'static>>;
 
-/// RAAI guard that installs a custom panic hook to send panic
+/// RAII guard that installs a custom panic hook to send panic
 /// information to tracing.
 ///
 /// Upon construction registers a custom panic
@@ -16,8 +16,8 @@ type PanicFunctionPtr = Arc<Box<dyn Fn(&PanicInfo<'_>) + Sync + Send + 'static>>
 ///
 /// Upon drop, restores the pre-existing panic hook
 pub struct SendPanicsToTracing {
-    /// The previously installed panic hook -- Not it is wrapped in an
-    /// opion so we can .take it during the call to drop();
+    /// The previously installed panic hook -- Note it is wrapped in an
+    /// `Option` so we can `.take` it during the call to `drop()`;
     old_panic_hook: Option<PanicFunctionPtr>,
 }
 
@@ -36,9 +36,9 @@ impl SendPanicsToTracing {
 impl Drop for SendPanicsToTracing {
     fn drop(&mut self) {
         if let Some(old_panic_hook) = self.old_panic_hook.take() {
-            // since old_panic_hook is an Arc - at this point it
-            // should have two reference -- the captured closure as
-            // well as self.
+            // since `old_panic_hook` is an `Arc` - at this point it
+            // should have two references -- the captured closure as
+            // well as `self`.
 
             // Temporarily install a dummy hook that does nothing. We
             // need to release the ref count in the closure of the
