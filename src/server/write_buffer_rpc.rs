@@ -933,8 +933,10 @@ mod tests {
 
         // Ensure that the logs captured the panic (and drop f beforehand)
         let captured_logs = tracing_capture.to_string();
-        // test just enough to ensure that
-        let expected_error = "panicked at 'This is a test panic', src/server/write_buffer_rpc.rs";
+        // Note we don't include the actual line / column in the
+        // expected panic message to avoid needing to update the test
+        // whenever the source code file changed.
+        let expected_error = "panicked at 'This is a test panic', src/server/write_buffer_rpc.rs:";
         assert!(
             captured_logs.contains(expected_error),
             "Logs did not contain expected panic message '{}'. They were\n{}",

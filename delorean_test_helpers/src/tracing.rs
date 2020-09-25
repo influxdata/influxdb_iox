@@ -73,7 +73,6 @@ impl Subscriber for TracingCaptureSubscriber {
             let mut v = StringVisitor { string: &mut s };
             event.record(&mut v);
         }
-        println!("event: {}", s);
         let mut logs = self.logs.lock().expect("got span mutex lock");
         logs.push(s);
     }
