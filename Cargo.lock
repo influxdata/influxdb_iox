@@ -673,6 +673,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "delorean_cluster"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "delorean_line_parser",
+ "delorean_storage",
+ "serde",
+ "serde_json",
+ "snafu",
+ "tokio",
+]
+
+[[package]]
 name = "delorean_generated_types"
 version = "0.1.0"
 dependencies = [
