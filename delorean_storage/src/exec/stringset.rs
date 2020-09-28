@@ -9,7 +9,7 @@ use delorean_arrow::{
     arrow::array::{Array, StringArray, StringArrayOps},
     arrow::datatypes::DataType,
 };
-use snafu::Snafu;
+use snafu::{ensure, OptionExt, Snafu};
 
 #[derive(Debug, Snafu)]
 /// Opaque error type
@@ -62,30 +62,29 @@ impl IntoStringSet for Vec<RecordBatch> {
             let num_rows = record_batch.num_rows();
             let schema = record_batch.schema();
             let fields = schema.fields();
-            if fields.len() != 1 {
-                return InternalSchemaWasNotString {
+            ensure!(
+                fields.len() == 1,
+                InternalSchemaWasNotString {
                     schema: schema.clone(),
                 }
-                .fail();
-            }
+            );
+
             let field = &fields[0];
 
-            if *field.data_type() != DataType::Utf8 {
-                return InternalSchemaWasNotString {
+            ensure!(
+                field.data_type() == &DataType::Utf8,
+                InternalSchemaWasNotString {
                     schema: schema.clone(),
                 }
-                .fail();
-            }
+            );
 
             let array = record_batch
                 .column(0)
                 .as_any()
-                .downcast_ref::<StringArray>();
+                .downcast_ref::<StringArray>()
+                .context(InternalFailedToDowncast)?;
 
-            match array {
-                Some(array) => add_utf8_array_to_stringset(&mut strings, array, num_rows)?,
-                None => return InternalFailedToDowncast {}.fail(),
-            }
+            add_utf8_array_to_stringset(&mut strings, array, num_rows)?;
         }
         Ok(StringSetRef::new(strings))
     }

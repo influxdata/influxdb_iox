@@ -419,7 +419,7 @@ mod tests {
 
         let scan = make_plan(schema, vec![batch]);
         let pivot = make_schema_pivot(scan);
-        let plan = StringSetPlan::from_plans(vec![pivot]);
+        let plan = vec![pivot].into();
 
         let executor = Executor::new();
         let results = executor.to_string_set(plan).await.expect("Executed plan");
