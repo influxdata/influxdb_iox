@@ -77,13 +77,13 @@ pub enum StringSetPlan {
     Plan(Vec<LogicalPlan>),
 }
 
-impl StringSetPlan {
+impl<E> From<Result<StringSetRef, E>> for StringSetPlan
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
     /// Create a plan from a known result, wrapping the error type
     /// appropriately
-    pub fn from_result<E>(result: Result<StringSetRef, E>) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
-    {
+    fn from(result: Result<StringSetRef, E>) -> Self {
         match result {
             Ok(set) => Self::Known(Ok(set)),
             Err(e) => Self::Known(Err(Error::Execution {
@@ -91,11 +91,13 @@ impl StringSetPlan {
             })),
         }
     }
+}
 
+impl From<Vec<LogicalPlan>> for StringSetPlan {
     /// Create a DataFusion LogicalPlan node, each if which must
     /// produce a single output Utf8 column. The output of each plan
     /// will be included into the final set.
-    pub fn from_plans(plans: Vec<LogicalPlan>) -> Self {
+    fn from(plans: Vec<LogicalPlan>) -> Self {
         Self::Plan(plans)
     }
 }
@@ -283,7 +285,7 @@ mod tests {
     async fn executor_known_string_set_plan_ok() -> Result<()> {
         let expected_strings = to_set(&["Foo", "Bar"]);
         let result: Result<_> = Ok(expected_strings.clone());
-        let plan = StringSetPlan::from_result(result);
+        let plan = result.into();
 
         let executor = Executor::default();
         let result_strings = executor.to_string_set(plan).await?;
@@ -298,7 +300,7 @@ mod tests {
         }
         .fail();
 
-        let plan = StringSetPlan::from_result(result);
+        let plan = result.into();
 
         let executor = Executor::default();
         let actual_result = executor.to_string_set(plan).await;
@@ -316,7 +318,7 @@ mod tests {
         // Test with a single plan that produces no batches
         let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Utf8, true)]));
         let scan = make_plan(schema, vec![]);
-        let plan = StringSetPlan::from_plans(vec![scan]);
+        let plan: StringSetPlan = vec![scan].into();
 
         let executor = Executor::new();
         let results = executor.to_string_set(plan).await?;
@@ -334,7 +336,7 @@ mod tests {
         let batch =
             RecordBatch::try_new(schema.clone(), vec![data]).expect("created new record batch");
         let scan = make_plan(schema, vec![batch]);
-        let plan = StringSetPlan::from_plans(vec![scan]);
+        let plan: StringSetPlan = vec![scan].into();
 
         let executor = Executor::new();
         let results = executor.to_string_set(plan).await?;
@@ -355,7 +357,7 @@ mod tests {
         let batch2 =
             RecordBatch::try_new(schema.clone(), vec![data2]).expect("created new record batch");
         let scan = make_plan(schema, vec![batch1, batch2]);
-        let plan = StringSetPlan::from_plans(vec![scan]);
+        let plan: StringSetPlan = vec![scan].into();
 
         let executor = Executor::new();
         let results = executor.to_string_set(plan).await?;
@@ -380,7 +382,7 @@ mod tests {
             RecordBatch::try_new(schema.clone(), vec![data2]).expect("created new record batch");
         let scan2 = make_plan(schema, vec![batch2]);
 
-        let plan = StringSetPlan::from_plans(vec![scan1, scan2]);
+        let plan: StringSetPlan = vec![scan1, scan2].into();
 
         let executor = Executor::new();
         let results = executor.to_string_set(plan).await?;
@@ -402,7 +404,7 @@ mod tests {
         let batch =
             RecordBatch::try_new(schema.clone(), vec![data]).expect("created new record batch");
         let scan = make_plan(schema, vec![batch]);
-        let plan = StringSetPlan::from_plans(vec![scan]);
+        let plan: StringSetPlan = vec![scan].into();
 
         let executor = Executor::new();
         let results = executor.to_string_set(plan).await;
@@ -427,7 +429,7 @@ mod tests {
         let batch =
             RecordBatch::try_new(schema.clone(), vec![data]).expect("created new record batch");
         let scan = make_plan(schema, vec![batch]);
-        let plan = StringSetPlan::from_plans(vec![scan]);
+        let plan: StringSetPlan = vec![scan].into();
 
         let executor = Executor::new();
         let results = executor.to_string_set(plan).await;
