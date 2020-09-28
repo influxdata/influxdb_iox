@@ -319,7 +319,7 @@ mod tests {
         let plan = StringSetPlan::from_plans(vec![scan]);
 
         let executor = Executor::new();
-        let results = executor.to_string_set(plan).await.expect("Executed plan");
+        let results = executor.to_string_set(plan).await?;
 
         assert_eq!(results, StringSetRef::new(StringSet::new()));
 
@@ -337,7 +337,7 @@ mod tests {
         let plan = StringSetPlan::from_plans(vec![scan]);
 
         let executor = Executor::new();
-        let results = executor.to_string_set(plan).await.expect("Executed plan");
+        let results = executor.to_string_set(plan).await?;
 
         assert_eq!(results, to_set(&["foo", "bar", "baz"]));
 
@@ -358,7 +358,7 @@ mod tests {
         let plan = StringSetPlan::from_plans(vec![scan]);
 
         let executor = Executor::new();
-        let results = executor.to_string_set(plan).await.expect("Executed plan");
+        let results = executor.to_string_set(plan).await?;
 
         assert_eq!(results, to_set(&["foo", "bar", "baz"]));
 
@@ -383,7 +383,7 @@ mod tests {
         let plan = StringSetPlan::from_plans(vec![scan1, scan2]);
 
         let executor = Executor::new();
-        let results = executor.to_string_set(plan).await.expect("Executed plan");
+        let results = executor.to_string_set(plan).await?;
 
         assert_eq!(results, to_set(&["foo", "bar", "baz"]));
 
