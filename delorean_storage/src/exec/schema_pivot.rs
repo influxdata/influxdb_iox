@@ -27,7 +27,7 @@ use std::{
 };
 
 use delorean_arrow::{
-    arrow::array::{Array, StringArray},
+    arrow::array::StringArray,
     arrow::datatypes::{DataType, Field, Schema, SchemaRef},
     arrow::record_batch::{RecordBatch, RecordBatchReader},
     datafusion::logical_plan::{self, Expr, LogicalPlan, UserDefinedLogicalNode},
@@ -220,9 +220,8 @@ impl ExecutionPlan for SchemaPivotExec {
                         if !*seen_value {
                             let column = input_batch.column(i);
 
-                            let field_has_values = !column.is_empty()
-                                && column.null_count() < num_rows
-                                && check_for_string_nulls(column, num_rows);
+                            let field_has_values =
+                                !column.is_empty() && column.null_count() < num_rows;
 
                             if field_has_values {
                                 *seen_value = true;
@@ -267,29 +266,6 @@ impl ExecutionPlan for SchemaPivotExec {
             self.schema(),
             batches,
         ))))
-    }
-}
-
-// this is a hack -- check for empty strings and treat them as null
-// (the write buffer produces them as empty strings right now).
-//
-// if this is a string column, return true if there are any non-empty string values
-// otherwise, return true
-//
-fn check_for_string_nulls(column: &Arc<dyn Array>, num_rows: usize) -> bool {
-    use delorean_arrow::arrow::array::StringArrayOps;
-    let string_array = column.as_any().downcast_ref::<StringArray>();
-
-    if let Some(string_array) = string_array {
-        for i in 0..num_rows {
-            if string_array.value(i) != "" {
-                return true;
-            }
-        }
-        false
-    } else {
-        // not a string column
-        true
     }
 }
 
