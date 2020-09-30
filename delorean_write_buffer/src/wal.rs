@@ -2,8 +2,6 @@
 use delorean_generated_types::wal as wb;
 use delorean_line_parser::FieldValue;
 
-use std::collections::BTreeSet;
-
 use crate::column::{ColumnValue, Value};
 
 pub fn type_description(value: wb::ColumnValue) -> &'static str {
@@ -23,9 +21,8 @@ pub fn type_description(value: wb::ColumnValue) -> &'static str {
 #[derive(Debug)]
 pub struct WalEntryBuilder<'a> {
     fbb: flatbuffers::FlatBufferBuilder<'a>,
-    entries: Vec<flatbuffers::WIPOffset<wb::WriteBufferEntry<'a>>>,
+    rows: Vec<flatbuffers::WIPOffset<wb::Row<'a>>>,
     row_values: Vec<flatbuffers::WIPOffset<wb::Value<'a>>>,
-    partitions: BTreeSet<u32>,
 }
 
 impl Default for WalEntryBuilder<'_> {
@@ -38,39 +35,9 @@ impl WalEntryBuilder<'_> {
     pub fn new() -> Self {
         Self {
             fbb: flatbuffers::FlatBufferBuilder::new_with_capacity(1024),
-            entries: vec![],
+            rows: vec![],
             row_values: vec![],
-            partitions: BTreeSet::new(),
         }
-    }
-
-    pub fn ensure_partition_exists(&mut self, generation: u32, key: &str) {
-        if !self.partitions.contains(&generation) {
-            self.add_partition_open(generation, key);
-        }
-    }
-
-    pub fn add_partition_open(&mut self, generation: u32, key: &str) {
-        self.partitions.insert(generation);
-        let partition_key = self.fbb.create_string(&key);
-
-        let partition_open = wb::PartitionOpen::create(
-            &mut self.fbb,
-            &wb::PartitionOpenArgs {
-                generation,
-                key: Some(partition_key),
-            },
-        );
-
-        let entry = wb::WriteBufferEntry::create(
-            &mut self.fbb,
-            &wb::WriteBufferEntryArgs {
-                partition_open: Some(partition_open),
-                ..Default::default()
-            },
-        );
-
-        self.entries.push(entry);
     }
 
     fn add_tag_value(&mut self, column: &str, value: &str) {
@@ -166,33 +133,26 @@ impl WalEntryBuilder<'_> {
             },
         );
 
+        self.rows.push(row);
+        self.row_values = vec![];
+    }
+
+    fn create_entry(&mut self) {
+        let row_vec = self.fbb.create_vector(&self.rows);
+
         let entry = wb::WriteBufferEntry::create(
             &mut self.fbb,
             &wb::WriteBufferEntryArgs {
-                write: Some(row),
+                write: Some(row_vec),
                 ..Default::default()
             },
         );
 
-        self.entries.push(entry);
-        self.row_values = vec![];
-    }
-
-    fn create_batch(&mut self) {
-        let entry_vec = self.fbb.create_vector(&self.entries);
-
-        let batch = wb::WriteBufferBatch::create(
-            &mut self.fbb,
-            &wb::WriteBufferBatchArgs {
-                entries: Some(entry_vec),
-            },
-        );
-
-        self.fbb.finish(batch, None);
+        self.fbb.finish(entry, None);
     }
 
     pub fn data(mut self) -> Vec<u8> {
-        self.create_batch();
+        self.create_entry();
 
         let (mut data, idx) = self.fbb.collapse();
         data.split_off(idx)

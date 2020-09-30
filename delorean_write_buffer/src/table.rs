@@ -43,7 +43,7 @@ pub enum Error {
     ))]
     TagValueIdNotFoundInDictionary {
         value: u32,
-        partition: u32,
+        partition: String,
         source: DictionaryError,
     },
 
@@ -66,7 +66,7 @@ pub enum Error {
     ))]
     ColumnIdNotFoundInDictionary {
         column_id: u32,
-        partition: u32,
+        partition: String,
         source: DictionaryError,
     },
 
@@ -77,7 +77,7 @@ pub enum Error {
     ))]
     ColumnNameNotFoundInDictionary {
         column_name: String,
-        partition: u32,
+        partition: String,
         source: DictionaryError,
     },
 
@@ -327,7 +327,7 @@ impl Table {
                     let column_id = partition.dictionary.lookup_value(column_name).context(
                         ColumnNameNotFoundInDictionary {
                             column_name,
-                            partition: partition.generation,
+                            partition: &partition.key,
                         },
                     )?;
 
@@ -372,7 +372,7 @@ impl Table {
                                 let tag_value = partition.dictionary.lookup_id(*value_id).context(
                                     TagValueIdNotFoundInDictionary {
                                         value: *value_id,
-                                        partition: partition.generation,
+                                        partition: &partition.key,
                                     },
                                 )?;
                                 builder.append_value(tag_value)

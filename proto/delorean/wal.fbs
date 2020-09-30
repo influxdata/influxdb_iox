@@ -53,15 +53,8 @@ table Delete {
   stop_time: int64;
 }
 
-table WriteBufferBatch {
-  entries: [WriteBufferEntry];
-}
-
 table WriteBufferEntry {
-  partition_open: PartitionOpen;
-  partition_snapshot_started: PartitionSnapshotStarted;
-  partition_snapshot_finished: PartitionSnapshotFinished;
-  write: Row;
+  write: [Row];
   delete: WriteBufferDelete;
 }
 

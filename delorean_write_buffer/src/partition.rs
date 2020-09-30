@@ -32,7 +32,7 @@ pub enum Error {
     ))]
     ColumnNameNotFoundInDictionary {
         column: String,
-        partition: u32,
+        partition: String,
         source: crate::dictionary::Error,
     },
 
@@ -58,12 +58,12 @@ pub enum Error {
     ))]
     TableNameNotFoundInDictionary {
         table: String,
-        partition: u32,
+        partition: String,
         source: crate::dictionary::Error,
     },
 
     #[snafu(display("Table {} not found in partition {}", table, partition))]
-    TableNotFoundInPartition { table: u32, partition: u32 },
+    TableNotFoundInPartition { table: u32, partition: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -71,7 +71,6 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug)]
 pub struct Partition {
     pub key: String,
-    pub generation: u32,
     /// `dictionary` maps &str -> u32. The u32s are used in place of String or str to avoid slow
     /// string operations. The same dictionary is used for table names, tag names, tag values, and
     /// field names.
@@ -83,10 +82,9 @@ pub struct Partition {
 }
 
 impl Partition {
-    pub fn new(generation: u32, key: impl Into<String>) -> Self {
+    pub fn new(key: impl Into<String>) -> Self {
         Self {
             key: key.into(),
-            generation,
             dictionary: Dictionary::new(),
             tables: HashMap::new(),
             is_open: true,
@@ -114,10 +112,6 @@ impl Partition {
         line: &ParsedLine<'_>,
         builder: &mut Option<WalEntryBuilder<'_>>,
     ) -> Result<()> {
-        if let Some(b) = builder.as_mut() {
-            b.ensure_partition_exists(self.generation, &self.key);
-        }
-
         let table_name = line.series.measurement.as_str();
         let table_id = self.dictionary.lookup_value_or_insert(table_name);
 
@@ -182,7 +176,7 @@ impl Partition {
                 let time_column_id = self.dictionary.lookup_value(TIME_COLUMN_NAME).context(
                     ColumnNameNotFoundInDictionary {
                         column: TIME_COLUMN_NAME,
-                        partition: self.generation,
+                        partition: &self.key,
                     },
                 )?;
 
@@ -207,7 +201,7 @@ impl Partition {
                 .lookup_value(table_name)
                 .context(TableNameNotFoundInDictionary {
                     table: table_name,
-                    partition: self.generation,
+                    partition: &self.key,
                 })?;
 
         let table = self
@@ -215,7 +209,7 @@ impl Partition {
             .get(&table_id)
             .context(TableNotFoundInPartition {
                 table: table_id,
-                partition: self.generation,
+                partition: &self.key,
             })?;
         table
             .to_arrow(&self, columns)
@@ -250,9 +244,8 @@ pub struct RestorationStats {
 /// Given a set of WAL entries, restore them into a set of Partitions.
 pub fn restore_partitions_from_wal(
     wal_entries: impl Iterator<Item = WalResult<WalEntry>>,
-) -> Result<(Vec<Partition>, u32, RestorationStats)> {
+) -> Result<(Vec<Partition>, RestorationStats)> {
     let mut stats = RestorationStats::default();
-    let mut max_partition_generation = 0;
 
     let mut partitions = BTreeMap::new();
 
@@ -260,53 +253,35 @@ pub fn restore_partitions_from_wal(
         let wal_entry = wal_entry.context(WalEntryRead)?;
         let bytes = wal_entry.as_data();
 
-        let batch = flatbuffers::get_root::<wb::WriteBufferBatch<'_>>(&bytes);
+        let entry = flatbuffers::get_root::<wb::WriteBufferEntry<'_>>(&bytes);
 
-        if let Some(entries) = batch.entries() {
-            for entry in entries {
-                if let Some(po) = entry.partition_open() {
-                    let generation = po.generation();
-                    let key = po
-                        .key()
-                        .expect("restored partitions should have keys")
-                        .to_string();
+        if let Some(rows) = entry.write() {
+            for row in rows {
+                let values = row.values().expect("restored rows should have values");
+                let table = row.table().expect("restored rows should have table");
+                let partition_key = partition_key(&values);
 
-                    if generation > max_partition_generation {
-                        max_partition_generation = generation;
-                    }
-
-                    // raw entry opportunity
-                    if !partitions.contains_key(&key) {
-                        partitions.insert(key.clone(), Partition::new(generation, key));
-                    }
-                } else if let Some(_ps) = entry.partition_snapshot_started() {
-                    todo!("handle partition snapshot");
-                } else if let Some(_pf) = entry.partition_snapshot_finished() {
-                    todo!("handle partition snapshot finished")
-                } else if let Some(row) = entry.write() {
-                    let values = row.values().expect("restored rows should have values");
-                    let table = row.table().expect("restored rows should have table");
-                    let partition_key = partition_key(&values);
-
-                    let partition =
-                        partitions
-                            .get_mut(&partition_key)
-                            .context(PartitionNotFound {
-                                partition: partition_key,
-                            })?;
-
-                    stats.row_count += 1;
-                    // Avoid allocating if we don't need to
-                    if !stats.tables.contains(table) {
-                        stats.tables.insert(table.to_string());
-                    }
-
-                    partition.add_wal_row(table, &values)?;
+                if !partitions.contains_key(&partition_key) {
+                    partitions.insert(partition_key.clone(), Partition::new(&partition_key));
                 }
+
+                let partition = partitions
+                    .get_mut(&partition_key)
+                    .context(PartitionNotFound {
+                        partition: partition_key,
+                    })?;
+
+                stats.row_count += 1;
+                // Avoid allocating if we don't need to
+                if !stats.tables.contains(table) {
+                    stats.tables.insert(table.to_string());
+                }
+
+                partition.add_wal_row(table, &values)?;
             }
         }
     }
     let partitions = partitions.into_iter().map(|(_, p)| p).collect();
 
-    Ok((partitions, max_partition_generation, stats))
+    Ok((partitions, stats))
 }
