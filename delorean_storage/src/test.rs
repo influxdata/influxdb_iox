@@ -150,21 +150,21 @@ impl Database for TestDatabase {
         predicate: Option<Predicate>,
     ) -> Result<StringSetPlan, Self::Error> {
         // save the request
-        let mut column_name_request = self.column_names_request.clone().lock_owned().await;
-
         let predicate = predicate.map(|p| format!("{:?}", p));
 
-        *column_name_request = Some(ColumnNamesRequest {
+        let new_column_names_request = Some(ColumnNamesRequest {
             table,
             range,
             predicate,
         });
 
+        *self.column_names_request.clone().lock().await = new_column_names_request;
+
         // pull out the saved columns
         let column_names = self
             .column_names
             .clone()
-            .lock_owned()
+            .lock()
             .await
             .take()
             // Turn None into an error
