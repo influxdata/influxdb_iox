@@ -1079,7 +1079,7 @@ disk bytes=23432323i 1600136510000000000",
         Ok(())
     }
 
-    // Create a prediate of the form column_name = val
+    // Create a predicate of the form column_name = val
     fn make_column_eq_predicate(column_name: &str, val: &str) -> Option<Predicate> {
         let expr = Expr::BinaryExpr {
             left: Box::new(Expr::Column(column_name.into())),
