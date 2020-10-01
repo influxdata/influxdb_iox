@@ -537,18 +537,17 @@ impl Db {
 
         for partition in partitions.iter() {
             // ids are relative to a specific partition
-            let table_symbol = match &table {
-                Some(name) => {
-                    let table_symbol = partition.dictionary.lookup_value(&name).context(
-                        TableNameNotFoundInDictionary {
-                            table: name,
-                            partition: partition.generation,
-                        },
-                    )?;
-                    Some(table_symbol)
-                }
-                None => None,
-            };
+            let table_symbol = &table
+                .as_ref()
+                .map(|name| partition.dictionary.lookup_value(&name))
+                .transpose()
+                .context(TableNameNotFoundInDictionary {
+                    table: (&table)
+                        .as_ref()
+                        .map(|s| s as &str)
+                        .unwrap_or_else(|| "UNKNOWN"),
+                    partition: partition.generation,
+                })?;
 
             let timestamp_predicate = partition
                 .make_timestamp_predicate(range)
