@@ -11,7 +11,7 @@ use crate::{
 use delorean_line_parser::{parse_lines, ParsedLine};
 
 use async_trait::async_trait;
-use snafu::Snafu;
+use snafu::{OptionExt, Snafu};
 use std::{collections::BTreeMap, collections::BTreeSet, sync::Arc};
 
 use tokio::sync::Mutex;
@@ -83,12 +83,12 @@ impl TestDatabase {
         let column_names = column_names.into_iter().collect::<StringSet>();
         let column_names = Arc::new(column_names);
 
-        *(self.column_names.clone().lock_owned().await) = Some(column_names)
+        *(self.column_names.clone().lock().await) = Some(column_names)
     }
 
     /// Get the parameters from the last column name request
     pub async fn get_column_names_request(&self) -> Option<ColumnNamesRequest> {
-        self.column_names_request.clone().lock_owned().await.take()
+        self.column_names_request.clone().lock().await.take()
     }
 }
 
@@ -168,8 +168,8 @@ impl Database for TestDatabase {
             .await
             .take()
             // Turn None into an error
-            .ok_or_else(|| TestError::General {
-                message: "No saved column_names in TestDatabase".into(),
+            .context(General {
+                message: "No saved column_names in TestDatabase",
             });
 
         Ok(column_names.into())
