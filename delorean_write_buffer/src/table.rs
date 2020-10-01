@@ -215,7 +215,7 @@ impl Table {
         Ok(self
             .column_id_to_index
             .get(&column_id)
-            .map(|column_index| &self.columns[*column_index])
+            .map(|&column_index| &self.columns[column_index])
             .expect("invalid column id"))
     }
 
@@ -344,10 +344,7 @@ impl Table {
         let requested_columns_with_index = self
             .column_id_to_index
             .iter()
-            .filter_map(|(column_id, column_index)| {
-                let column_index = *column_index;
-                let column_id = *column_id;
-
+            .filter_map(|(&column_id, &column_index)| {
                 // keep tag columns and the timestamp column, if needed
                 let need_column = if let Column::Tag(_) = self.columns[column_index] {
                     true
@@ -387,15 +384,14 @@ impl Table {
                 // Create expressions for all columns except time
                 let select_exprs = requested_columns_with_index
                     .iter()
-                    .filter_map(|(column_name, _)| {
-                        let column_name = *column_name;
+                    .filter_map(|&(column_name, _)| {
                         if column_name != TIME_COLUMN_NAME {
                             Some(Expr::Column(column_name.into()))
                         } else {
                             None
                         }
                     })
-                    .collect::<Vec<_>>();
+                    .collect();
 
                 plan_builder.project(select_exprs).context(BuildingPlan)?
             }
@@ -446,8 +442,7 @@ impl Table {
         let requested_columns_with_index =
             requested_columns
                 .iter()
-                .map(|column_name| {
-                    let column_name = *column_name;
+                .map(|&column_name| {
                     let column_id = partition.dictionary.lookup_value(column_name).context(
                         ColumnNameNotFoundInDictionary {
                             column_name,
@@ -480,9 +475,7 @@ impl Table {
         let mut fields = Vec::with_capacity(requested_columns_with_index.len());
         let mut columns: Vec<ArrayRef> = Vec::with_capacity(requested_columns_with_index.len());
 
-        for (column_name, column_index) in requested_columns_with_index.iter() {
-            let column_name = *column_name;
-            let column_index = *column_index;
+        for &(column_name, column_index) in requested_columns_with_index.iter() {
             let arrow_col: ArrayRef = match &self.columns[column_index] {
                 Column::String(vals) => {
                     fields.push(ArrowField::new(column_name, ArrowDataType::Utf8, true));
