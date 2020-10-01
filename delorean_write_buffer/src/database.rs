@@ -323,7 +323,7 @@ impl Database for Db {
                 .context(PartitionError)?;
             for (table_name_symbol, table) in &partition.tables {
                 if table
-                    .matches_timestamp_predicate(&timestamp_predicate)
+                    .matches_timestamp_predicate(timestamp_predicate.as_ref())
                     .context(TableError)?
                 {
                     let table_name = partition.dictionary.lookup_id(*table_name_symbol).context(
@@ -485,7 +485,7 @@ impl Db {
                 for (column_id, column_index) in &table.column_id_to_index {
                     if let Column::Tag(col) = &table.columns[*column_index] {
                         if table
-                            .column_matches_timestamp_predicate(col, &timestamp_predicate)
+                            .column_matches_timestamp_predicate(col, timestamp_predicate.as_ref())
                             .context(TableError)?
                         {
                             partition_column_ids.insert(column_id);
@@ -562,12 +562,16 @@ impl Db {
             for table in table_iter {
                 // skip table entirely if there are no rows that fall in the timestamp
                 if table
-                    .matches_timestamp_predicate(&timestamp_predicate)
+                    .matches_timestamp_predicate(timestamp_predicate.as_ref())
                     .context(TableError)?
                 {
                     plans.push(
                         table
-                            .tag_column_names_plan(&predicate, &timestamp_predicate, &partition)
+                            .tag_column_names_plan(
+                                &predicate,
+                                timestamp_predicate.as_ref(),
+                                &partition,
+                            )
                             .context(TableError)?,
                     );
                 }

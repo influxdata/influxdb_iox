@@ -325,7 +325,7 @@ impl Table {
     pub fn tag_column_names_plan(
         &self,
         predicate: &Predicate,
-        timestamp_predicate: &Option<TimestampPredicate>,
+        timestamp_predicate: Option<&TimestampPredicate>,
         partition: &Partition,
     ) -> Result<LogicalPlan> {
         // Note we also need to add a timestamp predicate to this
@@ -572,7 +572,7 @@ impl Table {
 
     /// returns true if there are any timestamps in this table that
     /// fall within the timestamp range
-    pub fn matches_timestamp_predicate(&self, pred: &Option<TimestampPredicate>) -> Result<bool> {
+    pub fn matches_timestamp_predicate(&self, pred: Option<&TimestampPredicate>) -> Result<bool> {
         match pred {
             None => Ok(true),
             Some(pred) => {
@@ -591,7 +591,7 @@ impl Table {
     pub fn column_matches_timestamp_predicate<T>(
         &self,
         column: &[Option<T>],
-        pred: &Option<TimestampPredicate>,
+        pred: Option<&TimestampPredicate>,
     ) -> Result<bool> {
         match pred {
             None => Ok(true),
