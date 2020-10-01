@@ -444,7 +444,7 @@ impl Db {
 
     // specialized / optimized implementations
 
-    /// return all column names in this database, while applying optional predicates
+    /// return all column names in this database, while applying the timestamp range
     async fn tag_column_names_no_predicate(
         &self,
         table: Option<String>,
@@ -495,10 +495,10 @@ impl Db {
             }
 
             // convert all the partition's column_ids to Strings
-            for column_id in partition_column_ids {
-                let column_name = partition.dictionary.lookup_id(*column_id).context(
+            for &column_id in partition_column_ids {
+                let column_name = partition.dictionary.lookup_id(column_id).context(
                     ColumnIdNotFoundInDictionary {
-                        column: *column_id,
+                        column: column_id,
                         partition: partition.generation,
                     },
                 )?;
