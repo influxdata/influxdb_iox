@@ -114,9 +114,7 @@ impl Partition {
         if let Some(rows) = batch.rows() {
             table
                 .append_rows(&mut self.dictionary, &rows)
-                .context(TableWrite {
-                    table_name,
-                })?;
+                .context(TableWrite { table_name })?;
         }
 
         Ok(())
