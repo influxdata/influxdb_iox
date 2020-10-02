@@ -1,3 +1,4 @@
+use delorean_generated_types::wal as wb;
 use delorean_line_parser::ParsedLine;
 use delorean_storage::{Database, Predicate, TimestampRange};
 use delorean_wal::WalBuilder;
@@ -23,7 +24,7 @@ use delorean_arrow::{
 use crate::dictionary::Error as DictionaryError;
 use crate::partition::restore_partitions_from_wal;
 
-use crate::wal::WalEntryBuilder;
+use crate::wal::split_lines_into_write_entry_partitions;
 
 use async_trait::async_trait;
 use chrono::{offset::TimeZone, Utc};
@@ -259,30 +260,27 @@ impl Database for Db {
     async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), Self::Error> {
         let mut partitions = self.partitions.write().await;
 
-        let mut builder = self.wal_details.as_ref().map(|_| WalEntryBuilder::new());
+        let data = split_lines_into_write_entry_partitions(partition_key, lines);
+        let batch = flatbuffers::get_root::<wb::WriteBufferBatch<'_>>(&data);
 
-        // TODO: rollback writes to partitions on validation failures
-        for line in lines {
-            let key = self.partition_key(line);
-            // TODO: could this be a hashmap lookup instead of iteration, or no because of the
-            // way partitioning rules might work?
-            // TODO: or could we group lines by key and share the results of looking up the
-            // partition? or could that make insertion go in an undesired order?
-            match partitions.iter_mut().find(|p| p.should_write(&key)) {
-                Some(p) => p.write_line(line, &mut builder).context(PartitionError)?,
-                None => {
-                    let mut p = Partition::new(key);
-                    p.write_line(line, &mut builder).context(PartitionError)?;
-                    partitions.push(p)
+        if let Some(entries) = batch.entries() {
+            for entry in entries {
+                let key = entry
+                    .partition_key()
+                    .expect("partition key should have been inserted");
+
+                match partitions.iter_mut().find(|p| p.should_write(key)) {
+                    Some(p) => p.write_entry(&entry).context(PartitionError)?,
+                    None => {
+                        let mut p = Partition::new(key);
+                        p.write_entry(&entry).context(PartitionError)?;
+                        partitions.push(p)
+                    }
                 }
             }
         }
 
         if let Some(wal) = &self.wal_details {
-            let data = builder
-                .expect("Where there's wal_details, there's a builder")
-                .data();
-
             wal.write_and_sync(data).await.context(WritingWal {
                 database: self.name.clone(),
             })?;
@@ -470,16 +468,14 @@ impl Database for Db {
     }
 }
 
-impl Db {
-    // partition_key returns the partition key for the given line. The key will be the prefix of a
-    // partition name (multiple partitions can exist for each key). It uses the user defined
-    // partitioning rules to construct this key
-    fn partition_key(&self, line: &ParsedLine<'_>) -> String {
-        // TODO - wire this up to use partitioning rules, for now just partition by day
-        let ts = line.timestamp.unwrap();
-        let dt = Utc.timestamp_nanos(ts);
-        dt.format("%Y-%m-%dT%H").to_string()
-    }
+// partition_key returns the partition key for the given line. The key will be the prefix of a
+// partition name (multiple partitions can exist for each key). It uses the user defined
+// partitioning rules to construct this key
+pub fn partition_key(line: &ParsedLine<'_>) -> String {
+    // TODO - wire this up to use partitioning rules, for now just partition by day
+    let ts = line.timestamp.unwrap();
+    let dt = Utc.timestamp_nanos(ts);
+    dt.format("%Y-%m-%dT%H").to_string()
 }
 
 struct ArrowTable {
@@ -833,15 +829,12 @@ mod tests {
 
     #[tokio::test]
     async fn db_partition_key() -> Result {
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
-        let db = Db::try_with_wal("mydb", &mut dir).await?;
-
         let partition_keys: Vec<_> = parse_lines(
             "\
 cpu user=23.2 1600107710000000000
 disk bytes=23432323i 1600136510000000000",
         )
-        .map(|line| db.partition_key(&line.unwrap()))
+        .map(|line| partition_key(&line.unwrap()))
         .collect();
 
         assert_eq!(partition_keys, vec!["2020-09-14T18", "2020-09-15T02"]);

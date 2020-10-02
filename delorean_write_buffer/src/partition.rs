@@ -1,18 +1,13 @@
-use chrono::Utc;
 use delorean_arrow::arrow::record_batch::RecordBatch;
 use delorean_generated_types::wal as wb;
 use delorean_wal::{Entry as WalEntry, Result as WalResult};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use delorean_line_parser::{FieldValue, ParsedLine};
 use delorean_storage::TimestampRange;
 
-use crate::column::{ColumnValue, Value};
 use crate::dictionary::Dictionary;
 use crate::table::{Table, TimestampPredicate};
-use crate::wal::WalEntryBuilder;
 
-use chrono::offset::TimeZone;
 use snafu::{OptionExt, ResultExt, Snafu};
 
 pub const TIME_COLUMN_NAME: &str = "time";
@@ -36,8 +31,8 @@ pub enum Error {
         source: crate::dictionary::Error,
     },
 
-    #[snafu(display("Error restoring table '{}': {}", table_name, source))]
-    TableRestoration {
+    #[snafu(display("Error writing table '{}': {}", table_name, source))]
+    TableWrite {
         table_name: String,
         source: crate::table::Error,
     },
@@ -64,6 +59,12 @@ pub enum Error {
 
     #[snafu(display("Table {} not found in partition {}", table, partition))]
     TableNotFoundInPartition { table: u32, partition: String },
+
+    #[snafu(display("Attempt to write table batch without a name"))]
+    TableWriteWithoutName,
+
+    #[snafu(display("Error restoring WAL entry, missing partition key"))]
+    MissingPartitionKey,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -91,74 +92,32 @@ impl Partition {
         }
     }
 
-    pub fn add_wal_row(
-        &mut self,
-        table_name: &str,
-        values: &flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<wb::Value<'_>>>,
-    ) -> Result<()> {
-        let table_id = self.dictionary.lookup_value_or_insert(table_name);
-
-        let t = self
-            .tables
-            .entry(table_id)
-            .or_insert_with(|| Table::new(table_id));
-
-        t.add_wal_row(&mut self.dictionary, values)
-            .context(TableRestoration { table_name })
-    }
-
-    pub fn write_line(
-        &mut self,
-        line: &ParsedLine<'_>,
-        builder: &mut Option<WalEntryBuilder<'_>>,
-    ) -> Result<()> {
-        let table_name = line.series.measurement.as_str();
-        let table_id = self.dictionary.lookup_value_or_insert(table_name);
-
-        let column_count = line.column_count();
-        let mut values: Vec<ColumnValue<'_>> = Vec::with_capacity(column_count);
-
-        // Make sure the time, tag and field names exist in the dictionary
-        if let Some(tags) = &line.series.tag_set {
-            for (column, value) in tags {
-                let tag_column_id = self.dictionary.lookup_value_or_insert(column.as_str());
-                let tag_value_id = self.dictionary.lookup_value_or_insert(value.as_str());
-
-                values.push(ColumnValue {
-                    id: tag_column_id,
-                    column,
-                    value: Value::TagValue(tag_value_id, value),
-                });
+    pub fn write_entry(&mut self, entry: &wb::WriteBufferEntry<'_>) -> Result<()> {
+        if let Some(table_batches) = entry.table_batches() {
+            for batch in table_batches {
+                self.write_table_batch(&batch)?;
             }
         }
 
-        for (column, value) in &line.field_set {
-            let field_column_id = self.dictionary.lookup_value_or_insert(column.as_str());
-            values.push(ColumnValue {
-                id: field_column_id,
-                column,
-                value: Value::FieldValue(value),
-            });
-        }
+        Ok(())
+    }
 
-        let time_column_id = self.dictionary.lookup_value_or_insert(TIME_COLUMN_NAME);
-        // TODO: shouldn't the default for timestamp be the current time, not 0?
-        let time = line.timestamp.unwrap_or(0);
-        let time_value = FieldValue::I64(time);
-        values.push(ColumnValue {
-            id: time_column_id,
-            column: TIME_COLUMN_NAME,
-            value: Value::FieldValue(&time_value),
-        });
+    fn write_table_batch(&mut self, batch: &wb::TableWriteBatch<'_>) -> Result<()> {
+        let table_name = batch.name().context(TableWriteWithoutName)?;
+        let table_id = self.dictionary.lookup_value_or_insert(table_name);
 
         let table = self
             .tables
             .entry(table_id)
             .or_insert_with(|| Table::new(table_id));
 
-        table
-            .add_row(&values, &self.dictionary, builder)
-            .context(TableError)?;
+        if let Some(rows) = batch.rows() {
+            table
+                .append_rows(&mut self.dictionary, &rows)
+                .context(TableWrite {
+                    table_name,
+                })?;
+        }
 
         Ok(())
     }
@@ -217,24 +176,6 @@ impl Partition {
     }
 }
 
-/// Computes the partition key from a row being restored from the WAL.
-/// TODO: This can't live on `Db`, because when we're restoring from the WAL, we don't have a `Db`
-/// yet. Where do the partitioning rules come from?
-pub fn partition_key(
-    row: &flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<wb::Value<'_>>>,
-) -> String {
-    // TODO - wire this up to use partitioning rules, for now just partition by day
-    let ts = row
-        .iter()
-        .find(|v| v.column().expect("restored row values must have column") == TIME_COLUMN_NAME)
-        .expect("restored rows must have timestamp")
-        .value_as_i64value()
-        .expect("restored timestamp rows must be i64")
-        .value();
-    let dt = Utc.timestamp_nanos(ts);
-    dt.format("%Y-%m-%dT%H").to_string()
-}
-
 #[derive(Default, Debug)]
 pub struct RestorationStats {
     pub row_count: usize,
@@ -253,35 +194,48 @@ pub fn restore_partitions_from_wal(
         let wal_entry = wal_entry.context(WalEntryRead)?;
         let bytes = wal_entry.as_data();
 
-        let entry = flatbuffers::get_root::<wb::WriteBufferEntry<'_>>(&bytes);
+        let batch = flatbuffers::get_root::<wb::WriteBufferBatch<'_>>(&bytes);
 
-        if let Some(rows) = entry.write() {
-            for row in rows {
-                let values = row.values().expect("restored rows should have values");
-                let table = row.table().expect("restored rows should have table");
-                let partition_key = partition_key(&values);
+        if let Some(entries) = batch.entries() {
+            for entry in entries {
+                let partition_key = entry.partition_key().context(MissingPartitionKey)?;
 
-                if !partitions.contains_key(&partition_key) {
-                    partitions.insert(partition_key.clone(), Partition::new(&partition_key));
+                if !partitions.contains_key(partition_key) {
+                    partitions.insert(
+                        partition_key.to_string(),
+                        Partition::new(partition_key.to_string()),
+                    );
                 }
 
                 let partition = partitions
-                    .get_mut(&partition_key)
+                    .get_mut(partition_key)
                     .context(PartitionNotFound {
                         partition: partition_key,
                     })?;
 
-                stats.row_count += 1;
-                // Avoid allocating if we don't need to
-                if !stats.tables.contains(table) {
-                    stats.tables.insert(table.to_string());
-                }
-
-                partition.add_wal_row(table, &values)?;
+                partition.write_entry(&entry)?;
             }
         }
     }
-    let partitions = partitions.into_iter().map(|(_, p)| p).collect();
+    let partitions = partitions
+        .into_iter()
+        .map(|(_, p)| p)
+        .collect::<Vec<Partition>>();
+
+    // compute the stats
+    for p in &partitions {
+        for (id, table) in &p.tables {
+            let name = p
+                .dictionary
+                .lookup_id(*id)
+                .expect("table id wasn't inserted into dictionary on restore");
+            if !stats.tables.contains(name) {
+                stats.tables.insert(name.to_string());
+            }
+
+            stats.row_count += table.row_count();
+        }
+    }
 
     Ok((partitions, stats))
 }
