@@ -86,11 +86,10 @@ pub enum Error {
     #[snafu(display("Partition {} is full", partition))]
     PartitionFull { partition: String },
 
-    #[snafu(display("Error in partition: {}", source))]
-    PartitionError { source: crate::partition::Error },
-
-    #[snafu(display("Error in table: {}", source))]
-    TableError { source: crate::table::Error },
+    #[snafu(display("{}", source))]
+    PassThrough {
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
 
     #[snafu(display(
         "Table name {} not found in dictionary of partition {}",
@@ -188,6 +187,22 @@ pub enum Error {
 
     #[snafu(display("query error {} on query {}", message, query))]
     GenericQueryError { message: String, query: String },
+}
+
+impl std::convert::From<crate::table::Error> for Error {
+    fn from(e: crate::table::Error) -> Self {
+        Self::PassThrough {
+            source: Box::new(e),
+        }
+    }
+}
+
+impl std::convert::From<crate::partition::Error> for Error {
+    fn from(e: crate::partition::Error) -> Self {
+        Self::PassThrough {
+            source: Box::new(e),
+        }
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -300,10 +315,10 @@ impl Database for Db {
                     .expect("partition key should have been inserted");
 
                 match partitions.iter_mut().find(|p| p.should_write(key)) {
-                    Some(p) => p.write_entry(&entry).context(PartitionError)?,
+                    Some(p) => p.write_entry(&entry)?,
                     None => {
                         let mut p = Partition::new(key);
-                        p.write_entry(&entry).context(PartitionError)?;
+                        p.write_entry(&entry)?;
                         partitions.push(p)
                     }
                 }
@@ -327,14 +342,9 @@ impl Database for Db {
         let partitions = self.partitions.read().await;
         let mut table_names: BTreeSet<String> = BTreeSet::new();
         for partition in partitions.iter() {
-            let timestamp_predicate = partition
-                .make_timestamp_predicate(range)
-                .context(PartitionError)?;
+            let timestamp_predicate = partition.make_timestamp_predicate(range)?;
             for (table_name_symbol, table) in &partition.tables {
-                if table
-                    .matches_timestamp_predicate(timestamp_predicate.as_ref())
-                    .context(TableError)?
-                {
+                if table.matches_timestamp_predicate(timestamp_predicate.as_ref())? {
                     let table_name = partition.dictionary.lookup_id(*table_name_symbol).context(
                         TableIdNotFoundInDictionary {
                             table: *table_name_symbol,
@@ -401,13 +411,12 @@ impl Database for Db {
     ) -> Result<Vec<RecordBatch>, Self::Error> {
         let partitions = self.partitions.read().await;
 
-        partitions
+        let batches = partitions
             .iter()
-            .map(|p| {
-                p.table_to_arrow(table_name, columns)
-                    .context(PartitionError)
-            })
-            .collect::<Result<Vec<_>>>()
+            .map(|p| p.table_to_arrow(table_name, columns))
+            .collect::<Result<Vec<_>, crate::partition::Error>>()?;
+
+        Ok(batches)
     }
 
     async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, Self::Error> {
@@ -548,9 +557,7 @@ impl Db {
 
         for partition in partitions.iter() {
             // The id of the timestamp column is specific to each partition
-            let timestamp_predicate = partition
-                .make_timestamp_predicate(range)
-                .context(PartitionError)?;
+            let timestamp_predicate = partition.make_timestamp_predicate(range)?;
 
             let ts_pred = timestamp_predicate.as_ref();
 
@@ -569,9 +576,7 @@ impl Db {
             for table in partition.tables.values() {
                 // Apply predicates, if any, to skip processing the table entirely
                 if table.matches_id_predicate(&table_symbol)
-                    && table
-                        .matches_timestamp_predicate(ts_pred)
-                        .context(TableError)?
+                    && table.matches_timestamp_predicate(ts_pred)?
                 {
                     visitor.pre_visit_table(table, partition, ts_pred)?;
 
@@ -618,10 +623,7 @@ impl Visitor for NameVisitor {
         ts_pred: Option<&TimestampPredicate>,
     ) -> Result<()> {
         if let Column::Tag(column) = column {
-            if table
-                .column_matches_timestamp_predicate(column, ts_pred)
-                .context(TableError)?
-            {
+            if table.column_matches_timestamp_predicate(column, ts_pred)? {
                 self.partition_column_ids.insert(column_id);
             }
         }
@@ -685,11 +687,8 @@ impl Visitor for NamePredVisitor {
         partition: &Partition,
         ts_pred: Option<&TimestampPredicate>,
     ) -> Result<()> {
-        self.plans.push(
-            table
-                .tag_column_names_plan(&self.predicate, ts_pred, partition)
-                .context(TableError)?,
-        );
+        self.plans
+            .push(table.tag_column_names_plan(&self.predicate, ts_pred, partition)?);
         Ok(())
     }
 }
@@ -761,8 +760,7 @@ impl<'a> Visitor for ValueVisitor<'a> {
                     }
                     Some(pred) => {
                         // filter out all values that don't match the timestmap
-                        let time_column =
-                            table.column_i64(pred.time_column_id).context(TableError)?;
+                        let time_column = table.column_i64(pred.time_column_id)?;
 
                         column
                             .iter()
@@ -834,18 +832,16 @@ impl<'a> Visitor for ValuePredVisitor<'a> {
         ts_pred: Option<&TimestampPredicate>,
     ) -> Result<()> {
         // skip table entirely if there are no rows that fall in the timestamp
-        if !table
-            .matches_timestamp_predicate(ts_pred)
-            .context(TableError)?
-        {
+        if !table.matches_timestamp_predicate(ts_pred)? {
             return Ok(());
         }
 
-        self.plans.push(
-            table
-                .tag_values_plan(self.column_name, &self.predicate, ts_pred, partition)
-                .context(TableError)?,
-        );
+        self.plans.push(table.tag_values_plan(
+            self.column_name,
+            &self.predicate,
+            ts_pred,
+            partition,
+        )?);
         Ok(())
     }
 }
