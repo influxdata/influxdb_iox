@@ -86,8 +86,9 @@ pub enum Error {
     #[snafu(display("Partition {} is full", partition))]
     PartitionFull { partition: String },
 
-    #[snafu(display("{}", source))]
+    #[snafu(display("Error in {}: {}", source_module, source))]
     PassThrough {
+        source_module: &'static str,
         source: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
 
@@ -189,17 +190,19 @@ pub enum Error {
     GenericQueryError { message: String, query: String },
 }
 
-impl std::convert::From<crate::table::Error> for Error {
+impl From<crate::table::Error> for Error {
     fn from(e: crate::table::Error) -> Self {
         Self::PassThrough {
+            source_module: "Table",
             source: Box::new(e),
         }
     }
 }
 
-impl std::convert::From<crate::partition::Error> for Error {
+impl From<crate::partition::Error> for Error {
     fn from(e: crate::partition::Error) -> Self {
         Self::PassThrough {
+            source_module: "Partition",
             source: Box::new(e),
         }
     }
