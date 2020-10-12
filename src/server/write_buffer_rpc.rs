@@ -1545,10 +1545,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_filter() -> Result<(), tonic::Status> {
-        // Send a message to a route that causes a panic and ensure:
-        // 1. We don't use up all executors 2. The panic message
-        // message ends up in the log system
-
         // Note we use a unique port. TODO: let the OS pick the port
         let mut fixture = Fixture::new(11901)
             .await
@@ -1617,7 +1613,7 @@ mod tests {
                 },
             },
             TestCase {
-                description: "timestamp + predicate",
+                description: "Both timestamp + predicate",
                 request: ReadFilterRequest {
                     read_source: source.clone(),
                     range: make_timestamp_range(150, 200),
