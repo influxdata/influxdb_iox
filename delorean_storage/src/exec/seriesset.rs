@@ -31,7 +31,7 @@ use delorean_data_types::TIME_COLUMN_NAME;
 use snafu::{ResultExt, Snafu};
 use tokio::sync::mpsc;
 
-use croaring::bitmap::Bitmap;
+use roaring::bitmap::RoaringBitmap;
 
 #[derive(Debug, Snafu)]
 /// Opaque error type
@@ -172,18 +172,16 @@ impl SeriesSetConverter {
 
             // no tag columns, emit a single tagset
             let intersections = if tag_transitions.is_empty() {
-                let mut b = Bitmap::create_with_capacity(1);
+                let mut b = RoaringBitmap::new();
                 let end_row = batch.num_rows();
-                b.add(end_row as u32);
+                b.insert(end_row as u32);
                 b
             } else {
                 // OR bitsets together to to find all rows where the
                 // keyset (values of the tag keys) changes
                 let remaining = tag_transitions.split_off(1);
 
-                remaining
-                    .into_iter()
-                    .for_each(|b| tag_transitions[0].or_inplace(&b));
+                remaining.into_iter().for_each(|b| tag_transitions[0] |= &b);
                 // take the first item
                 tag_transitions.into_iter().next().unwrap()
             };
@@ -244,10 +242,10 @@ impl SeriesSetConverter {
     /// returns a bitset with all row indicies where the value of the
     /// batch[col_idx] changes.  Does not include row 0, always includes
     /// the last row, `batch.num_rows() - 1`
-    fn compute_transitions(batch: &RecordBatch, col_idx: usize) -> Result<Bitmap> {
+    fn compute_transitions(batch: &RecordBatch, col_idx: usize) -> Result<RoaringBitmap> {
         let num_rows = batch.num_rows();
 
-        let mut bitmap = Bitmap::create_with_capacity(num_rows as u32);
+        let mut bitmap = RoaringBitmap::new();
         if num_rows < 1 {
             return Ok(bitmap);
         }
@@ -264,7 +262,7 @@ impl SeriesSetConverter {
                 for row in 1..num_rows {
                     let next_val = col.value(row);
                     if next_val != current_val {
-                        bitmap.add(row as u32);
+                        bitmap.insert(row as u32);
                         current_val = next_val;
                     }
                 }
@@ -277,7 +275,7 @@ impl SeriesSetConverter {
         }
 
         // for now, always treat the last row as ending a series
-        bitmap.add(num_rows as u32);
+        bitmap.insert(num_rows as u32);
 
         Ok(bitmap)
     }
