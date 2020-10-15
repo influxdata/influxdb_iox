@@ -486,6 +486,9 @@ impl Table {
         // (the select exprs)
         tag_columns.sort();
 
+        // Sort the field columns too so that the output always comes out in a predictable order
+        field_columns.sort();
+
         // TODO avoid materializing all the columns here (ideally
         // DataFusion can prune them out)
         let data = self.all_to_arrow(partition)?;
@@ -899,22 +902,22 @@ mod tests {
         );
         assert_eq!(
             series_set_plan.field_columns,
-            *str_vec_to_arc_vec(&["temp", "other"])
+            *str_vec_to_arc_vec(&["other", "temp"])
         );
 
         // run the created plan, ensuring the output is as expected
         let results = run_plan(series_set_plan.plan).await;
 
         let expected = vec![
-            "+----------+-------+--------+------+-------+------+",
-            "| city     | state | zz_tag | temp | other | time |",
-            "+----------+-------+--------+------+-------+------+",
-            "| Boston   | CA    |        | 70.3 |       | 250  |",
-            "| Boston   | MA    |        | 70.5 | 5     | 250  |",
-            "| Boston   | MA    | A      | 70.4 |       | 1000 |",
-            "| Kingston | MA    | A      | 70.1 |       | 800  |",
-            "| Kingston | MA    | B      | 70.2 |       | 100  |",
-            "+----------+-------+--------+------+-------+------+",
+            "+----------+-------+--------+-------+------+------+",
+            "| city     | state | zz_tag | other | temp | time |",
+            "+----------+-------+--------+-------+------+------+",
+            "| Boston   | CA    |        |       | 70.3 | 250  |",
+            "| Boston   | MA    |        | 5     | 70.5 | 250  |",
+            "| Boston   | MA    | A      |       | 70.4 | 1000 |",
+            "| Kingston | MA    | A      |       | 70.1 | 800  |",
+            "| Kingston | MA    | B      |       | 70.2 | 100  |",
+            "+----------+-------+--------+-------+------+------+",
         ];
 
         assert_eq!(expected, results, "expected output");
