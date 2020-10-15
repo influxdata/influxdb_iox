@@ -144,9 +144,9 @@ pub struct SeriesSetPlan {
     pub field_columns: Vec<Arc<String>>,
 }
 
-/// A container for plan which produces a logical stream of time
-/// series (from across man potential tables), and can be executed to
-/// produce logical series (streams of `SeriesSet`s).
+/// A container for plans which each produces a logical stream of
+/// timeseries (from across many potential tables). A `SeriesSetPlans`
+/// and can be executed to produce streams of `SeriesSet`s.
 #[derive(Debug, Default)]
 pub struct SeriesSetPlans {
     pub plans: Vec<SeriesSetPlan>,
@@ -181,10 +181,14 @@ impl Executor {
         }
     }
 
-    /// Executes this plan, sending the resulting `SeriesSet`s one by
-    /// one via `tx`. Returns once all plans have completed sending
-    /// the results to `tx` (which may block if there is nothing
-    /// hooked up to receive it).
+    /// Executes the embedded plans, each as separate tasks, sending
+    /// the resulting `SeriesSet`s one by one to the `tx` chanel.
+    ///
+    /// Note that the returned future resolves (e.g. "returns") once
+    /// all plans have been sent to `tx`. This means that the future
+    /// will not resolve if there is nothing hooked up receiving
+    /// results from the other end of the channel and the channel
+    /// can't hold all the resulting series.
     pub async fn to_series_set(
         &self,
         series_set_plans: SeriesSetPlans,

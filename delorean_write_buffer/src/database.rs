@@ -925,11 +925,6 @@ impl Visitor for SeriesVisitor {
         partition: &Partition,
         ts_pred: Option<&TimestampPredicate>,
     ) -> Result<()> {
-        // todo: find the tag and field columns
-
-        // the query needs to look like
-        //select (tag columns..., field_columns..., where <predicate>)
-
         self.plans
             .push(table.series_set_plan(self.predicate.as_ref(), ts_pred, partition)?);
 
