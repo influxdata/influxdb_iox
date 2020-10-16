@@ -58,7 +58,7 @@ pub fn series_set_to_read_response(series_set: SeriesSet) -> Result<ReadResponse
     Ok(ReadResponse { frames })
 }
 
-fn get_data_type(array: &ArrayRef) -> Result<DataType> {
+fn data_type(array: &ArrayRef) -> Result<DataType> {
     match array.data_type() {
         ArrowDataType::Utf8 => Ok(DataType::String),
         ArrowDataType::Float64 => Ok(DataType::Float),
@@ -87,7 +87,7 @@ fn field_to_data(frames: &mut Vec<Data>, series_set: &SeriesSet, field_index: us
             schema.field(field_index).name(),
             &series_set.tags,
         ),
-        data_type: get_data_type(array)? as i32,
+        data_type: data_type(array)? as i32,
     };
     frames.push(Data::Series(series_frame));
 

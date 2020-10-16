@@ -375,7 +375,7 @@ mod tests {
         let series_set = results[0].as_ref().expect("Correctly converted");
 
         assert_eq!(*series_set.table_name, "foo");
-        assert_eq!(series_set.tags.len(), 0);
+        assert!(series_set.tags.is_empty());
         assert_eq!(series_set.timestamp_index, 4);
         assert_eq!(series_set.field_indices, Arc::new(vec![2]));
         assert_eq!(series_set.start_row, 0);
