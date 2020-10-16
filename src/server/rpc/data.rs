@@ -173,7 +173,7 @@ fn convert_tags(
 }
 
 trait ExtractValues<T> {
-    /// Extracts num_rows of  data starting from start_row as a vector
+    /// Extracts num_rows of data starting from start_row as a vector
     fn extract_values(&self, start_row: usize, num_rows: usize) -> Vec<T>;
 }
 
