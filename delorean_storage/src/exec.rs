@@ -279,7 +279,7 @@ impl Executor {
         Ok(())
     }
 
-    /// Executes the the Grouped plans and produce, sending the
+    /// Executes the the Grouped plans, sending the
     /// results one by one to the `tx` chanel.
     ///
     /// Note that the returned future resolves (e.g. "returns") once
