@@ -114,6 +114,7 @@ workflows:
       - lint
       - test
       - build
+      - ci_image
       - perf_image:
           requires: # Only do a release build if all tests have passed
             - fmt
