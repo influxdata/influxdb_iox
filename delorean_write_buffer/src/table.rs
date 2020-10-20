@@ -848,25 +848,24 @@ impl Table {
     pub fn has_all_predicate_columns(
         &self,
         predicate_table_columns: Option<&PredicateTableColumns>,
-    ) -> Result<bool> {
-        match predicate_table_columns {
-            None => Ok(true),
-            Some(predicate_column_symbols) => {
-                use PredicateTableColumns::*;
+    ) -> bool {
+        if let Some(predicate_table_columns) = predicate_table_columns {
+            use PredicateTableColumns::*;
 
-                match predicate_column_symbols {
-                    NoColumns => Ok(true),
-                    AtLeastOneMissing => Ok(false),
-                    Present(predicate_column_symbols) => {
-                        for symbol in predicate_column_symbols {
-                            if !self.column_id_to_index.contains_key(symbol) {
-                                return Ok(false);
-                            }
+            match predicate_table_columns {
+                NoColumns => true,
+                AtLeastOneMissing => false,
+                Present(predicate_column_symbols) => {
+                    for symbol in predicate_column_symbols {
+                        if !self.column_id_to_index.contains_key(symbol) {
+                            return false;
                         }
-                        Ok(true)
                     }
+                    true
                 }
             }
+        } else {
+            true
         }
     }
 
@@ -1020,36 +1019,36 @@ mod tests {
 
         write_lines_to_table(&mut table, dictionary, lp_lines);
 
-        let state_symbol = dictionary.get("state").unwrap();
+        let state_symbol = dictionary.id("state").unwrap();
         let new_symbol = dictionary.lookup_value_or_insert("not_a_columns");
 
-        assert!(table.has_all_predicate_columns(None).unwrap());
+        assert!(table.has_all_predicate_columns(None));
 
         let pred = PredicateTableColumns::NoColumns;
-        assert!(table.has_all_predicate_columns(Some(&pred)).unwrap());
+        assert!(table.has_all_predicate_columns(Some(&pred)));
 
         let pred = PredicateTableColumns::AtLeastOneMissing;
-        assert!(!table.has_all_predicate_columns(Some(&pred)).unwrap());
+        assert!(!table.has_all_predicate_columns(Some(&pred)));
 
         let set = BTreeSet::<u32>::new();
         let pred = PredicateTableColumns::Present(set);
-        assert!(table.has_all_predicate_columns(Some(&pred)).unwrap());
+        assert!(table.has_all_predicate_columns(Some(&pred)));
 
         let mut set = BTreeSet::new();
         set.insert(state_symbol);
         let pred = PredicateTableColumns::Present(set);
-        assert!(table.has_all_predicate_columns(Some(&pred)).unwrap());
+        assert!(table.has_all_predicate_columns(Some(&pred)));
 
         let mut set = BTreeSet::new();
         set.insert(new_symbol);
         let pred = PredicateTableColumns::Present(set);
-        assert!(!table.has_all_predicate_columns(Some(&pred)).unwrap());
+        assert!(!table.has_all_predicate_columns(Some(&pred)));
 
         let mut set = BTreeSet::new();
         set.insert(state_symbol);
         set.insert(new_symbol);
         let pred = PredicateTableColumns::Present(set);
-        assert!(!table.has_all_predicate_columns(Some(&pred)).unwrap());
+        assert!(!table.has_all_predicate_columns(Some(&pred)));
     }
 
     #[tokio::test(threaded_scheduler)]

@@ -729,7 +729,7 @@ impl PartitionTableFilter {
 
             let mut symbols = BTreeSet::new();
             for column_name in predicate_columns {
-                if let Some(column_id) = partition.dictionary.get(column_name) {
+                if let Some(column_id) = partition.dictionary.id(column_name) {
                     symbols.insert(column_id);
                 } else {
                     return PredicateTableColumns::AtLeastOneMissing;
@@ -746,7 +746,7 @@ impl PartitionTableFilter {
     fn should_visit_table(&mut self, table: &Table) -> Result<bool> {
         Ok(table.matches_id_predicate(&self.table_symbol)
             && table.matches_timestamp_predicate(self.ts_pred.as_ref())?
-            && table.has_all_predicate_columns(self.predicate_table_columns.as_ref())?)
+            && table.has_all_predicate_columns(self.predicate_table_columns.as_ref()))
     }
 }
 

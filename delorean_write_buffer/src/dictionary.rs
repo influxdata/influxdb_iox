@@ -41,13 +41,12 @@ impl Dictionary {
     /// Returns the ID in self.dictionary that corresponds to `value`, if any. Returns an error if
     /// no such value is found. Does not add the value to the dictionary.
     pub fn lookup_value(&self, value: &str) -> Result<u32> {
-        self.get(value)
-            .context(DictionaryValueLookupError { value })
+        self.id(value).context(DictionaryValueLookupError { value })
     }
 
     /// Returns the ID in self.dictionary that corresponds to `value`,
     /// if any. No error is returned to avoid an allocation when no value is present
-    pub fn get(&self, value: &str) -> Option<u32> {
+    pub fn id(&self, value: &str) -> Option<u32> {
         self.0.get(value).map(symbol_to_u32)
     }
 
