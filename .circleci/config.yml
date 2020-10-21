@@ -47,10 +47,6 @@ jobs:
     steps:
       - checkout
       - rust_nightly
-      - run: |
-          echo "PWD: $PWD"
-          ls -ltr
-          git status
       - run:
           name: Cargo build
           command: cargo build --workspace
