@@ -18,7 +18,6 @@ use delorean_arrow::{
 use planning::DeloreanExecutionContext;
 use schema_pivot::SchemaPivotNode;
 
-// Publically export the different types of plans
 use seriesset::{
     Error as SeriesSetError, GroupedSeriesSetConverter, GroupedSeriesSetItem, SeriesSet,
     SeriesSetConverter,
