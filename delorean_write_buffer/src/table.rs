@@ -318,7 +318,7 @@ impl Table {
     }
 
     /// Creates and adds a datafuson filtering expression, if any out of the
-    /// combination of predicate and timestamp. Returns None of no
+    /// combination of predicate and timestamp. Returns None if no
     /// predicate is needed
     fn add_datafusion_predicate(
         plan_builder: LogicalPlanBuilder,
@@ -607,7 +607,7 @@ impl Table {
     ///
     /// The output looks like (field0, field1, ..., time)
     ///
-    /// The data is not sorted in any particular irder
+    /// The data is not sorted in any particular order
     ///
     /// The created plan looks like:
     ///
