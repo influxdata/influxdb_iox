@@ -11,7 +11,7 @@ use delorean_arrow::arrow::{
 };
 use delorean_data_types::TIME_COLUMN_NAME;
 
-use snafu::{ResultExt, Snafu};
+use snafu::{ensure, ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -157,12 +157,14 @@ impl IntoFieldList for Vec<FieldList> {
 
         for new_field in field_iter {
             if let Some(existing_field) = field_map.get_mut(&new_field.name) {
-                ensure!(existing_field.data_type == new_field.data_type,  InconsistentFieldType {
-                    field_name: new_field.name,
-                    data_type1: existing_field.data_type.clone(),
-                    data_type2: new_field.data_type,
-                });
-                }
+                ensure!(
+                    existing_field.data_type == new_field.data_type,
+                    InconsistentFieldType {
+                        field_name: new_field.name,
+                        data_type1: existing_field.data_type.clone(),
+                        data_type2: new_field.data_type,
+                    }
+                );
                 existing_field.last_timestamp =
                     std::cmp::max(existing_field.last_timestamp, new_field.last_timestamp);
             }
