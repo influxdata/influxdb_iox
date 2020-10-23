@@ -157,13 +157,11 @@ impl IntoFieldList for Vec<FieldList> {
 
         for new_field in field_iter {
             if let Some(existing_field) = field_map.get_mut(&new_field.name) {
-                if existing_field.data_type != new_field.data_type {
-                    return InconsistentFieldType {
-                        field_name: new_field.name,
-                        data_type1: existing_field.data_type.clone(),
-                        data_type2: new_field.data_type,
-                    }
-                    .fail();
+                ensure!(existing_field.data_type == new_field.data_type,  InconsistentFieldType {
+                    field_name: new_field.name,
+                    data_type1: existing_field.data_type.clone(),
+                    data_type2: new_field.data_type,
+                });
                 }
                 existing_field.last_timestamp =
                     std::cmp::max(existing_field.last_timestamp, new_field.last_timestamp);
@@ -399,7 +397,7 @@ mod tests {
             last_timestamp: 5000,
         };
 
-        // use something that has a later timestamp and expect the later one takes precidence
+        // use something that has a later timestamp and expect the later one takes precedence
         let l3 = FieldList {
             fields: vec![field1_new_type],
         };

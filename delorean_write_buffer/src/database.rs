@@ -2217,7 +2217,7 @@ disk bytes=23432323i 1600136510000000000",
         let range = None;
         let predicate = make_column_eq_predicate("state", "MA"); // state=MA
 
-        // make sure table filtering work (no tables match)
+        // make sure table filtering works (no tables match)
         let plan = db
             .field_columns("NoSuchTable".into(), range, predicate.clone())
             .await
