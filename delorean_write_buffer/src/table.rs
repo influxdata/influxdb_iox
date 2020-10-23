@@ -1165,18 +1165,18 @@ mod tests {
         assert!(table.matches_id_predicate(None));
 
         let table_symbol_predicate = PredicateTableName::NoPredicate;
-        assert!(table.matches_id_predicate(Some(table_symbol_predicate).as_ref()));
+        assert!(table.matches_id_predicate(Some(&table_symbol_predicate)));
 
         let table_symbol_predicate = PredicateTableName::NoTableInPartition;
-        assert!(!table.matches_id_predicate(Some(table_symbol_predicate).as_ref()));
+        assert!(!table.matches_id_predicate(Some(&table_symbol_predicate)));
 
         let table_symbol_predicate = PredicateTableName::Present(h2o_symbol);
-        assert!(table.matches_id_predicate(Some(table_symbol_predicate).as_ref()));
+        assert!(table.matches_id_predicate(Some(&table_symbol_predicate)));
 
         // Some symbol that is not the same as h2o_symbol
         assert_ne!(37377, h2o_symbol);
         let table_symbol_predicate = PredicateTableName::Present(37377);
-        assert!(!table.matches_id_predicate(Some(table_symbol_predicate).as_ref()));
+        assert!(!table.matches_id_predicate(Some(&table_symbol_predicate)));
     }
 
     #[tokio::test]

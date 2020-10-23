@@ -413,9 +413,7 @@ impl Executor {
                 // collect them all up and combine them
                 let mut results = Vec::new();
                 for join_handle in handles.into_iter() {
-                    let fieldlist = join_handle.await.context(JoinError)??;
-
-                    let fieldlist = fieldlist?;
+                    let fieldlist = join_handle.await.context(JoinError)???;
 
                     results.push(fieldlist);
                 }

@@ -36,7 +36,7 @@ use delorean_storage::{
     org_and_bucket_to_database, Database, DatabaseStore, TimestampRange as StorageTimestampRange,
 };
 
-use snafu::{ResultExt, Snafu};
+use snafu::{ResultExt, OptionExt, Snafu};
 
 use tokio::sync::mpsc;
 use tonic::Status;
@@ -580,8 +580,8 @@ where
     let plan = db_store
         .db(&db_name)
         .await
-        .ok_or_else(|| Error::DatabaseNotFound {
-            db_name: db_name.clone(),
+        .context(DatabaseNotFound {
+            db_name: &db_name,
         })?
         .table_names(range)
         .await
@@ -623,8 +623,8 @@ where
     let db = db_store
         .db(&db_name)
         .await
-        .ok_or_else(|| Error::DatabaseNotFound {
-            db_name: db_name.clone(),
+        .context(DatabaseNotFound {
+            db_name: &db_name,
         })?;
 
     let predicate_string = format!("{:?}", predicate);
@@ -674,8 +674,8 @@ where
     let db = db_store
         .db(&db_name)
         .await
-        .ok_or_else(|| Error::DatabaseNotFound {
-            db_name: db_name.clone(),
+        .context(DatabaseNotFound {
+            db_name: &db_name,
         })?;
 
     let predicate_string = format!("{:?}", predicate);
@@ -726,8 +726,8 @@ where
     let db = db_store
         .db(&db_name)
         .await
-        .ok_or_else(|| Error::DatabaseNotFound {
-            db_name: db_name.clone(),
+        .context(DatabaseNotFound {
+            db_name: &db_name,
         })?;
 
     let predicate_string = format!("{:?}", predicate);
@@ -800,8 +800,8 @@ where
     let db = db_store
         .db(&db_name)
         .await
-        .ok_or_else(|| Error::DatabaseNotFound {
-            db_name: db_name.clone(),
+        .context(DatabaseNotFound {
+            db_name: &db_name,
         })?;
 
     let predicate_string = format!("{:?}", predicate);
@@ -874,8 +874,8 @@ where
     let db = db_store
         .db(&db_name)
         .await
-        .ok_or_else(|| Error::DatabaseNotFound {
-            db_name: db_name.clone(),
+        .context(DatabaseNotFound {
+            db_name: &db_name,
         })?;
 
     let predicate_string = format!("{:?}", predicate);

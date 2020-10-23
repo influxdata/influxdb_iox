@@ -14,7 +14,6 @@ use delorean_data_types::TIME_COLUMN_NAME;
 use snafu::{ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
-/// Opaque error type
 pub enum Error {
     #[snafu(display(
         "Internal error converting to FieldList. No time column in schema: {:?}. {}",
@@ -50,7 +49,7 @@ pub struct Field {
     pub last_timestamp: i64,
 }
 
-/// A lsit of `Fields`
+/// A list of `Fields`
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FieldList {
     pub fields: Vec<Field>,
@@ -71,13 +70,15 @@ impl IntoFieldList for Vec<RecordBatch> {
             return Ok(FieldList::default());
         }
 
-        // For each field in the schema (except time) for all rows that are non-null, update the
+        // For each field in the schema (except time) for all rows
+        // that are non-null, update the current most-recent timestamp
+        // seen
         let arrow_schema = self[0].schema();
 
         let time_column_index =
             arrow_schema
                 .index_of(TIME_COLUMN_NAME)
-                .context(InternalNoTimeColumn {
+                .with_context(|| InternalNoTimeColumn {
                     schema: arrow_schema.clone(),
                 })?;
 
@@ -140,7 +141,7 @@ impl IntoFieldList for Vec<RecordBatch> {
 /// Merge several FieldLists into a single field list, merging the
 /// entries appropriately
 // Clippy gets confused and tells me that I should be using Self
-// instead of Vec even thought the type of Vec being created is different
+// instead of Vec even though the type of Vec being created is different
 #[allow(clippy::use_self)]
 impl IntoFieldList for Vec<FieldList> {
     fn into_fieldlist(self) -> Result<FieldList> {
@@ -152,7 +153,7 @@ impl IntoFieldList for Vec<FieldList> {
         let mut field_map = BTreeMap::<String, Field>::new();
 
         // iterate over all fields
-        let field_iter = self.into_iter().map(|f| f.fields.into_iter()).flatten();
+        let field_iter = self.into_iter().flat_map(|f| f.fields.into_iter());
 
         for new_field in field_iter {
             if let Some(existing_field) = field_map.get_mut(&new_field.name) {
