@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use delorean_arrow::arrow::{
     self,
-    array::{Int64Array, PrimitiveArrayOps},
+    array::{Int64Array, PrimitiveArray},
     datatypes::{DataType, SchemaRef},
     record_batch::RecordBatch,
 };
