@@ -17,24 +17,13 @@
 
 use assert_cmd::prelude::*;
 use delorean_generated_types::{
-    //delorean_client::DeloreanClient,
     node::{Comparison, Value},
     read_group_request::Group,
     read_response::{frame::Data, *},
     storage_client::StorageClient,
-    MeasurementFieldsRequest,
-    MeasurementNamesRequest,
-    MeasurementTagKeysRequest,
-    MeasurementTagValuesRequest,
-    Node,
-    Predicate,
-    ReadFilterRequest,
-    ReadGroupRequest,
-    ReadSource,
-    Tag,
-    TagKeysRequest,
-    TagValuesRequest,
-    TimestampRange,
+    MeasurementFieldsRequest, MeasurementNamesRequest, MeasurementTagKeysRequest,
+    MeasurementTagValuesRequest, Node, Predicate, ReadFilterRequest, ReadGroupRequest, ReadSource,
+    Tag, TagKeysRequest, TagValuesRequest, TimestampRange,
 };
 use delorean_test_helpers::*;
 use futures::prelude::*;
@@ -78,7 +67,7 @@ async fn read_data_as_sql(
         .trim()
         .split('\n')
         .map(str::to_string)
-        .collect::<Vec<_>>();
+        .collect();
     Ok(lines)
 }
 
@@ -500,7 +489,7 @@ fn substitute_nanos(ns_since_epoch: i64, lines: &[&str]) -> Vec<String> {
             }
             line
         })
-        .collect::<Vec<_>>()
+        .collect()
 }
 
 struct TestServer {
@@ -603,7 +592,7 @@ impl Drop for TestServer {
 }
 
 fn dump_data_frames(frames: &[Data]) -> Vec<String> {
-    frames.iter().map(|f| dump_data(f)).collect::<Vec<_>>()
+    frames.iter().map(|f| dump_data(f)).collect()
 }
 
 fn dump_data(data: &Data) -> String {
