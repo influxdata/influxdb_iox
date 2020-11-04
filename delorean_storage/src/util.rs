@@ -13,7 +13,8 @@ pub trait ExpressionVisitor {
     /// Invoked before children of expr are visisted
     fn pre_visit(&mut self, expr: &Expr);
 
-    /// Invoked after children of expr are visited
+    /// Invoked after children of expr are visited. Default
+    /// implementation does nothing.
     fn post_visit(&mut self, _expr: &Expr) {}
 }
 
@@ -144,9 +145,9 @@ fn dump_plan_impl(prefix: &str, p: &LogicalPlan, buf: &mut impl Write) {
     }
 }
 
-#[derive(Debug, Default)]
 /// Creates a single expression representing the conjunction (aka
-/// AND'ing) together of a set of predicates
+/// AND'ing) together of a set of expressions
+#[derive(Debug, Default)]
 pub struct AndExprBuilder {
     cur_expr: Option<Expr>,
 }
