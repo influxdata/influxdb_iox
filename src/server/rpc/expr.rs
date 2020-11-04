@@ -116,15 +116,19 @@ impl AddRPCNode for PredicateBuilder {
         match rpc_predicate {
             // no input predicate, is fine
             None => Ok(self),
-            Some(None) => EmptyPredicateNode {}.fail(),
-            Some(Some(node)) => {
-                // normalize so the rest of the passes can deal with fewer cases
-                let node = normalize_node(node)?;
+            Some(rpc_predicate) => {
+                match rpc_predicate.root {
+                    None => EmptyPredicateNode {}.fail(),
+                    Some(node) => {
+                        // normalize so the rest of the passes can deal with fewer cases
+                        let node = normalize_node(node)?;
 
-                // step one is to flatten any AND tree into a vector of conjucts
-                let conjuncts = flatten_ands(node, Vec::new())?;
-                conjuncts.into_iter().try_fold(self, convert_simple_node)
-            },
+                        // step one is to flatten any AND tree into a vector of conjucts
+                        let conjuncts = flatten_ands(node, Vec::new())?;
+                        conjuncts.into_iter().try_fold(self, convert_simple_node)
+                    }
+                }
+            }
         }
     }
 }
@@ -728,7 +732,7 @@ mod tests {
 
         let res = PredicateBuilder::default().rpc_predicate(Some(rpc_predicate));
 
-        let expected_error = "Internal error: found field tag reference in expected location";
+        let expected_error = "Internal error: found field tag reference in unexpected location";
         let actual_error = error_result_to_string(res);
         assert!(
             actual_error.contains(expected_error),
