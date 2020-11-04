@@ -13,8 +13,6 @@ use delorean_storage::predicate::PredicateBuilder;
 use delorean_storage::Predicate as StoragePredicate;
 use snafu::{ResultExt, Snafu};
 
-use tracing::info;
-
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Error creating predicate: Unexpected empty predicate: Node"))]
@@ -180,10 +178,6 @@ fn convert_simple_node(builder: PredicateBuilder, node: RPCNode) -> Result<Predi
 
         // look for tag or measurement = <values>
         if let Some(RPCValue::TagRefValue(tag_name)) = lhs.value {
-            info!(
-                "AAL found an inlist with tag_name {:?} on the lhs",
-                tag_name
-            );
             if tag_name.is_measurement() {
                 // add the table names as a predicate
                 return Ok(builder.tables(value_list));
