@@ -124,14 +124,6 @@ impl AddRPCNode for PredicateBuilder {
 
                     // step one is to flatten any AND tree into a vector of conjucts
                     let conjuncts = flatten_ands(node, Vec::new())?;
-
-                    info!(
-                        "Converting {} RPCNodes::\n{:#?}",
-                        conjuncts.len(),
-                        conjuncts
-                    );
-
-                    // now build up the predicates, one at a time
                     conjuncts.into_iter().try_fold(self, convert_simple_node)
                 }
             },
@@ -189,8 +181,6 @@ fn normalize_node(node: RPCNode) -> Result<RPCNode> {
 /// patterns are matched, it falls back to a generic DataFusion Expr
 fn convert_simple_node(builder: PredicateBuilder, node: RPCNode) -> Result<PredicateBuilder> {
     if let Some(in_list) = InList::try_from_node(&node) {
-        info!("AAL found an inlist: {:?}", in_list);
-
         let InList { lhs, value_list } = in_list;
 
         // look for tag or measurement = <values>
@@ -200,27 +190,16 @@ fn convert_simple_node(builder: PredicateBuilder, node: RPCNode) -> Result<Predi
                 tag_name
             );
             if tag_name.is_measurement() {
-                println!(
-                    "AAL tag_key was measurement, adding names {:?} as table name filter",
-                    value_list
-                );
                 // add the table names as a predicate
                 return Ok(builder.tables(value_list));
             } else if tag_name.is_field() {
-                println!(
-                    "AAL tag_key was field, adding names {:?} as field name filter",
-                    value_list
-                );
                 return Ok(builder.field_columns(value_list));
             }
         }
-    } else {
-        println!("No inlist found for {:?}", node);
     }
 
     // If no special case applies, fall back to generic conversion
     let expr = convert_node_to_expr(node)?;
-    //println!("converted node to expr: {}", dump_expr(&expr));
 
     Ok(builder.add_expr(expr))
 }
@@ -283,8 +262,6 @@ impl InListBuilder {
     fn append(self, node: &RPCNode) -> Option<Self> {
         // lhs = rhs
         if Some(RPCValue::Comparison(RPCComparison::Equal as i32)) == node.value {
-            //println!("append Found Equal: {:?} ", node);
-
             assert_eq!(node.children.len(), 2);
             let lhs = &node.children[0];
             let rhs = &node.children[1];
@@ -300,7 +277,6 @@ impl InListBuilder {
             // recurse down both sides
             self.append(lhs).and_then(|s| s.append(rhs))
         } else {
-            //println!("append: not Equal or OR: {:#?} ", node);
             None
         }
     }
@@ -482,6 +458,8 @@ fn build_binary_expr(op: Operator, inputs: Vec<Expr>) -> Result<Expr> {
 #[cfg(test)]
 mod tests {
 
+    use std::collections::BTreeSet;
+
     use super::*;
 
     #[test]
@@ -511,20 +489,8 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_predicate_good() -> Result<()> {
-        // host > 5.0
-        let field_ref = RPCNode {
-            children: vec![],
-            value: Some(RPCValue::FieldRefValue(String::from("host"))),
-        };
-        let iconst = RPCNode {
-            children: vec![],
-            value: Some(RPCValue::FloatValue(5.0)),
-        };
-        let comparison = RPCNode {
-            children: vec![field_ref, iconst],
-            value: Some(RPCValue::Comparison(RPCComparison::Gt as i32)),
-        };
+    fn test_convert_predicate_good() {
+        let (comparison, expected_expr) = make_host_comparison();
 
         let rpc_predicate = RPCPredicate {
             root: Some(comparison),
@@ -538,12 +504,6 @@ mod tests {
         assert_eq!(predicate.exprs.len(), 1);
         let converted_expr = &predicate.exprs[0];
 
-        let expected_expr = Expr::BinaryExpr {
-            left: Box::new(Expr::Column(String::from("host"))),
-            op: Operator::Gt,
-            right: Box::new(Expr::Literal(ScalarValue::Float64(Some(5.0)))),
-        };
-
         // compare the expression using their string representations
         // as Expr can't be compared directly.
         let converted_expr = format!("{:?}", converted_expr);
@@ -554,12 +514,10 @@ mod tests {
             "expected '{:#?}' doesn't match actual '{:#?}'",
             expected_expr, converted_expr
         );
-
-        Ok(())
     }
 
     #[test]
-    fn test_convert_predicate_no_children() -> Result<()> {
+    fn test_convert_predicate_no_children() {
         let comparison = RPCNode {
             children: vec![],
             value: Some(RPCValue::Comparison(RPCComparison::Gt as i32)),
@@ -579,11 +537,10 @@ mod tests {
             expected_error,
             actual_error
         );
-        Ok(())
     }
 
     #[test]
-    fn test_convert_predicate_comparison_bad_values() -> Result<()> {
+    fn test_convert_predicate_comparison_bad_values() {
         // Send in invalid input to simulate a bad actor
         let iconst = RPCNode {
             children: vec![],
@@ -609,11 +566,10 @@ mod tests {
             expected_error,
             actual_error
         );
-        Ok(())
     }
 
     #[test]
-    fn test_convert_predicate_logical_bad_values() -> Result<()> {
+    fn test_convert_predicate_logical_bad_values() {
         // Send in invalid input to simulate a bad actor
         let iconst = RPCNode {
             children: vec![],
@@ -639,7 +595,226 @@ mod tests {
             expected_error,
             actual_error
         );
-        Ok(())
+    }
+
+    #[test]
+    fn test_convert_predicate_field_selection() {
+        let field_selection = make_field_ref_node("field1");
+
+        let rpc_predicate = RPCPredicate {
+            root: Some(field_selection),
+        };
+
+        let predicate = PredicateBuilder::default()
+            .rpc_predicate(Some(rpc_predicate))
+            .unwrap()
+            .build();
+
+        assert!(predicate.exprs.is_empty());
+        assert!(predicate.table_names.is_none());
+        assert_eq!(predicate.field_columns, Some(to_set(&["field1"])));
+        assert!(predicate.range.is_none());
+    }
+
+    #[test]
+    fn test_convert_predicate_field_selection_wrapped() {
+        // test wrapping the whole predicate in a None value (aka what influxql does for some reason
+        let field_selection = make_field_ref_node("field1");
+        let wrapped = RPCNode {
+            children: vec![field_selection],
+            value: None,
+        };
+
+        let rpc_predicate = RPCPredicate {
+            root: Some(wrapped),
+        };
+
+        let predicate = PredicateBuilder::default()
+            .rpc_predicate(Some(rpc_predicate))
+            .unwrap()
+            .build();
+
+        assert!(predicate.exprs.is_empty());
+        assert!(predicate.table_names.is_none());
+        assert_eq!(predicate.field_columns, Some(to_set(&["field1"])));
+        assert!(predicate.range.is_none());
+    }
+
+    #[test]
+    fn test_convert_predicate_multiple_field_selection() {
+        let selection = make_or_node(make_field_ref_node("field1"), make_field_ref_node("field2"));
+        let selection = make_or_node(selection, make_field_ref_node("field3"));
+
+        let rpc_predicate = RPCPredicate {
+            root: Some(selection),
+        };
+
+        let predicate = PredicateBuilder::default()
+            .rpc_predicate(Some(rpc_predicate))
+            .unwrap()
+            .build();
+
+        assert!(predicate.exprs.is_empty());
+        assert!(predicate.table_names.is_none());
+        assert_eq!(
+            predicate.field_columns,
+            Some(to_set(&["field1", "field2", "field3"]))
+        );
+        assert!(predicate.range.is_none());
+    }
+
+    // test multiple field restrictions and a general predicate
+    #[test]
+    fn test_convert_predicate_multiple_field_selection_and_predicate() {
+        let (comparison, expected_expr) = make_host_comparison();
+
+        let selection = make_or_node(make_field_ref_node("field1"), make_field_ref_node("field2"));
+
+        let selection = make_and_node(selection, comparison);
+
+        let rpc_predicate = RPCPredicate {
+            root: Some(selection),
+        };
+
+        let predicate = PredicateBuilder::default()
+            .rpc_predicate(Some(rpc_predicate))
+            .unwrap()
+            .build();
+
+        // compare the expression using their string representations
+        // as Expr can't be compared directly.
+        assert_eq!(predicate.exprs.len(), 1);
+        let converted_expr = format!("{:?}", predicate.exprs[0]);
+        let expected_expr = format!("{:?}", expected_expr);
+
+        assert_eq!(
+            expected_expr, converted_expr,
+            "expected '{:#?}' doesn't match actual '{:#?}'",
+            expected_expr, converted_expr
+        );
+        assert!(predicate.table_names.is_none());
+
+        assert_eq!(predicate.field_columns, Some(to_set(&["field1", "field2"])));
+        assert!(predicate.range.is_none());
+    }
+
+    #[test]
+    fn test_convert_predicate_measurement_selection() {
+        let measurement_selection = make_measurement_ref_node("m1");
+
+        let rpc_predicate = RPCPredicate {
+            root: Some(measurement_selection),
+        };
+
+        let predicate = PredicateBuilder::default()
+            .rpc_predicate(Some(rpc_predicate))
+            .unwrap()
+            .build();
+
+        assert!(predicate.exprs.is_empty());
+        assert_eq!(predicate.table_names, Some(to_set(&["m1"])));
+        assert!(predicate.field_columns.is_none());
+        assert!(predicate.range.is_none());
+    }
+
+    #[test]
+    fn test_convert_predicate_unsupported_structure() {
+        // Test (_f = "foo" and host > 5.0) OR (_m = "bar")
+        // which is not something we know how to do
+
+        let (comparison, _) = make_host_comparison();
+
+        let unsupported = make_or_node(
+            make_and_node(make_field_ref_node("foo"), comparison),
+            make_measurement_ref_node("bar"),
+        );
+
+        let rpc_predicate = RPCPredicate {
+            root: Some(unsupported),
+        };
+
+        let res = PredicateBuilder::default().rpc_predicate(Some(rpc_predicate));
+
+        let expected_error = "Internal error: found field tag reference in expected location";
+        let actual_error = error_result_to_string(res);
+        assert!(
+            actual_error.contains(expected_error),
+            "expected '{}' not found in '{}'",
+            expected_error,
+            actual_error
+        );
+    }
+
+    /// make a _f = 'field_name' type node
+    fn make_field_ref_node(field_name: impl Into<String>) -> RPCNode {
+        make_tag_ref_node(&[255], field_name)
+    }
+
+    /// make a _m = 'measurement_name' type node
+    fn make_measurement_ref_node(field_name: impl Into<String>) -> RPCNode {
+        make_tag_ref_node(&[0], field_name)
+    }
+
+    /// returns (RPCNode, and expected_expr for the "host > 5.0")
+    fn make_host_comparison() -> (RPCNode, Expr) {
+        // host > 5.0
+        let field_ref = RPCNode {
+            children: vec![],
+            value: Some(RPCValue::FieldRefValue(String::from("host"))),
+        };
+        let iconst = RPCNode {
+            children: vec![],
+            value: Some(RPCValue::FloatValue(5.0)),
+        };
+        let comparison = RPCNode {
+            children: vec![field_ref, iconst],
+            value: Some(RPCValue::Comparison(RPCComparison::Gt as i32)),
+        };
+
+        let expected_expr = Expr::BinaryExpr {
+            left: Box::new(Expr::Column(String::from("host"))),
+            op: Operator::Gt,
+            right: Box::new(Expr::Literal(ScalarValue::Float64(Some(5.0)))),
+        };
+
+        (comparison, expected_expr)
+    }
+
+    fn make_tag_ref_node(tag_name: &[u8], field_name: impl Into<String>) -> RPCNode {
+        let field_tag_ref_node = RPCNode {
+            children: vec![],
+            value: Some(RPCValue::TagRefValue(tag_name.to_vec())),
+        };
+
+        let string_node = RPCNode {
+            children: vec![],
+            value: Some(RPCValue::StringValue(field_name.into())),
+        };
+
+        RPCNode {
+            children: vec![field_tag_ref_node, string_node],
+            value: Some(RPCValue::Comparison(RPCComparison::Equal as i32)),
+        }
+    }
+
+    /// make n1 OR n2
+    fn make_or_node(n1: RPCNode, n2: RPCNode) -> RPCNode {
+        RPCNode {
+            children: vec![n1, n2],
+            value: Some(RPCValue::Logical(RPCLogical::Or as i32)),
+        }
+    }
+
+    /// make n1 AND n2
+    fn make_and_node(n1: RPCNode, n2: RPCNode) -> RPCNode {
+        RPCNode {
+            children: vec![n1, n2],
+            value: Some(RPCValue::Logical(RPCLogical::And as i32)),
+        }
+    }
+
+    fn to_set(v: &[&str]) -> BTreeSet<String> {
+        v.iter().map(|s| s.to_string()).collect::<BTreeSet<_>>()
     }
 
     /// Return the dislay formay of the resulting error, or

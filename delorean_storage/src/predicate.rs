@@ -33,26 +33,32 @@ impl TimestampRange {
     }
 }
 
-/// Represents a general purpose predicate for evaluation in the
-/// Delorean storage system. Certain parts of the predicate are
-/// special cased
+/// Represents a parsed predicate for evaluation by the
+/// Delorean storage system.
+///
+/// Note that the input data model (e.g. ParsedLine's) distinguishes
+/// between some types of columns (tags and fields), and likewise
+/// this structure has some types of restrictions that only apply to
+/// certain types of columns.
 #[derive(Clone, Debug, Default)]
 pub struct Predicate {
-    /// Optional filter. If present, restrict the request to just
-    /// those tables whose names are in table_names
+    /// Optional filter. If present, restrict the results to only
+    /// those tables whose names are in `table_names`
     pub table_names: Option<BTreeSet<String>>,
 
     // Optional field column selection. If present, further restrict any
     // field columns returned to only those named
     pub field_columns: Option<BTreeSet<String>>,
 
-    /// General DataFusion expressions (arbitrary predicates) applied
-    /// as a filter using logical conjuction (aka are 'AND'ed
-    /// together). Only rows that evaluate to TRUE for all these
-    /// expressions should be returned.
+    /// Optional arbitrary predicates, represented as list of
+    /// DataFusion expressions applied a logical conjuction (aka they
+    /// are 'AND'ed together). Only rows that evaluate to TRUE for all
+    /// these expressions should be returned. Other rows are excluded
+    /// from the results.
     pub exprs: Vec<Expr>,
 
-    /// Timestamp range: only rows within this range should be considered
+    /// Optional timestamp range: only rows within this range are included in
+    /// results. Other rows are excluded
     pub range: Option<TimestampRange>,
 }
 
@@ -72,25 +78,10 @@ impl Predicate {
             })
             .build()
     }
-
-    /// adds an additional filter such that all rows must be in one of the table names specified
-    pub fn add_filter_table_names(&mut self, table_name_filter: Vec<String>) {
-        self.table_names = match self.table_names.take() {
-            None => Some(table_name_filter.into_iter().collect::<BTreeSet<_>>()),
-            Some(table_names) => {
-                // already had table names, so only keep tables that match all predicates
-                let intersection = table_name_filter
-                    .into_iter()
-                    .filter(|t| table_names.contains(t))
-                    .collect::<BTreeSet<_>>();
-
-                Some(intersection)
-            }
-        };
-    }
 }
 
 #[derive(Debug, Default)]
+/// Structure for building `Predicate`s
 pub struct PredicateBuilder {
     inner: Predicate,
 }
