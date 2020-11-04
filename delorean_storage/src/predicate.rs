@@ -6,7 +6,7 @@ use crate::util::AndExprBuilder;
 
 /// Specifies a continuous range of nanosecond timestamps. Timestamp
 /// predicates are so common and critical to performance of timeseries
-/// databases in general, and delorean in particular, they handled specially
+/// databases in general, and delorean in particular, that they are handled specially
 #[derive(Clone, PartialEq, Copy, Debug)]
 pub struct TimestampRange {
     /// Start defines the inclusive lower bound.
