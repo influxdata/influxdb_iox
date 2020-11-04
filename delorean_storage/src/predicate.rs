@@ -86,11 +86,13 @@ pub struct PredicateBuilder {
     inner: Predicate,
 }
 
-impl PredicateBuilder {
-    pub fn from_predicate(predicate: Predicate) -> Self {
-        Self { inner: predicate }
+impl From<Predicate> for PredicateBuilder {
+    fn from(inner: Predicate) -> Self {
+        Self { inner }
     }
+}
 
+impl PredicateBuilder {
     /// Sets the timestamp range
     pub fn timestamp_range(mut self, start: i64, end: i64) -> Self {
         self.inner.range = Some(TimestampRange { start, end });
