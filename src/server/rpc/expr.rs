@@ -23,10 +23,10 @@ pub enum Error {
     #[snafu(display("Error creating predicate: Unexpected empty predicate: Value"))]
     EmptyPredicateValue {},
 
-    #[snafu(display("Internal error: found measurement tag reference in expected location"))]
+    #[snafu(display("Internal error: found measurement tag reference in unexpected location"))]
     InternalInvalidMeasurementReference {},
 
-    #[snafu(display("Internal error: found field tag reference in expected location"))]
+    #[snafu(display("Internal error: found field tag reference in unexpected location"))]
     InternalInvalidFieldReference {},
 
     #[snafu(display(
@@ -89,12 +89,12 @@ pub fn convert_predicate(predicate: Option<RPCPredicate>) -> Result<Option<Stora
         .map(|expr| StoragePredicate { expr }))
 }
 
-/// A traint for adding gRPC specific nodes to the generic predicate builder
+/// A trait for adding gRPC specific nodes to the generic predicate builder
 pub trait AddRPCNode
 where
     Self: Sized,
 {
-    fn rpc_predicate(self: Self, predicate: Option<RPCPredicate>) -> Result<Self>;
+    fn rpc_predicate(self, predicate: Option<RPCPredicate>) -> Result<Self>;
 }
 
 impl AddRPCNode for PredicateBuilder {
@@ -116,16 +116,14 @@ impl AddRPCNode for PredicateBuilder {
         match rpc_predicate {
             // no input predicate, is fine
             None => Ok(self),
-            Some(predicate) => match predicate.root {
-                None => EmptyPredicateNode {}.fail(),
-                Some(node) => {
-                    // normalize so the rest of the passes can deal with fewer cases
-                    let node = normalize_node(node)?;
+            Some(None) => EmptyPredicateNode {}.fail(),
+            Some(Some(node)) => {
+                // normalize so the rest of the passes can deal with fewer cases
+                let node = normalize_node(node)?;
 
-                    // step one is to flatten any AND tree into a vector of conjucts
-                    let conjuncts = flatten_ands(node, Vec::new())?;
-                    conjuncts.into_iter().try_fold(self, convert_simple_node)
-                }
+                // step one is to flatten any AND tree into a vector of conjucts
+                let conjuncts = flatten_ands(node, Vec::new())?;
+                conjuncts.into_iter().try_fold(self, convert_simple_node)
             },
         }
     }
@@ -134,16 +132,21 @@ impl AddRPCNode for PredicateBuilder {
 /// cleans up / normalizes the input in preparation for other
 /// processing. Noramlizations performed:
 ///
-/// 1. Flatten 'None' value nodes with 1 children (semantially the
+/// 1. Flatten `None` value nodes with `children` of length 1 (semantically the
 /// same as the child itself). Specifically, if the input is:
 ///
+/// ```
 /// Node {
 ///  value: None,
 ///  children: [child],
 /// }
+/// ```
 ///
 /// Then the output is:
+///
+/// ```
 /// child
+/// ```
 ///
 fn normalize_node(node: RPCNode) -> Result<RPCNode> {
     let RPCNode { children, value } = node;
@@ -174,10 +177,10 @@ fn normalize_node(node: RPCNode) -> Result<RPCNode> {
     }
 }
 
-/// Converts the node and appends updates the  StoragePredicate being build, as appropriate
+/// Converts the node and updates the `StoragePredicate` being built, as appropriate
 ///
 /// It recognizes special predicate patterns and pulls them into
-/// the fields on StoragePredicate for special processing. If no
+/// the fields on `StoragePredicate` for special processing. If no
 /// patterns are matched, it falls back to a generic DataFusion Expr
 fn convert_simple_node(builder: PredicateBuilder, node: RPCNode) -> Result<PredicateBuilder> {
     if let Some(in_list) = InList::try_from_node(&node) {
