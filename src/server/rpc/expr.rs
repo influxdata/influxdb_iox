@@ -1,6 +1,8 @@
 //! This module has logic to translate gRPC `Predicate` nodes into
 //! delorean_storage_interface::Predicates
 
+use std::convert::TryFrom;
+
 use delorean_arrow::datafusion::{
     logical_plan::{Expr, Operator},
     scalar::ScalarValue,
@@ -173,7 +175,7 @@ fn normalize_node(node: RPCNode) -> Result<RPCNode> {
 /// the fields on StoragePredicate for special processing. If no
 /// patterns are matched, it falls back to a generic DataFusion Expr
 fn convert_simple_node(builder: PredicateBuilder, node: RPCNode) -> Result<PredicateBuilder> {
-    if let Some(in_list) = InList::try_from_node(&node) {
+    if let Ok(in_list) = InList::try_from(&node) {
         let InList { lhs, value_list } = in_list;
 
         // look for tag or measurement = <values>
@@ -219,15 +221,17 @@ struct InList {
     value_list: Vec<String>,
 }
 
-impl InList {
+impl TryFrom<&RPCNode> for InList {
+    type Error = &'static str;
+
     /// If node represents an OR tree like (expr = option1) OR (expr=option2)... extracts
     /// an InList like expr IN (option1, option2)
-    fn try_from_node(node: &RPCNode) -> Option<Self> {
-        InListBuilder::default()
-            .append(node)
-            .and_then(|builder| builder.build())
+    fn try_from(node: &RPCNode) -> Result<Self, &'static str> {
+        InListBuilder::default().append(node)?.build()
     }
+}
 
+impl InList {
     fn new(lhs: RPCNode) -> Self {
         Self {
             lhs,
@@ -248,7 +252,7 @@ impl InListBuilder {
     ///
     /// For example, if we are at self OR (foo = 'bar') and self.lhs
     /// is foo, will add 'bar' to value_list
-    fn append(self, node: &RPCNode) -> Option<Self> {
+    fn append(self, node: &RPCNode) -> Result<Self, &'static str> {
         // lhs = rhs
         if Some(RPCValue::Comparison(RPCComparison::Equal as i32)) == node.value {
             assert_eq!(node.children.len(), 2);
@@ -266,12 +270,12 @@ impl InListBuilder {
             // recurse down both sides
             self.append(lhs).and_then(|s| s.append(rhs))
         } else {
-            None
+            Err("Found something other than equal or OR")
         }
     }
 
     // append lhs = rhs expression, if possible, return None if not
-    fn append_equal(mut self, lhs: &RPCNode, rhs: &RPCNode) -> Option<Self> {
+    fn append_equal(mut self, lhs: &RPCNode, rhs: &RPCNode) -> Result<Self, &'static str> {
         let mut in_list = self
             .inner
             .take()
@@ -282,21 +286,18 @@ impl InListBuilder {
             if &in_list.lhs == lhs {
                 in_list.value_list.push(string_value.clone());
                 self.inner = Some(in_list);
-                Some(self)
+                Ok(self)
             } else {
-                // lhs didn't match
-                None
+                Err("lhs did not match")
             }
-        }
-        // rhs wasn't a string
-        else {
-            None
+        } else {
+            Err("rhs wasn't a string")
         }
     }
 
     // consume self and return the built InList
-    fn build(self) -> Option<InList> {
-        self.inner
+    fn build(self) -> Result<InList, &'static str> {
+        self.inner.ok_or("No sub expressions found")
     }
 }
 
