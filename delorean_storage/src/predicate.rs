@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 
 use delorean_arrow::datafusion::logical_plan::Expr;
 
+use crate::util::AndExprBuilder;
+
 /// Specifies a continuous range of nanosecond timestamps. Timestamp
 /// predicates are so common and critical to performance of timeseries
 /// databases in general, and delorean in particular, they handled specially
@@ -40,7 +42,7 @@ pub struct Predicate {
     /// those tables whose names are in table_names
     pub table_names: Option<BTreeSet<String>>,
 
-    // Optional column selection. If present, further restrict any
+    // Optional field column selection. If present, further restrict any
     // field columns returned to only those named
     pub field_columns: Option<BTreeSet<String>>,
 
@@ -52,6 +54,40 @@ pub struct Predicate {
 
     /// Timestamp range: only rows within this range should be considered
     pub range: Option<TimestampRange>,
+}
+
+impl Predicate {
+    /// Return true if this predicate has any general purpose predicates
+    pub fn has_exprs(&self) -> bool {
+        !self.exprs.is_empty()
+    }
+
+    /// TEMP: return a single Expr that represents all the
+    /// general purpose predicates AND'd together.
+    pub fn combined_expr(&self) -> Option<Expr> {
+        self.exprs
+            .iter()
+            .fold(AndExprBuilder::default(), |builder, expr| {
+                builder.append_expr(expr.clone())
+            })
+            .build()
+    }
+
+    /// adds an additional filter such that all rows must be in one of the table names specified
+    pub fn add_filter_table_names(&mut self, table_name_filter: Vec<String>) {
+        self.table_names = match self.table_names.take() {
+            None => Some(table_name_filter.into_iter().collect::<BTreeSet<_>>()),
+            Some(table_names) => {
+                // already had table names, so only keep tables that match all predicates
+                let intersection = table_name_filter
+                    .into_iter()
+                    .filter(|t| table_names.contains(t))
+                    .collect::<BTreeSet<_>>();
+
+                Some(intersection)
+            }
+        };
+    }
 }
 
 #[derive(Debug, Default)]
@@ -106,7 +142,6 @@ impl PredicateBuilder {
         );
 
         let table_names = tables.into_iter().collect::<BTreeSet<_>>();
-        println!("AAL new table_names: {:?}", table_names);
         self.inner.table_names = Some(table_names);
         self
     }
@@ -121,7 +156,6 @@ impl PredicateBuilder {
         );
 
         let column_names = columns.into_iter().collect::<BTreeSet<_>>();
-        println!("AAL new column_names: {:?}", column_names);
         self.inner.field_columns = Some(column_names);
         self
     }
@@ -129,28 +163,5 @@ impl PredicateBuilder {
     /// Create a predicate, consuming this builder
     pub fn build(self) -> Predicate {
         self.inner
-    }
-}
-
-impl Predicate {
-    /// Return true if this predicate has any general purpose predicates
-    pub fn has_exprs(&self) -> bool {
-        !self.exprs.is_empty()
-    }
-
-    /// adds an additional filter such that all rows must be in one of the table names specified
-    pub fn add_filter_table_names(&mut self, table_name_filter: Vec<String>) {
-        self.table_names = match self.table_names.take() {
-            None => Some(table_name_filter.into_iter().collect::<BTreeSet<_>>()),
-            Some(table_names) => {
-                // already had table names, so only keep tables that match all predicates
-                let intersection = table_name_filter
-                    .into_iter()
-                    .filter(|t| table_names.contains(t))
-                    .collect::<BTreeSet<_>>();
-
-                Some(intersection)
-            }
-        };
     }
 }
