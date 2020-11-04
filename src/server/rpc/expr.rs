@@ -148,23 +148,18 @@ impl AddRPCNode for PredicateBuilder {
 fn normalize_node(node: RPCNode) -> Result<RPCNode> {
     let RPCNode { children, value } = node;
 
-    let normalized_children = children
+    let mut normalized_children = children
         .into_iter()
         .map(normalize_node)
         .collect::<Result<Vec<_>>>()?;
 
-    match value {
-        None => {
-            // Sometimes InfluxQL sends in a RPCNode with 1 child and no value
-            // which seems some sort of wrapper -- unwrap this case
-            if normalized_children.len() == 1 {
-                Ok(normalized_children.into_iter().next().unwrap())
-            } else {
-                // It is not clear what None means without exactly one child..
-                EmptyPredicateValue {}.fail()
-            }
-        }
-        Some(value) => {
+    match (value, normalized_children.len()) {
+        // Sometimes InfluxQL sends in a RPCNode with 1 child and no value
+        // which seems some sort of wrapper -- unwrap this case
+        (None, 1) => Ok(normalized_children.pop().unwrap()),
+        // It is not clear what None means without exactly one child..
+        (None, _) => EmptyPredicateValue {}.fail(),
+        (Some(value), _) => {
             // performance any other normalizations needed
             Ok(RPCNode {
                 children: normalized_children,
