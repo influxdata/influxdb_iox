@@ -9,7 +9,7 @@ use delorean_arrow::arrow::{
     datatypes::{DataType, SchemaRef},
     record_batch::RecordBatch,
 };
-use delorean_data_types::TIME_COLUMN_NAME;
+use data_types::TIME_COLUMN_NAME;
 
 use snafu::{ensure, ResultExt, Snafu};
 

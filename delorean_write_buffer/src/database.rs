@@ -32,7 +32,7 @@ use delorean_arrow::{
         datasource::MemTable, error::DataFusionError, execution::context::ExecutionContext,
     },
 };
-use delorean_data_types::data::{split_lines_into_write_entry_partitions, ReplicatedWrite};
+use data_types::data::{split_lines_into_write_entry_partitions, ReplicatedWrite};
 
 use crate::dictionary::Error as DictionaryError;
 use crate::partition::restore_partitions_from_wal;

@@ -26,7 +26,7 @@ use delorean_arrow::{
     arrow::{self},
     datafusion::physical_plan::SendableRecordBatchStream,
 };
-use delorean_data_types::TIME_COLUMN_NAME;
+use data_types::TIME_COLUMN_NAME;
 use snafu::{ResultExt, Snafu};
 use tokio::stream::StreamExt;
 use tokio::sync::mpsc::{self, error::SendError};
