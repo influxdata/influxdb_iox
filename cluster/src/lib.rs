@@ -76,7 +76,7 @@ use data_types::{
     data::{lines_to_replicated_write, ReplicatedWrite},
     database_rules::{DatabaseRules, HostGroup, HostGroupId, MatchTables},
 };
-use delorean_line_parser::ParsedLine;
+use influxdb_line_protocol::ParsedLine;
 use object_store::ObjectStore;
 use storage::Database;
 use write_buffer::Db as WriteBufferDb;
@@ -405,8 +405,8 @@ mod tests {
     use arrow_deps::arrow::{csv, util::string_writer::StringWriter};
     use async_trait::async_trait;
     use data_types::database_rules::{MatchTables, Matcher, Subscription};
-    use delorean_line_parser::parse_lines;
     use futures::TryStreamExt;
+    use influxdb_line_protocol::parse_lines;
     use object_store::{InMemory, ObjectStoreIntegration};
     use snafu::Snafu;
     use std::sync::Mutex;

@@ -18,7 +18,7 @@ use http::header::CONTENT_ENCODING;
 use tracing::{debug, error, info};
 
 use arrow_deps::arrow;
-use delorean_line_parser::parse_lines;
+use influxdb_line_protocol::parse_lines;
 use storage::{org_and_bucket_to_database, Database, DatabaseStore};
 
 use bytes::{Bytes, BytesMut};
@@ -109,7 +109,9 @@ pub enum ApplicationError {
     ReadingBodyAsUtf8 { source: std::str::Utf8Error },
 
     #[snafu(display("Error parsing line protocol: {}", source))]
-    ParsingLineProtocol { source: delorean_line_parser::Error },
+    ParsingLineProtocol {
+        source: influxdb_line_protocol::Error,
+    },
 
     #[snafu(display("Error decompressing body as gzip: {}", source))]
     ReadingBodyAsGzip { source: std::io::Error },
@@ -233,7 +235,7 @@ async fn write<T: DatabaseStore>(
     let body = str::from_utf8(&body).context(ReadingBodyAsUtf8)?;
 
     let lines = parse_lines(body)
-        .collect::<Result<Vec<_>, delorean_line_parser::Error>>()
+        .collect::<Result<Vec<_>, influxdb_line_protocol::Error>>()
         .context(ParsingLineProtocol)?;
 
     debug!(

@@ -109,10 +109,10 @@ impl nom::error::ParseError<&str> for Error {
 /// into a `ParsedLine`:
 ///
 /// ```
-/// use delorean_line_parser::{ParsedLine, FieldValue};
+/// use influxdb_line_protocol::{ParsedLine, FieldValue};
 ///
 /// let mut parsed_lines =
-///     delorean_line_parser::parse_lines(
+///     influxdb_line_protocol::parse_lines(
 ///         "cpu,host=A,region=west usage_system=64i 1590488773254420000"
 ///     );
 /// let parsed_line = parsed_lines
@@ -152,10 +152,10 @@ impl<'a> ParsedLine<'a> {
     /// always present).
     ///
     /// ```
-    /// use delorean_line_parser::{ParsedLine, FieldValue};
+    /// use influxdb_line_protocol::{ParsedLine, FieldValue};
     ///
     /// let mut parsed_lines =
-    ///     delorean_line_parser::parse_lines(
+    ///     influxdb_line_protocol::parse_lines(
     ///         "cpu,host=A,region=west usage_system=64i 1590488773254420000"
     ///     );
     /// let parsed_line = parsed_lines

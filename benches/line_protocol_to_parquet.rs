@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use data_types::table_schema::Schema;
-use delorean_line_parser::parse_lines;
+use influxdb_line_protocol::parse_lines;
 use ingest::{
     parquet::{
         writer::{CompressionLevel, DeloreanParquetTableWriter},

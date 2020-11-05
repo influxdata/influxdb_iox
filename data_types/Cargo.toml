@@ -10,7 +10,7 @@ edition = "2018"
 snafu = "0.6"
 serde = "1.0"
 generated_types = { path = "../generated_types" }
-delorean_line_parser = { path = "../delorean_line_parser" }
+influxdb_line_protocol = { path = "../influxdb_line_protocol" }
 chrono = "0.4"
 flatbuffers = "0.6"
 crc32fast = "1.2.0"

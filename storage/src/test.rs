@@ -13,7 +13,7 @@ use crate::{
 };
 
 use data_types::data::ReplicatedWrite;
-use delorean_line_parser::{parse_lines, ParsedLine};
+use influxdb_line_protocol::{parse_lines, ParsedLine};
 
 use async_trait::async_trait;
 use snafu::{OptionExt, Snafu};

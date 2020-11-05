@@ -10,7 +10,7 @@
 )]
 
 use data_types::table_schema::{DataType, Schema, SchemaBuilder};
-use delorean_line_parser::{FieldValue, ParsedLine};
+use influxdb_line_protocol::{FieldValue, ParsedLine};
 use packers::{
     ByteArray, DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError, Packer, Packers,
 };
@@ -1215,7 +1215,7 @@ mod tests {
     }
 
     fn only_good_lines(data: &str) -> Vec<ParsedLine<'_>> {
-        delorean_line_parser::parse_lines(data)
+        influxdb_line_protocol::parse_lines(data)
             .filter_map(|r| {
                 assert!(r.is_ok());
                 r.ok()

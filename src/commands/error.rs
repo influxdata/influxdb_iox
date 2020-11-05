@@ -67,7 +67,7 @@ pub enum Error {
     TSM { source: TSMError },
 
     #[snafu(display(r#"Error parsing data: {}"#, source))]
-    Parsing { source: delorean_line_parser::Error },
+    Parsing { source: influxdb_line_protocol::Error },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

@@ -16,6 +16,6 @@ tracing = "0.1"
 croaring = "0.4.5"
 
 arrow_deps = { path = "../arrow_deps" }
-delorean_line_parser = { path = "../delorean_line_parser" }
+influxdb_line_protocol = { path = "../influxdb_line_protocol" }
 data_types = { path = "../data_types" }
 test_helpers = { path = "../test_helpers" }

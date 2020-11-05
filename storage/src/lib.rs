@@ -9,8 +9,8 @@
 use arrow_deps::arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use data_types::data::ReplicatedWrite;
-use delorean_line_parser::ParsedLine;
 use exec::{FieldListPlan, GroupedSeriesSetPlans, SeriesSetPlans, StringSetPlan};
+use influxdb_line_protocol::ParsedLine;
 
 use std::{fmt::Debug, sync::Arc};
 

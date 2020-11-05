@@ -421,9 +421,9 @@ dependencies = [
  "async-trait",
  "bytes",
  "data_types",
- "delorean_line_parser",
  "futures",
  "generated_types",
+ "influxdb_line_protocol",
  "object_store",
  "serde",
  "serde_json",
@@ -696,9 +696,9 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "crc32fast",
- "delorean_line_parser",
  "flatbuffers",
  "generated_types",
+ "influxdb_line_protocol",
  "serde",
  "snafu",
  "tracing",
@@ -736,7 +736,6 @@ dependencies = [
  "criterion",
  "csv",
  "data_types",
- "delorean_line_parser",
  "delorean_segment_store",
  "dirs 3.0.1",
  "dotenv",
@@ -747,6 +746,7 @@ dependencies = [
  "http",
  "hyper",
  "influxdb2_client",
+ "influxdb_line_protocol",
  "ingest",
  "libflate",
  "mem_qe",
@@ -771,18 +771,6 @@ dependencies = [
  "tsm",
  "wal",
  "write_buffer",
-]
-
-[[package]]
-name = "delorean_line_parser"
-version = "0.1.0"
-dependencies = [
- "influxdb2_client",
- "nom",
- "smallvec",
- "snafu",
- "test_helpers",
- "tracing",
 ]
 
 [[package]]
@@ -1362,13 +1350,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "influxdb_line_protocol"
+version = "0.1.0"
+dependencies = [
+ "influxdb2_client",
+ "nom",
+ "smallvec",
+ "snafu",
+ "test_helpers",
+ "tracing",
+]
+
+[[package]]
 name = "ingest"
 version = "0.1.0"
 dependencies = [
  "arrow_deps",
  "data_types",
- "delorean_line_parser",
  "env_logger",
+ "influxdb_line_protocol",
  "libflate",
  "packers",
  "snafu",
@@ -2926,7 +2926,7 @@ dependencies = [
  "async-trait",
  "croaring",
  "data_types",
- "delorean_line_parser",
+ "influxdb_line_protocol",
  "serde",
  "serde_urlencoded 0.6.1",
  "snafu",
@@ -3767,9 +3767,9 @@ dependencies = [
  "chrono",
  "criterion",
  "data_types",
- "delorean_line_parser",
  "flatbuffers",
  "generated_types",
+ "influxdb_line_protocol",
  "snafu",
  "sqlparser",
  "storage",

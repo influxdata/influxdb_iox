@@ -1024,7 +1024,7 @@ mod tests {
     use arrow::util::pretty::pretty_format_batches;
     use data_types::data::split_lines_into_write_entry_partitions;
     use datafusion::{logical_plan::Operator, scalar::ScalarValue};
-    use delorean_line_parser::{parse_lines, ParsedLine};
+    use influxdb_line_protocol::{parse_lines, ParsedLine};
     use storage::{exec::Executor, predicate::PredicateBuilder};
     use test_helpers::str_vec_to_arc_vec;
 

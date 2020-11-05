@@ -12,7 +12,7 @@ members = [
     "data_types",
     "generated_types",
     "ingest",
-    "delorean_line_parser",
+    "influxdb_line_protocol",
     "object_store",
     "mem_qe",
     "delorean_segment_store",
@@ -33,7 +33,7 @@ data_types = { path = "data_types" }
 arrow_deps = { path = "arrow_deps" }
 generated_types = { path = "generated_types" }
 ingest = { path = "ingest" }
-delorean_line_parser = { path = "delorean_line_parser" }
+influxdb_line_protocol = { path = "influxdb_line_protocol" }
 mem_qe = { path = "mem_qe" }
 delorean_segment_store = { path = "delorean_segment_store" }
 packers = { path = "packers" }

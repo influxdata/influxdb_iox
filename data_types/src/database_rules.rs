@@ -1,4 +1,4 @@
-use delorean_line_parser::ParsedLine;
+use influxdb_line_protocol::ParsedLine;
 
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -203,7 +203,7 @@ pub struct HostGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use delorean_line_parser::parse_lines;
+    use influxdb_line_protocol::parse_lines;
 
     #[allow(dead_code)]
     type TestError = Box<dyn std::error::Error + Send + Sync + 'static>;

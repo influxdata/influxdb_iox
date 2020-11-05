@@ -1,5 +1,5 @@
-use delorean_line_parser::ParsedLine;
 use generated_types::wal as wb;
+use influxdb_line_protocol::ParsedLine;
 use storage::{
     exec::{
         stringset::StringSet, FieldListPlan, GroupedSeriesSetPlan, GroupedSeriesSetPlans,
@@ -1106,7 +1106,7 @@ mod tests {
         datatypes::DataType,
         util::pretty::pretty_format_batches,
     };
-    use delorean_line_parser::parse_lines;
+    use influxdb_line_protocol::parse_lines;
     use test_helpers::str_pair_vec_to_vec;
     use tokio::sync::mpsc;
 
