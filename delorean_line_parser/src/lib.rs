@@ -1020,8 +1020,8 @@ fn escape_and_write_value(
 #[cfg(test)]
 mod test {
     use super::*;
-    use delorean_test_helpers::approximately_equal;
     use smallvec::smallvec;
+    use test_helpers::approximately_equal;
 
     type Error = Box<dyn std::error::Error>;
     type Result<T = (), E = Error> = std::result::Result<T, E>;

@@ -510,7 +510,7 @@ fn decode_with_sentinel(
 #[allow(clippy::unreadable_literal)]
 #[allow(clippy::excessive_precision)] // TODO: Audit test values for truncation
 mod tests {
-    use delorean_test_helpers::approximately_equal;
+    use test_helpers::approximately_equal;
 
     #[test]
     fn encode_no_values() {

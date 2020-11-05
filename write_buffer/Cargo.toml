@@ -12,7 +12,7 @@ generated_types = { path = "../generated_types" }
 delorean_line_parser = { path = "../delorean_line_parser" }
 storage = { path = "../storage" }
 wal = { path = "../wal" }
-delorean_test_helpers = { path = "../delorean_test_helpers" }
+test_helpers = { path = "../test_helpers" }
 
 async-trait = "0.1"
 chrono = "0.4"
@@ -24,7 +24,7 @@ tokio = { version = "0.2", features = ["full"] }
 tracing = "0.1"
 
 [dev-dependencies]
-delorean_test_helpers = { path = "../delorean_test_helpers" }
+test_helpers = { path = "../test_helpers" }
 criterion = "0.3"
 
 [[bench]]

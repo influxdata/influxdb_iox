@@ -1025,8 +1025,8 @@ mod tests {
     use data_types::data::split_lines_into_write_entry_partitions;
     use datafusion::{logical_plan::Operator, scalar::ScalarValue};
     use delorean_line_parser::{parse_lines, ParsedLine};
-    use delorean_test_helpers::str_vec_to_arc_vec;
     use storage::{exec::Executor, predicate::PredicateBuilder};
+    use test_helpers::str_vec_to_arc_vec;
 
     use super::*;
 

@@ -729,7 +729,6 @@ dependencies = [
  "delorean_arrow",
  "delorean_line_parser",
  "delorean_segment_store",
- "delorean_test_helpers",
  "dirs 3.0.1",
  "dotenv",
  "env_logger",
@@ -755,6 +754,7 @@ dependencies = [
  "snafu",
  "storage",
  "tempfile",
+ "test_helpers",
  "tokio",
  "tonic",
  "tracing",
@@ -777,11 +777,11 @@ dependencies = [
 name = "delorean_line_parser"
 version = "0.1.0"
 dependencies = [
- "delorean_test_helpers",
  "influxdb2_client",
  "nom",
  "smallvec",
  "snafu",
+ "test_helpers",
  "tracing",
 ]
 
@@ -794,16 +794,6 @@ dependencies = [
  "delorean_arrow",
  "packers",
  "rand",
-]
-
-[[package]]
-name = "delorean_test_helpers"
-version = "0.1.0"
-dependencies = [
- "dotenv",
- "env_logger",
- "tempfile",
- "tracing",
 ]
 
 [[package]]
@@ -1378,11 +1368,11 @@ dependencies = [
  "data_types",
  "delorean_arrow",
  "delorean_line_parser",
- "delorean_test_helpers",
  "env_logger",
  "libflate",
  "packers",
  "snafu",
+ "test_helpers",
  "tracing",
  "tsm",
 ]
@@ -1979,10 +1969,10 @@ version = "0.1.0"
 dependencies = [
  "data_types",
  "delorean_arrow",
- "delorean_test_helpers",
  "human_format",
  "rand",
  "snafu",
+ "test_helpers",
  "tracing",
  "tsm",
 ]
@@ -2937,10 +2927,10 @@ dependencies = [
  "data_types",
  "delorean_arrow",
  "delorean_line_parser",
- "delorean_test_helpers",
  "serde",
  "serde_urlencoded 0.6.1",
  "snafu",
+ "test_helpers",
  "tokio",
  "tracing",
 ]
@@ -3011,6 +3001,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb6bfa289a4d7c5766392812c0a1f4c1ba45afa1ad47803c11e1f407d846d75f"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "test_helpers"
+version = "0.1.0"
+dependencies = [
+ "dotenv",
+ "env_logger",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -3456,13 +3456,13 @@ checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
 name = "tsm"
 version = "0.1.0"
 dependencies = [
- "delorean_test_helpers",
  "hex",
  "integer-encoding",
  "libflate",
  "rand",
  "snafu",
  "snap",
+ "test_helpers",
  "tracing",
 ]
 
@@ -3573,7 +3573,6 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "crc32fast",
- "delorean_test_helpers",
  "futures",
  "itertools 0.9.0",
  "once_cell",
@@ -3582,6 +3581,7 @@ dependencies = [
  "serde_json",
  "snafu",
  "snap",
+ "test_helpers",
  "tokio",
  "tracing",
 ]
@@ -3768,13 +3768,13 @@ dependencies = [
  "data_types",
  "delorean_arrow",
  "delorean_line_parser",
- "delorean_test_helpers",
  "flatbuffers",
  "generated_types",
  "snafu",
  "sqlparser",
  "storage",
  "string-interner",
+ "test_helpers",
  "tokio",
  "tracing",
  "wal",

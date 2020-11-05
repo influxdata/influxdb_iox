@@ -71,7 +71,7 @@ async fn generate_multiple_entry_multiple_partition() -> Result<(Vec<Entry>, usi
 async fn common_create_entries(
     mut f: impl FnMut(&mut dyn FnMut(String)),
 ) -> Result<(Vec<Entry>, usize)> {
-    let tmp_dir = delorean_test_helpers::tmp_dir()?;
+    let tmp_dir = test_helpers::tmp_dir()?;
     let mut wal_dir = tmp_dir.as_ref().to_owned();
     let db = Db::try_with_wal("mydb", &mut wal_dir).await?;
 

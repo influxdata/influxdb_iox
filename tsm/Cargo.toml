@@ -16,4 +16,4 @@ snafu = "0.6.2"
 hex = "0.4.2"
 libflate = "1.0.0"
 rand = "0.7.2"
-delorean_test_helpers = { path = "../delorean_test_helpers" }
+test_helpers = { path = "../test_helpers" }

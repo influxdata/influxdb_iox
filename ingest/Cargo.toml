@@ -18,5 +18,5 @@ tsm = { path = "../tsm" }
 delorean_arrow = { path = "../delorean_arrow" }
 
 [dev-dependencies]
-delorean_test_helpers ={ path = "../delorean_test_helpers" }
+test_helpers ={ path = "../test_helpers" }
 libflate = "1.0.0"

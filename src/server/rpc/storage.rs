@@ -993,7 +993,6 @@ mod tests {
     use super::*;
     use crate::panic::SendPanicsToTracing;
     use delorean_arrow::arrow::datatypes::DataType;
-    use delorean_test_helpers::tracing::TracingCapture;
     use std::{
         convert::TryFrom,
         net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -1011,6 +1010,7 @@ mod tests {
         test::TestDatabaseStore,
         test::{ColumnValuesRequest, QuerySeriesRequest},
     };
+    use test_helpers::tracing::TracingCapture;
     use tonic::Code;
 
     use futures::prelude::*;

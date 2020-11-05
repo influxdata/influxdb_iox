@@ -1107,7 +1107,7 @@ mod tests {
         util::pretty::pretty_format_batches,
     };
     use delorean_line_parser::parse_lines;
-    use delorean_test_helpers::str_pair_vec_to_vec;
+    use test_helpers::str_pair_vec_to_vec;
     use tokio::sync::mpsc;
 
     type TestError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -1138,7 +1138,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_table_names() -> Result {
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
 
         let db = Db::try_with_wal("mydb", &mut dir).await?;
 
@@ -1166,7 +1166,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_table_names_timestamps() -> Result {
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
 
         let db = Db::try_with_wal("mydb", &mut dir).await?;
 
@@ -1202,7 +1202,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_tags_are_null() -> Result {
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
 
         let db = Db::try_with_wal("mydb", &mut dir).await?;
 
@@ -1256,7 +1256,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_data_and_recover() -> Result {
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
 
         let expected_cpu_table = r#"+--------+------+------+-------+-------------+------+------+---------+-----------+
 | region | host | user | other | str         | b    | time | new_tag | new_field |
@@ -1362,7 +1362,7 @@ mod tests {
 
     #[tokio::test]
     async fn recover_partial_entries() -> Result {
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
 
         let expected_cpu_table = r#"+--------+------+------+-------+-------------+------+------+---------+-----------+
 | region | host | user | other | str         | b    | time | new_tag | new_field |
@@ -1495,7 +1495,7 @@ disk bytes=23432323i 1600136510000000000",
 
     #[tokio::test]
     async fn list_column_names() -> Result {
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
         let db = Db::try_with_wal("column_namedb", &mut dir).await?;
 
         let lp_data = "h2o,state=CA,city=LA,county=LA temp=70.4 100\n\
@@ -1653,7 +1653,7 @@ disk bytes=23432323i 1600136510000000000",
     async fn list_column_names_predicate() -> Result {
         // Demonstration test to show column names with predicate working
 
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
         let db = Db::try_with_wal("column_namedb", &mut dir).await?;
 
         let lp_data = "h2o,state=CA,city=LA,county=LA temp=70.4 100\n\
@@ -1687,7 +1687,7 @@ disk bytes=23432323i 1600136510000000000",
 
     #[tokio::test]
     async fn list_column_values() -> Result {
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
         let db = Db::try_with_wal("column_namedb", &mut dir).await?;
 
         let lp_data = "h2o,state=CA,city=LA temp=70.4 100\n\
@@ -1843,7 +1843,7 @@ disk bytes=23432323i 1600136510000000000",
         // This test checks that everything is wired together
         // correctly.  There are more detailed tests in table.rs that
         // test the generated queries.
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
         let db = Db::try_with_wal("column_namedb", &mut dir).await?;
 
         let mut lp_lines = vec![
@@ -1914,7 +1914,7 @@ disk bytes=23432323i 1600136510000000000",
     #[tokio::test]
     async fn test_query_series_filter() -> Result {
         // check the appropriate filters are applied in the datafusion plans
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
         let db = Db::try_with_wal("column_namedb", &mut dir).await?;
 
         let lp_lines = vec![
@@ -1962,7 +1962,7 @@ disk bytes=23432323i 1600136510000000000",
 
     #[tokio::test]
     async fn test_query_series_pred_refers_to_column_not_in_table() -> Result {
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
         let db = Db::try_with_wal("column_namedb", &mut dir).await?;
 
         let lp_lines = vec![
@@ -2022,7 +2022,7 @@ disk bytes=23432323i 1600136510000000000",
         expected = "Unsupported binary operator in expression: #state NotEq Utf8(\"MA\")"
     )]
     async fn test_query_series_pred_neq() {
-        let mut dir = delorean_test_helpers::tmp_dir().unwrap().into_path();
+        let mut dir = test_helpers::tmp_dir().unwrap().into_path();
         let db = Db::try_with_wal("column_namedb", &mut dir).await.unwrap();
 
         let lp_lines = vec![
@@ -2047,7 +2047,7 @@ disk bytes=23432323i 1600136510000000000",
     async fn test_field_columns() -> Result {
         // Ensure that the database queries are hooked up correctly
 
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
         let db = Db::try_with_wal("column_namedb", &mut dir).await?;
 
         let lp_data = vec![
@@ -2143,7 +2143,7 @@ disk bytes=23432323i 1600136510000000000",
     #[tokio::test]
     async fn test_field_columns_timestamp_predicate() -> Result {
         // check the appropriate filters are applied in the datafusion plans
-        let mut dir = delorean_test_helpers::tmp_dir()?.into_path();
+        let mut dir = test_helpers::tmp_dir()?.into_path();
         let db = Db::try_with_wal("column_namedb", &mut dir).await?;
 
         let lp_data = vec![

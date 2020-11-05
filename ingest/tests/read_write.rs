@@ -59,7 +59,7 @@ fn test_write_parquet_data() {
     packers[5].i64_packer_mut().push(910000000000);
 
     // write the data out to the parquet file
-    let output_path = delorean_test_helpers::tempfile::Builder::new()
+    let output_path = test_helpers::tempfile::Builder::new()
         .prefix("delorean_parquet_e2e")
         .suffix(".parquet")
         .tempfile()

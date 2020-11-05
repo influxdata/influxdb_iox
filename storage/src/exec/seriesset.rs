@@ -487,7 +487,7 @@ mod tests {
         util::pretty::pretty_format_batches,
     };
     use delorean_arrow::datafusion::physical_plan::common::SizedRecordBatchStream;
-    use delorean_test_helpers::{str_pair_vec_to_vec, str_vec_to_arc_vec};
+    use test_helpers::{str_pair_vec_to_vec, str_vec_to_arc_vec};
 
     use super::*;
 

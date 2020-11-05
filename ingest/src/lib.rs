@@ -1089,8 +1089,8 @@ impl std::fmt::Debug for TSMFileConverter {
 mod tests {
     use super::*;
     use data_types::table_schema::ColumnDefinition;
-    use delorean_test_helpers::approximately_equal;
     use packers::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError, Packers};
+    use test_helpers::approximately_equal;
     use tsm::{
         reader::{BlockData, MockBlockDecoder},
         Block,
