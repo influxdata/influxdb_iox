@@ -1,5 +1,5 @@
 //! Provide storage statistics for parquet files
-use delorean_arrow::parquet::{
+use arrow_deps::parquet::{
     basic::{Compression, Encoding},
     file::reader::{FileReader, SerializedFileReader},
 };

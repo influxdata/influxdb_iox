@@ -11,7 +11,7 @@ tracing = "0.1"
 rand = "0.7.3"
 human_format = "1.0.3"
 
-delorean_arrow = { path = "../delorean_arrow" }
+arrow_deps = { path = "../arrow_deps" }
 data_types = { path = "../data_types" }
 tsm = { path = "../tsm" }
 

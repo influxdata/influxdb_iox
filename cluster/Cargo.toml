@@ -18,6 +18,6 @@ storage = { path = "../storage" }
 write_buffer = { path = "../write_buffer" }
 object_store = { path = "../object_store" }
 tokio = { version = "0.2", features = ["full"] }
-delorean_arrow = { path = "../delorean_arrow" }
+arrow_deps = { path = "../arrow_deps" }
 futures = "0.3.7"
 bytes = "0.5"

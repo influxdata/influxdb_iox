@@ -27,7 +27,7 @@ use std::{
 
 use async_trait::async_trait;
 
-use delorean_arrow::{
+use arrow_deps::{
     arrow::array::StringBuilder,
     arrow::datatypes::{DataType, Field, Schema, SchemaRef},
     arrow::record_batch::RecordBatch,
@@ -42,7 +42,7 @@ use delorean_arrow::{
 
 use tokio::stream::StreamExt;
 
-pub use delorean_arrow::datafusion::error::{DataFusionError as Error, Result};
+pub use arrow_deps::datafusion::error::{DataFusionError as Error, Result};
 
 /// Implementes the SchemaPivot operation described in make_schema_pivot,
 pub struct SchemaPivotNode {
@@ -281,7 +281,7 @@ mod tests {
     use crate::exec::stringset::{IntoStringSet, StringSetRef};
 
     use super::*;
-    use delorean_arrow::{
+    use arrow_deps::{
         arrow::array::StringArray,
         arrow::{
             array::Int64Array,

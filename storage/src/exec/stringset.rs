@@ -4,7 +4,7 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
-use delorean_arrow::{
+use arrow_deps::{
     arrow,
     arrow::array::{Array, StringArray},
     arrow::datatypes::DataType,

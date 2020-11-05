@@ -1,4 +1,4 @@
-use delorean_arrow::{
+use arrow_deps::{
     arrow::record_batch::RecordBatch, datafusion::logical_plan::Expr,
     datafusion::logical_plan::Operator, datafusion::optimizer::utils::expr_to_column_names,
     datafusion::scalar::ScalarValue,

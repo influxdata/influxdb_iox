@@ -17,7 +17,7 @@ use crate::{
 use data_types::TIME_COLUMN_NAME;
 use snafu::{OptionExt, ResultExt, Snafu};
 
-use delorean_arrow::{
+use arrow_deps::{
     arrow,
     arrow::{
         array::{ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, StringBuilder},

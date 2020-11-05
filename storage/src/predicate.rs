@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use delorean_arrow::datafusion::logical_plan::Expr;
+use arrow_deps::datafusion::logical_plan::Expr;
 
 /// Specifies a continuous range of nanosecond timestamps. Timestamp
 /// predicates are so common and critical to performance of timeseries

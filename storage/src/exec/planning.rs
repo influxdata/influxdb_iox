@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use delorean_arrow::{
+use arrow_deps::{
     arrow::record_batch::RecordBatch,
     datafusion::physical_plan::merge::MergeExec,
     datafusion::physical_plan::SendableRecordBatchStream,
@@ -25,7 +25,7 @@ use crate::util::dump_plan;
 use tracing::debug;
 
 // Reuse DataFusion error and Result types for this module
-pub use delorean_arrow::datafusion::error::{DataFusionError as Error, Result};
+pub use arrow_deps::datafusion::error::{DataFusionError as Error, Result};
 
 use super::counters::ExecutionCounters;
 

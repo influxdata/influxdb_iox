@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeSet, sync::Arc};
 
-use delorean_arrow::arrow::{
+use arrow_deps::arrow::{
     array::{ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray},
     datatypes::DataType as ArrowDataType,
 };
@@ -316,7 +316,7 @@ fn datatype_to_measurement_field_enum(data_type: &ArrowDataType) -> Result<Field
 
 #[cfg(test)]
 mod tests {
-    use delorean_arrow::arrow::{
+    use arrow_deps::arrow::{
         datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema},
         record_batch::RecordBatch,
     };

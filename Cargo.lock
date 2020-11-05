@@ -97,6 +97,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow_deps"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "datafusion",
+ "parquet",
+]
+
+[[package]]
 name = "assert-json-diff"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -408,10 +417,10 @@ dependencies = [
 name = "cluster"
 version = "0.1.0"
 dependencies = [
+ "arrow_deps",
  "async-trait",
  "bytes",
  "data_types",
- "delorean_arrow",
  "delorean_line_parser",
  "futures",
  "generated_types",
@@ -719,6 +728,7 @@ dependencies = [
 name = "delorean"
 version = "0.1.0"
 dependencies = [
+ "arrow_deps",
  "assert_cmd",
  "byteorder",
  "bytes",
@@ -726,7 +736,6 @@ dependencies = [
  "criterion",
  "csv",
  "data_types",
- "delorean_arrow",
  "delorean_line_parser",
  "delorean_segment_store",
  "dirs 3.0.1",
@@ -765,15 +774,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "delorean_arrow"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "datafusion",
- "parquet",
-]
-
-[[package]]
 name = "delorean_line_parser"
 version = "0.1.0"
 dependencies = [
@@ -789,9 +789,9 @@ dependencies = [
 name = "delorean_segment_store"
 version = "0.1.0"
 dependencies = [
+ "arrow_deps",
  "criterion",
  "croaring",
- "delorean_arrow",
  "packers",
  "rand",
 ]
@@ -1365,8 +1365,8 @@ dependencies = [
 name = "ingest"
 version = "0.1.0"
 dependencies = [
+ "arrow_deps",
  "data_types",
- "delorean_arrow",
  "delorean_line_parser",
  "env_logger",
  "libflate",
@@ -1580,11 +1580,11 @@ checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 name = "mem_qe"
 version = "0.1.0"
 dependencies = [
+ "arrow_deps",
  "chrono",
  "criterion",
  "croaring",
  "crossbeam",
- "delorean_arrow",
  "env_logger",
  "human_format",
  "packers",
@@ -1967,8 +1967,8 @@ dependencies = [
 name = "packers"
 version = "0.1.0"
 dependencies = [
+ "arrow_deps",
  "data_types",
- "delorean_arrow",
  "human_format",
  "rand",
  "snafu",
@@ -2922,10 +2922,10 @@ checksum = "213701ba3370744dcd1a12960caa4843b3d68b4d1c0a5d575e0d65b2ee9d16c0"
 name = "storage"
 version = "0.1.0"
 dependencies = [
+ "arrow_deps",
  "async-trait",
  "croaring",
  "data_types",
- "delorean_arrow",
  "delorean_line_parser",
  "serde",
  "serde_urlencoded 0.6.1",
@@ -3762,11 +3762,11 @@ dependencies = [
 name = "write_buffer"
 version = "0.1.0"
 dependencies = [
+ "arrow_deps",
  "async-trait",
  "chrono",
  "criterion",
  "data_types",
- "delorean_arrow",
  "delorean_line_parser",
  "flatbuffers",
  "generated_types",

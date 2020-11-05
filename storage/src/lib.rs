@@ -6,9 +6,9 @@
     clippy::use_self
 )]
 
+use arrow_deps::arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use data_types::data::ReplicatedWrite;
-use delorean_arrow::arrow::record_batch::RecordBatch;
 use delorean_line_parser::ParsedLine;
 use exec::{FieldListPlan, GroupedSeriesSetPlans, SeriesSetPlans, StringSetPlan};
 

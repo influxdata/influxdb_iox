@@ -22,8 +22,7 @@ use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use data_types::data::{split_lines_into_write_entry_partitions, ReplicatedWrite};
-use delorean_arrow::{
+use arrow_deps::{
     arrow,
     arrow::{datatypes::Schema as ArrowSchema, record_batch::RecordBatch},
     datafusion::logical_plan::LogicalPlan,
@@ -32,6 +31,7 @@ use delorean_arrow::{
         datasource::MemTable, error::DataFusionError, execution::context::ExecutionContext,
     },
 };
+use data_types::data::{split_lines_into_write_entry_partitions, ReplicatedWrite};
 
 use crate::dictionary::Error as DictionaryError;
 use crate::partition::restore_partitions_from_wal;
@@ -1086,7 +1086,7 @@ struct ArrowTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use delorean_arrow::datafusion::{
+    use arrow_deps::datafusion::{
         logical_plan::{self, Literal},
         scalar::ScalarValue,
     };

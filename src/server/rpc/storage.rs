@@ -992,7 +992,7 @@ where
 mod tests {
     use super::*;
     use crate::panic::SendPanicsToTracing;
-    use delorean_arrow::arrow::datatypes::DataType;
+    use arrow_deps::arrow::datatypes::DataType;
     use std::{
         convert::TryFrom,
         net::{IpAddr, Ipv4Addr, SocketAddr},

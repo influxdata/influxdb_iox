@@ -1,5 +1,5 @@
 //! This module contains the code to write delorean table data to parquet
-use delorean_arrow::parquet::{
+use arrow_deps::parquet::{
     self,
     basic::{Compression, Encoding, LogicalType, Repetition, Type as PhysicalType},
     errors::ParquetError,
@@ -98,7 +98,7 @@ where
     /// # use packers::DeloreanTableWriter;
     /// # use packers::{Packer, Packers};
     /// # use ingest::parquet::writer::{DeloreanParquetTableWriter, CompressionLevel};
-    /// # use delorean_arrow::parquet::data_type::ByteArray;
+    /// # use arrow_deps::parquet::data_type::ByteArray;
     ///
     /// let schema = table_schema::SchemaBuilder::new("measurement_name")
     ///      .tag("tag1")

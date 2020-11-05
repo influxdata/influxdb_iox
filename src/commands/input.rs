@@ -1,4 +1,4 @@
-use delorean_arrow::parquet::file::serialized_reader::{FileSource, SliceableCursor};
+use arrow_deps::parquet::file::serialized_reader::{FileSource, SliceableCursor};
 use ingest::parquet::ChunkReader;
 /// Module to handle input files (and maybe urls?)
 use libflate::gzip;
@@ -155,11 +155,7 @@ impl ingest::parquet::Length for InputReader {
 
 impl ChunkReader for InputReader {
     type T = InputSlice;
-    fn get_read(
-        &self,
-        start: u64,
-        length: usize,
-    ) -> delorean_arrow::parquet::errors::Result<Self::T> {
+    fn get_read(&self, start: u64, length: usize) -> arrow_deps::parquet::errors::Result<Self::T> {
         match self {
             Self::FileInputType(file_input_reader) => Ok(InputSlice::FileSlice(FileSource::new(
                 file_input_reader.reader.get_ref(),

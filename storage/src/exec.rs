@@ -10,11 +10,11 @@ pub mod stringset;
 
 use std::sync::Arc;
 
-use counters::ExecutionCounters;
-use delorean_arrow::{
+use arrow_deps::{
     arrow::record_batch::RecordBatch,
     datafusion::{self, logical_plan::LogicalPlan},
 };
+use counters::ExecutionCounters;
 
 use planning::DeloreanExecutionContext;
 use schema_pivot::SchemaPivotNode;
@@ -509,7 +509,7 @@ async fn run_logical_plans(
 
 #[cfg(test)]
 mod tests {
-    use delorean_arrow::arrow::{
+    use arrow_deps::arrow::{
         array::Int64Array,
         array::StringArray,
         array::StringBuilder,

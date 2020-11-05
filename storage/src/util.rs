@@ -1,5 +1,5 @@
 //! This module contains DataFusion utility functions and helpers
-use delorean_arrow::datafusion::{
+use arrow_deps::datafusion::{
     logical_plan::Expr, logical_plan::LogicalPlan, logical_plan::Operator, optimizer::utils::inputs,
 };
 use std::io::Write;

@@ -3,7 +3,7 @@
 
 use std::convert::TryFrom;
 
-use delorean_arrow::datafusion::{
+use arrow_deps::datafusion::{
     logical_plan::{Expr, Operator},
     scalar::ScalarValue,
 };

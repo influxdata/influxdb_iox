@@ -15,7 +15,7 @@ serde_urlencoded = "0.6.1"
 tracing = "0.1"
 croaring = "0.4.5"
 
-delorean_arrow = { path = "../delorean_arrow" }
+arrow_deps = { path = "../arrow_deps" }
 delorean_line_parser = { path = "../delorean_line_parser" }
 data_types = { path = "../data_types" }
 test_helpers = { path = "../test_helpers" }

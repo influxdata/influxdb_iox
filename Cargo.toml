@@ -7,7 +7,7 @@ default-run = "delorean"
 
 [workspace]
 members = [
-    "delorean_arrow",
+    "arrow_deps",
     "cluster",
     "data_types",
     "generated_types",
@@ -30,7 +30,7 @@ debug = true
 
 [dependencies]
 data_types = { path = "data_types" }
-delorean_arrow = { path = "delorean_arrow" }
+arrow_deps = { path = "arrow_deps" }
 generated_types = { path = "generated_types" }
 ingest = { path = "ingest" }
 delorean_line_parser = { path = "delorean_line_parser" }

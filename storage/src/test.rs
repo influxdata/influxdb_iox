@@ -1,7 +1,7 @@
 //! This module provides a reference implementaton of `storage::DatabaseSource` and
 //! `storage::Database` for use in testing.
 
-use delorean_arrow::arrow::record_batch::RecordBatch;
+use arrow_deps::arrow::record_batch::RecordBatch;
 
 use crate::{
     exec::FieldListPlan,

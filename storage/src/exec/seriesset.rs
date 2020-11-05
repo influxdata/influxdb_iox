@@ -22,11 +22,11 @@ use std::sync::Arc;
 use arrow::{
     array::StringArray, datatypes::DataType, datatypes::SchemaRef, record_batch::RecordBatch,
 };
-use data_types::TIME_COLUMN_NAME;
-use delorean_arrow::{
+use arrow_deps::{
     arrow::{self},
     datafusion::physical_plan::SendableRecordBatchStream,
 };
+use data_types::TIME_COLUMN_NAME;
 use snafu::{ResultExt, Snafu};
 use tokio::stream::StreamExt;
 use tokio::sync::mpsc::{self, error::SendError};
@@ -486,7 +486,7 @@ mod tests {
         record_batch::RecordBatch,
         util::pretty::pretty_format_batches,
     };
-    use delorean_arrow::datafusion::physical_plan::common::SizedRecordBatchStream;
+    use arrow_deps::datafusion::physical_plan::common::SizedRecordBatchStream;
     use test_helpers::{str_pair_vec_to_vec, str_vec_to_arc_vec};
 
     use super::*;

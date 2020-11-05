@@ -1,7 +1,7 @@
 use ingest::parquet::writer::{CompressionLevel, DeloreanParquetTableWriter};
 use packers::{DeloreanTableWriter, Packer, Packers};
 
-use delorean_arrow::parquet::data_type::ByteArray;
+use arrow_deps::parquet::data_type::ByteArray;
 use std::fs;
 
 #[test]

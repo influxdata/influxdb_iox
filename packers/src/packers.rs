@@ -9,7 +9,7 @@ use core::iter::Iterator;
 use std::iter;
 use std::slice::Chunks;
 
-use delorean_arrow::parquet::data_type::ByteArray;
+use arrow_deps::parquet::data_type::ByteArray;
 use std::default::Default;
 
 // NOTE: See https://blog.twitter.com/engineering/en_us/a/2013/dremel-made-simple-with-parquet.html

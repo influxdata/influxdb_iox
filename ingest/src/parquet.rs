@@ -8,7 +8,7 @@
 )]
 
 // Export the parts of the parquet crate that are needed to interact with code in this crate
-pub use delorean_arrow::parquet::{
+pub use arrow_deps::parquet::{
     errors::ParquetError,
     file::reader::{ChunkReader, Length},
     file::writer::TryClone,
