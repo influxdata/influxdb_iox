@@ -16,7 +16,9 @@
 // - Stopping the server after all relevant tests are run
 
 use assert_cmd::prelude::*;
-use delorean_generated_types::{
+use delorean_test_helpers::*;
+use futures::prelude::*;
+use generated_types::{
     node::{Comparison, Value},
     read_group_request::Group,
     read_response::{frame::Data, *},
@@ -25,8 +27,6 @@ use delorean_generated_types::{
     MeasurementTagValuesRequest, Node, Predicate, ReadFilterRequest, ReadGroupRequest, ReadSource,
     Tag, TagKeysRequest, TagValuesRequest, TimestampRange,
 };
-use delorean_test_helpers::*;
-use futures::prelude::*;
 use prost::Message;
 use std::convert::TryInto;
 use std::fs;

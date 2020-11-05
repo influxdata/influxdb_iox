@@ -1,4 +1,3 @@
-use delorean_generated_types::wal as wb;
 use delorean_line_parser::ParsedLine;
 use delorean_storage::{
     exec::{
@@ -8,6 +7,7 @@ use delorean_storage::{
     predicate::Predicate,
     Database,
 };
+use generated_types::wal as wb;
 use wal::{
     writer::{start_wal_sync_task, Error as WalWriterError, WalDetails},
     WalBuilder,

@@ -1,8 +1,8 @@
-use delorean_generated_types::wal as wb;
 use delorean_storage::{
     exec::{make_schema_pivot, GroupedSeriesSetPlan, SeriesSetPlan},
     util::dump_plan,
 };
+use generated_types::wal as wb;
 use tracing::debug;
 
 use std::{collections::BTreeSet, collections::HashMap, sync::Arc};

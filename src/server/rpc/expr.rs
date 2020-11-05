@@ -7,11 +7,11 @@ use delorean_arrow::datafusion::{
     logical_plan::{Expr, Operator},
     scalar::ScalarValue,
 };
-use delorean_generated_types::{
+use delorean_storage::predicate::PredicateBuilder;
+use generated_types::{
     node::Comparison as RPCComparison, node::Logical as RPCLogical, node::Value as RPCValue,
     Node as RPCNode, Predicate as RPCPredicate,
 };
-use delorean_storage::predicate::PredicateBuilder;
 use snafu::{ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]

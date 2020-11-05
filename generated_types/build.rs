@@ -1,5 +1,7 @@
 //! Compiles Protocol Buffers and FlatBuffers schema definitions into
 //! native Rust types.
+//!
+//! Source files are found in
 
 use std::{
     path::{Path, PathBuf},
@@ -10,8 +12,7 @@ type Error = Box<dyn std::error::Error>;
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 fn main() -> Result<()> {
-    let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    root.push("..");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
     generate_grpc_types(&root)?;
     generate_wal_types(&root)?;
@@ -23,7 +24,7 @@ fn main() -> Result<()> {
 ///
 /// Creates `influxdata.platform.storage.rs`
 fn generate_grpc_types(root: &Path) -> Result<()> {
-    let proto_file = root.join("proto/delorean/delorean.proto");
+    let proto_file = root.join("delorean.proto");
 
     println!("cargo:rerun-if-changed={}", proto_file.display());
     tonic_build::compile_protos(proto_file)?;
@@ -35,7 +36,7 @@ fn generate_grpc_types(root: &Path) -> Result<()> {
 ///
 /// Creates `wal_generated.rs`
 fn generate_wal_types(root: &Path) -> Result<()> {
-    let wal_file = root.join("proto/delorean/wal.fbs");
+    let wal_file = root.join("wal.fbs");
 
     println!("cargo:rerun-if-changed={}", wal_file.display());
     let out_dir: PathBuf = std::env::var_os("OUT_DIR")

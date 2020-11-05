@@ -1,4 +1,4 @@
-use delorean_generated_types::wal as wb;
+use generated_types::wal as wb;
 use snafu::Snafu;
 
 use crate::dictionary::Dictionary;

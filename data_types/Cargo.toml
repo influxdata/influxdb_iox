@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 snafu = "0.6"
 serde = "1.0"
-delorean_generated_types = { path = "../delorean_generated_types" }
+generated_types = { path = "../generated_types" }
 delorean_line_parser = { path = "../delorean_line_parser" }
 chrono = "0.4"
 flatbuffers = "0.6"

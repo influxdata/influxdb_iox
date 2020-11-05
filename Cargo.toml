@@ -10,7 +10,7 @@ members = [
     "delorean_arrow",
     "cluster",
     "data_types",
-    "delorean_generated_types",
+    "generated_types",
     "delorean_ingest",
     "delorean_line_parser",
     "object_store",
@@ -31,7 +31,7 @@ debug = true
 [dependencies]
 data_types = { path = "data_types" }
 delorean_arrow = { path = "delorean_arrow" }
-delorean_generated_types = { path = "delorean_generated_types" }
+generated_types = { path = "generated_types" }
 delorean_ingest = { path = "delorean_ingest" }
 delorean_line_parser = { path = "delorean_line_parser" }
 mem_qe = { path = "mem_qe" }

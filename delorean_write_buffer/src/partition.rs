@@ -3,7 +3,7 @@ use delorean_arrow::{
     datafusion::logical_plan::Operator, datafusion::optimizer::utils::expr_to_column_names,
     datafusion::scalar::ScalarValue,
 };
-use delorean_generated_types::wal as wb;
+use generated_types::wal as wb;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use wal::{Entry as WalEntry, Result as WalResult};
 

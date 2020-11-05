@@ -12,7 +12,7 @@ use delorean_storage::exec::{
     seriesset::{GroupDescription, GroupedSeriesSetItem, SeriesSet},
 };
 
-use delorean_generated_types::{
+use generated_types::{
     measurement_fields_response::{FieldType, MessageField},
     read_response::{
         frame::Data, BooleanPointsFrame, DataType, FloatPointsFrame, Frame, GroupFrame,

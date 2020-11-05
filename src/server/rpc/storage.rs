@@ -4,7 +4,7 @@
 
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
-use delorean_generated_types::{
+use generated_types::{
     delorean_server::{Delorean, DeloreanServer},
     storage_server::{Storage, StorageServer},
     CapabilitiesResponse, CreateBucketRequest, CreateBucketResponse, DeleteBucketRequest,
@@ -17,7 +17,7 @@ use delorean_generated_types::{
 // For some reason rust thinks these imports are unused, but then
 // complains of unresolved imports if they are not imported.
 #[allow(unused_imports)]
-use delorean_generated_types::{node, Node};
+use generated_types::{node, Node};
 
 use crate::server::rpc::expr::{AddRPCNode, SpecialTagKeys};
 use crate::server::rpc::input::GrpcInputs;
@@ -1015,9 +1015,7 @@ mod tests {
 
     use futures::prelude::*;
 
-    use delorean_generated_types::{
-        delorean_client, read_response::frame, storage_client, ReadSource,
-    };
+    use generated_types::{delorean_client, read_response::frame, storage_client, ReadSource};
     use prost::Message;
 
     type DeloreanClient = delorean_client::DeloreanClient<tonic::transport::Channel>;
@@ -1656,7 +1654,7 @@ mod tests {
             partition_id,
         ));
 
-        let group = delorean_generated_types::read_group_request::Group::None as i32;
+        let group = generated_types::read_group_request::Group::None as i32;
 
         let request = ReadGroupRequest {
             read_source: source.clone(),

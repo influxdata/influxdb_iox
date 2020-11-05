@@ -412,11 +412,11 @@ dependencies = [
  "bytes",
  "data_types",
  "delorean_arrow",
- "delorean_generated_types",
  "delorean_line_parser",
  "delorean_storage",
  "delorean_write_buffer",
  "futures",
+ "generated_types",
  "object_store",
  "serde",
  "serde_json",
@@ -687,9 +687,9 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "crc32fast",
- "delorean_generated_types",
  "delorean_line_parser",
  "flatbuffers",
+ "generated_types",
  "serde",
  "snafu",
  "tracing",
@@ -727,7 +727,6 @@ dependencies = [
  "csv",
  "data_types",
  "delorean_arrow",
- "delorean_generated_types",
  "delorean_ingest",
  "delorean_line_parser",
  "delorean_segment_store",
@@ -739,6 +738,7 @@ dependencies = [
  "dotenv",
  "env_logger",
  "futures",
+ "generated_types",
  "hex",
  "http",
  "hyper",
@@ -771,18 +771,6 @@ dependencies = [
  "arrow",
  "datafusion",
  "parquet",
-]
-
-[[package]]
-name = "delorean_generated_types"
-version = "0.1.0"
-dependencies = [
- "flatbuffers",
- "futures",
- "prost",
- "prost-types",
- "tonic",
- "tonic-build",
 ]
 
 [[package]]
@@ -874,11 +862,11 @@ dependencies = [
  "criterion",
  "data_types",
  "delorean_arrow",
- "delorean_generated_types",
  "delorean_line_parser",
  "delorean_storage",
  "delorean_test_helpers",
  "flatbuffers",
+ "generated_types",
  "snafu",
  "sqlparser",
  "string-interner",
@@ -1216,6 +1204,18 @@ dependencies = [
  "proc-macro-hack",
  "proc-macro-nested",
  "slab",
+]
+
+[[package]]
+name = "generated_types"
+version = "0.1.0"
+dependencies = [
+ "flatbuffers",
+ "futures",
+ "prost",
+ "prost-types",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]
