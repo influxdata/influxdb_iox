@@ -97,7 +97,7 @@ where
     /// # use data_types::table_schema::DataType;
     /// # use packers::DeloreanTableWriter;
     /// # use packers::{Packer, Packers};
-    /// # use delorean_ingest::parquet::writer::{DeloreanParquetTableWriter, CompressionLevel};
+    /// # use ingest::parquet::writer::{DeloreanParquetTableWriter, CompressionLevel};
     /// # use delorean_arrow::parquet::data_type::ByteArray;
     ///
     /// let schema = table_schema::SchemaBuilder::new("measurement_name")

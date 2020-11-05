@@ -1086,7 +1086,7 @@ impl std::fmt::Debug for TSMFileConverter {
 }
 
 #[cfg(test)]
-mod delorean_ingest_tests {
+mod tests {
     use super::*;
     use data_types::table_schema::ColumnDefinition;
     use delorean_test_helpers::approximately_equal;

@@ -727,7 +727,6 @@ dependencies = [
  "csv",
  "data_types",
  "delorean_arrow",
- "delorean_ingest",
  "delorean_line_parser",
  "delorean_segment_store",
  "delorean_storage",
@@ -742,6 +741,7 @@ dependencies = [
  "http",
  "hyper",
  "influxdb2_client",
+ "ingest",
  "libflate",
  "mem_qe",
  "object_store",
@@ -771,22 +771,6 @@ dependencies = [
  "arrow",
  "datafusion",
  "parquet",
-]
-
-[[package]]
-name = "delorean_ingest"
-version = "0.1.0"
-dependencies = [
- "data_types",
- "delorean_arrow",
- "delorean_line_parser",
- "delorean_test_helpers",
- "delorean_tsm",
- "env_logger",
- "libflate",
- "packers",
- "snafu",
- "tracing",
 ]
 
 [[package]]
@@ -1416,6 +1400,22 @@ dependencies = [
  "serde_json",
  "snafu",
  "tokio",
+]
+
+[[package]]
+name = "ingest"
+version = "0.1.0"
+dependencies = [
+ "data_types",
+ "delorean_arrow",
+ "delorean_line_parser",
+ "delorean_test_helpers",
+ "delorean_tsm",
+ "env_logger",
+ "libflate",
+ "packers",
+ "snafu",
+ "tracing",
 ]
 
 [[package]]

@@ -46,7 +46,7 @@ pub enum Error {
 
     #[snafu(context(false))]
     #[snafu(display("Error converting data {}", source))]
-    Conversion { source: delorean_ingest::Error },
+    Conversion { source: ingest::Error },
 
     #[snafu(display("Error creating a parquet table writer {}", source))]
     UnableToCreateParquetTableWriter { source: ParquetWriterError },

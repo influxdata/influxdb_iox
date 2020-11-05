@@ -11,7 +11,7 @@ members = [
     "cluster",
     "data_types",
     "generated_types",
-    "delorean_ingest",
+    "ingest",
     "delorean_line_parser",
     "object_store",
     "mem_qe",
@@ -32,7 +32,7 @@ debug = true
 data_types = { path = "data_types" }
 delorean_arrow = { path = "delorean_arrow" }
 generated_types = { path = "generated_types" }
-delorean_ingest = { path = "delorean_ingest" }
+ingest = { path = "ingest" }
 delorean_line_parser = { path = "delorean_line_parser" }
 mem_qe = { path = "mem_qe" }
 delorean_segment_store = { path = "delorean_segment_store" }
