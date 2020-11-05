@@ -21,7 +21,7 @@ members = [
     "delorean_tsm",
     "delorean_storage",
     "wal",
-    "delorean_write_buffer",
+    "write_buffer",
     "influxdb2_client",
 ]
 
@@ -37,7 +37,7 @@ delorean_line_parser = { path = "delorean_line_parser" }
 mem_qe = { path = "mem_qe" }
 delorean_segment_store = { path = "delorean_segment_store" }
 packers = { path = "packers" }
-delorean_write_buffer = { path = "delorean_write_buffer" }
+write_buffer = { path = "write_buffer" }
 object_store = { path = "object_store" }
 delorean_storage = { path = "delorean_storage" }
 delorean_tsm = { path = "delorean_tsm" }

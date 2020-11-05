@@ -1,5 +1,5 @@
 [package]
-name = "delorean_write_buffer"
+name = "write_buffer"
 version = "0.1.0"
 authors = ["alamb <andrew@nerdnetworks.org>"]
 edition = "2018"
