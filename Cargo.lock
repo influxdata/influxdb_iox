@@ -405,6 +405,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cluster"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "data_types",
+ "delorean_arrow",
+ "delorean_generated_types",
+ "delorean_line_parser",
+ "delorean_storage",
+ "delorean_write_buffer",
+ "futures",
+ "object_store",
+ "serde",
+ "serde_json",
+ "snafu",
+ "tokio",
+]
+
+[[package]]
 name = "colored"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -751,26 +771,6 @@ dependencies = [
  "arrow",
  "datafusion",
  "parquet",
-]
-
-[[package]]
-name = "delorean_cluster"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "data_types",
- "delorean_arrow",
- "delorean_generated_types",
- "delorean_line_parser",
- "delorean_storage",
- "delorean_write_buffer",
- "futures",
- "object_store",
- "serde",
- "serde_json",
- "snafu",
- "tokio",
 ]
 
 [[package]]
