@@ -11,11 +11,6 @@
 
 use data_types::table_schema::{DataType, Schema, SchemaBuilder};
 use delorean_line_parser::{FieldValue, ParsedLine};
-use delorean_tsm::{
-    mapper::{ColumnData, MeasurementTable, TSMMeasurementMapper},
-    reader::{BlockDecoder, TSMBlockReader, TSMIndexReader},
-    BlockType, TSMError,
-};
 use packers::{
     ByteArray, DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError, Packer, Packers,
 };
@@ -25,6 +20,11 @@ use std::{
     io::{Read, Seek},
 };
 use tracing::debug;
+use tsm::{
+    mapper::{ColumnData, MeasurementTable, TSMMeasurementMapper},
+    reader::{BlockDecoder, TSMBlockReader, TSMIndexReader},
+    BlockType, TSMError,
+};
 
 pub mod parquet;
 
@@ -856,7 +856,7 @@ impl TSMFileConverter {
         //
         m.process(
             &mut block_reader,
-            |section: delorean_tsm::mapper::TableSection| -> Result<(), TSMError> {
+            |section: tsm::mapper::TableSection| -> Result<(), TSMError> {
                 // number of rows in each column in this table section.
                 let col_len = section.len();
 
@@ -1090,11 +1090,11 @@ mod tests {
     use super::*;
     use data_types::table_schema::ColumnDefinition;
     use delorean_test_helpers::approximately_equal;
-    use delorean_tsm::{
+    use packers::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError, Packers};
+    use tsm::{
         reader::{BlockData, MockBlockDecoder},
         Block,
     };
-    use packers::{DeloreanTableWriter, DeloreanTableWriterSource, Error as TableError, Packers};
 
     use libflate::gzip;
     use std::fs::File;

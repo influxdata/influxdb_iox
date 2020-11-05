@@ -730,7 +730,6 @@ dependencies = [
  "delorean_line_parser",
  "delorean_segment_store",
  "delorean_test_helpers",
- "delorean_tsm",
  "dirs 3.0.1",
  "dotenv",
  "env_logger",
@@ -760,6 +759,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-futures",
+ "tsm",
  "wal",
  "write_buffer",
 ]
@@ -803,20 +803,6 @@ dependencies = [
  "dotenv",
  "env_logger",
  "tempfile",
- "tracing",
-]
-
-[[package]]
-name = "delorean_tsm"
-version = "0.1.0"
-dependencies = [
- "delorean_test_helpers",
- "hex",
- "integer-encoding",
- "libflate",
- "rand",
- "snafu",
- "snap",
  "tracing",
 ]
 
@@ -1393,12 +1379,12 @@ dependencies = [
  "delorean_arrow",
  "delorean_line_parser",
  "delorean_test_helpers",
- "delorean_tsm",
  "env_logger",
  "libflate",
  "packers",
  "snafu",
  "tracing",
+ "tsm",
 ]
 
 [[package]]
@@ -1994,11 +1980,11 @@ dependencies = [
  "data_types",
  "delorean_arrow",
  "delorean_test_helpers",
- "delorean_tsm",
  "human_format",
  "rand",
  "snafu",
  "tracing",
+ "tsm",
 ]
 
 [[package]]
@@ -3465,6 +3451,20 @@ name = "try-lock"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
+
+[[package]]
+name = "tsm"
+version = "0.1.0"
+dependencies = [
+ "delorean_test_helpers",
+ "hex",
+ "integer-encoding",
+ "libflate",
+ "rand",
+ "snafu",
+ "snap",
+ "tracing",
+]
 
 [[package]]
 name = "typenum"

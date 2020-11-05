@@ -189,14 +189,14 @@ impl std::convert::From<data_types::table_schema::DataType> for Packers {
     }
 }
 
-impl std::convert::From<delorean_tsm::BlockType> for Packers {
-    fn from(t: delorean_tsm::BlockType) -> Self {
+impl std::convert::From<tsm::BlockType> for Packers {
+    fn from(t: tsm::BlockType) -> Self {
         match t {
-            delorean_tsm::BlockType::Float => Self::Float(Packer::<f64>::new()),
-            delorean_tsm::BlockType::Integer => Self::Integer(Packer::<i64>::new()),
-            delorean_tsm::BlockType::Str => Self::String(Packer::<ByteArray>::new()),
-            delorean_tsm::BlockType::Bool => Self::Boolean(Packer::<bool>::new()),
-            delorean_tsm::BlockType::Unsigned => Self::Integer(Packer::<i64>::new()),
+            tsm::BlockType::Float => Self::Float(Packer::<f64>::new()),
+            tsm::BlockType::Integer => Self::Integer(Packer::<i64>::new()),
+            tsm::BlockType::Str => Self::String(Packer::<ByteArray>::new()),
+            tsm::BlockType::Bool => Self::Boolean(Packer::<bool>::new()),
+            tsm::BlockType::Unsigned => Self::Integer(Packer::<i64>::new()),
         }
     }
 }

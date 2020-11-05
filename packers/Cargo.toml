@@ -13,7 +13,7 @@ human_format = "1.0.3"
 
 delorean_arrow = { path = "../delorean_arrow" }
 data_types = { path = "../data_types" }
-delorean_tsm = { path = "../delorean_tsm" }
+tsm = { path = "../tsm" }
 
 [dev-dependencies]
 delorean_test_helpers ={ path = "../delorean_test_helpers" }

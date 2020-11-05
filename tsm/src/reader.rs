@@ -13,7 +13,7 @@ use std::u64;
 /// Iterating over the TSM index.
 ///
 /// ```
-/// # use delorean_tsm::reader::*;
+/// # use tsm::reader::*;
 /// # use libflate::gzip;
 /// # use std::fs::File;
 /// # use std::io::BufReader;

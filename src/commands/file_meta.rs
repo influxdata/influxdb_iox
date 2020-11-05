@@ -1,4 +1,3 @@
-use delorean_tsm::{reader::IndexEntry, reader::TSMIndexReader, InfluxID, TSMError};
 use ingest::parquet::metadata::print_parquet_metadata;
 use snafu::{ResultExt, Snafu};
 use std::{
@@ -6,6 +5,7 @@ use std::{
     convert::TryInto,
 };
 use tracing::{debug, info};
+use tsm::{reader::IndexEntry, reader::TSMIndexReader, InfluxID, TSMError};
 
 use crate::commands::input::{FileType, InputReader};
 

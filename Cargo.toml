@@ -18,7 +18,7 @@ members = [
     "delorean_segment_store",
     "packers",
     "delorean_test_helpers",
-    "delorean_tsm",
+    "tsm",
     "storage",
     "wal",
     "write_buffer",
@@ -40,7 +40,7 @@ packers = { path = "packers" }
 write_buffer = { path = "write_buffer" }
 object_store = { path = "object_store" }
 storage = { path = "storage" }
-delorean_tsm = { path = "delorean_tsm" }
+tsm = { path = "tsm" }
 wal = { path = "wal" }
 
 bytes = "0.5.4"

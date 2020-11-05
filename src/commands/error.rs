@@ -7,7 +7,7 @@ use delorean_ingest::{
         writer::Error as ParquetWriterError
     }
 };
-use delorean_tsm::TSMError;
+use tsm::TSMError;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
