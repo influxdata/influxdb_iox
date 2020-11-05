@@ -7,7 +7,7 @@ use delorean_arrow::arrow::{
     datatypes::DataType as ArrowDataType,
 };
 
-use delorean_storage::exec::{
+use storage::exec::{
     fieldlist::FieldList,
     seriesset::{GroupDescription, GroupedSeriesSetItem, SeriesSet},
 };
@@ -320,7 +320,7 @@ mod tests {
         datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema},
         record_batch::RecordBatch,
     };
-    use delorean_storage::exec::fieldlist::Field;
+    use storage::exec::fieldlist::Field;
 
     use super::*;
 

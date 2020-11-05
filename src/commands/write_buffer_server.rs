@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::server::http_routes;
 use crate::server::rpc::storage;
 
-use delorean_storage::exec::Executor as StorageExecutor;
+use ::storage::exec::Executor as StorageExecutor;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::Server;
 use write_buffer::{Db, WriteBufferDatabases};

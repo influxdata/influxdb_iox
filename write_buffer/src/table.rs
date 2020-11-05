@@ -1,8 +1,8 @@
-use delorean_storage::{
+use generated_types::wal as wb;
+use storage::{
     exec::{make_schema_pivot, GroupedSeriesSetPlan, SeriesSetPlan},
     util::dump_plan,
 };
-use generated_types::wal as wb;
 use tracing::debug;
 
 use std::{collections::BTreeSet, collections::HashMap, sync::Arc};
@@ -1025,8 +1025,8 @@ mod tests {
     use data_types::data::split_lines_into_write_entry_partitions;
     use datafusion::{logical_plan::Operator, scalar::ScalarValue};
     use delorean_line_parser::{parse_lines, ParsedLine};
-    use delorean_storage::{exec::Executor, predicate::PredicateBuilder};
     use delorean_test_helpers::str_vec_to_arc_vec;
+    use storage::{exec::Executor, predicate::PredicateBuilder};
 
     use super::*;
 

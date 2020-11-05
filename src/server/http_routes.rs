@@ -19,7 +19,7 @@ use tracing::{debug, error, info};
 
 use delorean_arrow::arrow;
 use delorean_line_parser::parse_lines;
-use delorean_storage::{org_and_bucket_to_database, Database, DatabaseStore};
+use storage::{org_and_bucket_to_database, Database, DatabaseStore};
 
 use bytes::{Bytes, BytesMut};
 use futures::{self, StreamExt};
@@ -356,8 +356,7 @@ mod tests {
     use hyper::service::{make_service_fn, service_fn};
     use hyper::Server;
 
-    use delorean_storage::test::TestDatabaseStore;
-    use delorean_storage::DatabaseStore;
+    use storage::{test::TestDatabaseStore, DatabaseStore};
 
     type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
     type Result<T, E = Error> = std::result::Result<T, E>;

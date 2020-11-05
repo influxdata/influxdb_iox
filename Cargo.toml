@@ -19,7 +19,7 @@ members = [
     "packers",
     "delorean_test_helpers",
     "delorean_tsm",
-    "delorean_storage",
+    "storage",
     "wal",
     "write_buffer",
     "influxdb2_client",
@@ -39,7 +39,7 @@ delorean_segment_store = { path = "delorean_segment_store" }
 packers = { path = "packers" }
 write_buffer = { path = "write_buffer" }
 object_store = { path = "object_store" }
-delorean_storage = { path = "delorean_storage" }
+storage = { path = "storage" }
 delorean_tsm = { path = "delorean_tsm" }
 wal = { path = "wal" }
 

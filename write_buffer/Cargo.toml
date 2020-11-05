@@ -10,7 +10,7 @@ delorean_arrow = { path = "../delorean_arrow" }
 data_types = { path = "../data_types" }
 generated_types = { path = "../generated_types" }
 delorean_line_parser = { path = "../delorean_line_parser" }
-delorean_storage = { path = "../delorean_storage" }
+storage = { path = "../storage" }
 wal = { path = "../wal" }
 delorean_test_helpers = { path = "../delorean_test_helpers" }
 

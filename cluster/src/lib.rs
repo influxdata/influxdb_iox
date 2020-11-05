@@ -77,8 +77,8 @@ use data_types::{
 };
 use delorean_arrow::arrow::record_batch::RecordBatch;
 use delorean_line_parser::ParsedLine;
-use delorean_storage::Database;
 use object_store::ObjectStore;
+use storage::Database;
 use write_buffer::Db as WriteBufferDb;
 
 use async_trait::async_trait;

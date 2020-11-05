@@ -1,6 +1,6 @@
 //! This module contains implementations for the storage gRPC service
-//! implemented in terms of the `delorean_storage::Database` and
-//! `delorean_storage::DatabaseStore`
+//! implemented in terms of the `storage::Database` and
+//! `storage::DatabaseStore`
 
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
@@ -22,7 +22,7 @@ use generated_types::{node, Node};
 use crate::server::rpc::expr::{AddRPCNode, SpecialTagKeys};
 use crate::server::rpc::input::GrpcInputs;
 
-use delorean_storage::{
+use storage::{
     exec::{
         seriesset::{Error as SeriesSetError, GroupedSeriesSetItem, SeriesSet},
         Executor as StorageExecutor,
@@ -993,7 +993,13 @@ mod tests {
     use super::*;
     use crate::panic::SendPanicsToTracing;
     use delorean_arrow::arrow::datatypes::DataType;
-    use delorean_storage::{
+    use delorean_test_helpers::tracing::TracingCapture;
+    use std::{
+        convert::TryFrom,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+        time::Duration,
+    };
+    use storage::{
         exec::fieldlist::{Field, FieldList},
         exec::FieldListPlan,
         exec::GroupedSeriesSetPlans,
@@ -1004,12 +1010,6 @@ mod tests {
         test::QueryGroupsRequest,
         test::TestDatabaseStore,
         test::{ColumnValuesRequest, QuerySeriesRequest},
-    };
-    use delorean_test_helpers::tracing::TracingCapture;
-    use std::{
-        convert::TryFrom,
-        net::{IpAddr, Ipv4Addr, SocketAddr},
-        time::Duration,
     };
     use tonic::Code;
 

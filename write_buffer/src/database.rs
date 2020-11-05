@@ -1,5 +1,6 @@
 use delorean_line_parser::ParsedLine;
-use delorean_storage::{
+use generated_types::wal as wb;
+use storage::{
     exec::{
         stringset::StringSet, FieldListPlan, GroupedSeriesSetPlan, GroupedSeriesSetPlans,
         SeriesSetPlan, SeriesSetPlans, StringSetPlan,
@@ -7,7 +8,6 @@ use delorean_storage::{
     predicate::Predicate,
     Database,
 };
-use generated_types::wal as wb;
 use wal::{
     writer::{start_wal_sync_task, Error as WalWriterError, WalDetails},
     WalBuilder,
@@ -1090,7 +1090,8 @@ mod tests {
         logical_plan::{self, Literal},
         scalar::ScalarValue,
     };
-    use delorean_storage::{
+    use logical_plan::{Expr, Operator};
+    use storage::{
         exec::fieldlist::{Field, FieldList},
         exec::{
             seriesset::{Error as SeriesSetError, SeriesSet},
@@ -1099,7 +1100,6 @@ mod tests {
         predicate::PredicateBuilder,
         Database,
     };
-    use logical_plan::{Expr, Operator};
 
     use arrow::{
         array::{Array, StringArray},

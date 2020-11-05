@@ -14,7 +14,7 @@ async-trait = "0.1"
 data_types = { path = "../data_types" }
 generated_types = { path = "../generated_types" }
 delorean_line_parser = { path = "../delorean_line_parser" }
-delorean_storage = { path = "../delorean_storage" }
+storage = { path = "../storage" }
 write_buffer = { path = "../write_buffer" }
 object_store = { path = "../object_store" }
 tokio = { version = "0.2", features = ["full"] }

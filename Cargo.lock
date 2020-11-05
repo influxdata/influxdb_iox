@@ -413,13 +413,13 @@ dependencies = [
  "data_types",
  "delorean_arrow",
  "delorean_line_parser",
- "delorean_storage",
  "futures",
  "generated_types",
  "object_store",
  "serde",
  "serde_json",
  "snafu",
+ "storage",
  "tokio",
  "write_buffer",
 ]
@@ -729,7 +729,6 @@ dependencies = [
  "delorean_arrow",
  "delorean_line_parser",
  "delorean_segment_store",
- "delorean_storage",
  "delorean_test_helpers",
  "delorean_tsm",
  "dirs 3.0.1",
@@ -755,6 +754,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded 0.7.0",
  "snafu",
+ "storage",
  "tempfile",
  "tokio",
  "tonic",
@@ -794,23 +794,6 @@ dependencies = [
  "delorean_arrow",
  "packers",
  "rand",
-]
-
-[[package]]
-name = "delorean_storage"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "croaring",
- "data_types",
- "delorean_arrow",
- "delorean_line_parser",
- "delorean_test_helpers",
- "serde",
- "serde_urlencoded 0.6.1",
- "snafu",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -2960,6 +2943,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213701ba3370744dcd1a12960caa4843b3d68b4d1c0a5d575e0d65b2ee9d16c0"
 
 [[package]]
+name = "storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "croaring",
+ "data_types",
+ "delorean_arrow",
+ "delorean_line_parser",
+ "delorean_test_helpers",
+ "serde",
+ "serde_urlencoded 0.6.1",
+ "snafu",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "string-interner"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3768,12 +3768,12 @@ dependencies = [
  "data_types",
  "delorean_arrow",
  "delorean_line_parser",
- "delorean_storage",
  "delorean_test_helpers",
  "flatbuffers",
  "generated_types",
  "snafu",
  "sqlparser",
+ "storage",
  "string-interner",
  "tokio",
  "tracing",
