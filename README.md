@@ -102,7 +102,7 @@ InfluxDB IOx is built using Cargo, Rust's package manager and build tool.
 To compile for development, run:
 
 ```
-$ cargo build
+$ cargo +nightly build
 ```
 
 which will create a binary in `target/debug` that you can run with:
@@ -114,13 +114,13 @@ $ ./target/debug/influxdb_iox
 You can compile and run with one command by using:
 
 ```
-$ cargo run
+$ cargo +nightly run
 ```
 
 When compiling for performance testing, build in release mode by using:
 
 ```
-$ cargo build --release
+$ cargo +nightly build --release
 ```
 
 which will create the corresponding binary in `target/release`:
@@ -132,7 +132,7 @@ $ ./target/release/influxdb_iox
 Similarly, you can do this in one step with:
 
 ```
-$ cargo run --release
+$ cargo +nightly run --release
 ```
 
 The server will, by default, start an HTTP API server on port `8080` and a gRPC server on port
@@ -176,7 +176,7 @@ InfluxDB IOx is written mostly in idiomatic Rust -- please see the [Style Guide]
 The `cargo` build tool runs tests as well. Run:
 
 ```
-$ cargo test --workspace
+$ cargo +nightly test --workspace
 ```
 
 ### Running `rustfmt` and `clippy`
@@ -204,7 +204,7 @@ $ rustup component add clippy
 And run with:
 
 ```
-$ cargo clippy  --all-targets --workspace
+$ cargo +nightly clippy --all-targets --workspace
 ```
 
 [`rustfmt`]: https://github.com/rust-lang/rustfmt
