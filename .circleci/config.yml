@@ -89,19 +89,7 @@ workflows:
   version: 2
   build:
     jobs:
-      - fmt
-      - lint
-      - test
-      - build
-      - perf_image:
-          requires: # Only do a release build if all tests have passed
-            - fmt
-            - lint
-            - test
-            - build
-          filters:
-            branches:
-              only: /.*\/perf$/ # Only do a release build if the branch name ends in `/perf`
+      - ci_image
   ci_image:
     triggers:
       - schedule:
