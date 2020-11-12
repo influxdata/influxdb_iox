@@ -1,3 +1,9 @@
+// This file defines the InfluxDB storage gRPC service definition (how the rest of influxdb /
+// flux / influxql talk to the storage system)
+//
+// Copy/pasted, as closely as verbatim as possible, from
+// https://github.com/influxdata/idpe/blob/master/storage/storageproto/service.proto
+
 syntax = "proto3";
 package influxdata.platform.storage;
 
