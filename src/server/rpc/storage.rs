@@ -1068,9 +1068,7 @@ mod tests {
 
     use futures::prelude::*;
 
-    use generated_types::{
-        i_ox_client, read_response::frame, storage_client, Capability, ReadSource,
-    };
+    use generated_types::{i_ox_client, read_response::frame, storage_client, ReadSource};
     use prost::Message;
 
     type IOxClient = i_ox_client::IOxClient<tonic::transport::Channel>;
@@ -1965,10 +1963,7 @@ mod tests {
             // unwrap the Vec of Strings inside each `Capability`
             let caps = caps
                 .into_iter()
-                .map(|(name, capability)| {
-                    let Capability { features } = capability;
-                    (name, features)
-                })
+                .map(|(name, capability)| (name, capability.features))
                 .collect();
 
             Ok(caps)
