@@ -721,8 +721,9 @@ mod test {
 
     #[test]
     fn row_ids_filter_lt() {
-        let mut v: Fixed<i64> = Fixed::default();
-        v.values = vec![100, 101, 100, 102, 1000, 300, 2030, 3, 101, 4, 5, 21, 100];
+        let v: Fixed<i64> = Fixed {
+            values: vec![100, 101, 100, 102, 1000, 300, 2030, 3, 101, 4, 5, 21, 100],
+        };
 
         let dst = v.row_ids_filter(100, &Operator::LT, RowIDs::new_vector());
         assert_eq!(dst.unwrap_vector(), &vec![7, 9, 10, 11]);
