@@ -7,7 +7,7 @@ macro_rules! check_feature {
 }
 
 fn main() {
-    println!("Available CPU features on build machine:");
+    println!("Available CPU features on this machine:");
 
     // The list of possibilities was taken from
     // https://doc.rust-lang.org/reference/attributes/codegen.html#the-target_feature-attribute
