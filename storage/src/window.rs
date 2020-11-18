@@ -3,7 +3,7 @@
 //!
 //! The code in this module is intended to be as faithful a
 //! transliteration of the original Go code into Rust as possible. It
-//! does not forcing idomatic Eust when that might obscure the mapping
+//! does not forcing idomatic Rust when that might obscure the mapping
 //! between the original code and this port.
 use chrono::{prelude::*, Month::February};
 use std::ops::{Add, Mul};
