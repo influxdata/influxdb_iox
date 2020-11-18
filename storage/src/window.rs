@@ -95,13 +95,13 @@ impl Duration {
 }
 
 impl Mul<i64> for Duration {
-    type Output = Duration;
+    type Output = Self;
 
     /// Mul will multiply the Duration by a scalar.
     /// This multiplies each component of the vector.
     ///
     /// Original: https://github.com/influxdata/flux/blob/1e9bfd49f21c0e679b42acf6fc515ce05c6dec2b/values/time.go#L175
-    fn mul(self, rhs: i64) -> Duration {
+    fn mul(self, rhs: i64) -> Self {
         let mut scale = rhs;
         let mut d = self;
 
@@ -117,7 +117,7 @@ impl Mul<i64> for Duration {
         }
         d.months *= scale;
         d.nsecs *= scale;
-        return d;
+        d
     }
 }
 
@@ -158,7 +158,7 @@ fn last_day_of_month(month: i32) -> u32 {
 
 // port of fun isLeapYear(year int) bool {
 fn is_leap_year(year: i32) -> bool {
-    return year % 400 == 0 || (year % 4 == 0 && year % 100 != 0);
+    year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)
 }
 
 /// Convert the parts of year to nanoseconds since the epoc UTC time.
@@ -186,12 +186,12 @@ fn to_timestamp_nanos_utc(
 }
 
 impl Add<Duration> for i64 {
-    type Output = i64;
+    type Output = Self;
 
     /// Adds a duration to a nanosecond timestamp
     ///
     /// Original: https://github.com/influxdata/flux/blob/1e9bfd49f21c0e679b42acf6fc515ce05c6dec2b/values/time.go#L84
-    fn add(self, rhs: Duration) -> i64 {
+    fn add(self, rhs: Duration) -> Self {
         let t = self;
         let d = rhs;
 
@@ -245,7 +245,7 @@ impl Add<Duration> for i64 {
         if d.negative {
             nsecs = -nsecs;
         }
-        return new_t + nsecs;
+        new_t + nsecs
     }
 }
 
@@ -378,6 +378,7 @@ mod tests {
             want: Bounds,
         }
 
+        #[allow(clippy::identity_op)]
         let testcases = vec![
             TestCase {
                 name: "simple",
