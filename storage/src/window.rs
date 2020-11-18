@@ -72,9 +72,9 @@ impl Duration {
     /// truncate the time using the duration.
     ///
     /// Porting note: this implementation was moved into Duration so
-    /// we could safely that only month or nsec was zero, not both (as
+    /// we could safely assume that only month or nsec was zero, not both (as
     /// the only two ways to create a duration in this `impl` ensures
-    /// that invariant0
+    /// that invariant)
     ///
     /// Original: https://github.com/influxdata/flux/blob/1e9bfd49f21c0e679b42acf6fc515ce05c6dec2b/execute/window.go#L52
     fn truncate(&self, t: i64) -> i64 {
