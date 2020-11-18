@@ -129,6 +129,8 @@ impl Mul<i64> for Duration {
 fn timestamp_to_datetime(ts: i64) -> DateTime<Utc> {
     let secs = ts / 1_000_000_000;
     let nsec = ts % 1_000_000_000;
+    // Note that nsec as u32 is safe here because modulo on a negative ts value
+    //  still produces a positive remainder.
     let datetime = NaiveDateTime::from_timestamp(secs, nsec as u32);
     DateTime::from_utc(datetime, Utc)
 }
@@ -560,5 +562,28 @@ mod tests {
                 tc.name, tc.want, got
             );
         }
+    }
+
+    #[test]
+    fn test_timestamp_to_datetime() {
+        assert_eq!(
+            timestamp_to_datetime(1591894320000000000).to_rfc3339(),
+            "2020-06-11T16:52:00+00:00"
+        );
+        assert_eq!(
+            timestamp_to_datetime(159189432).to_rfc3339(),
+            "1970-01-01T00:00:00.159189432+00:00"
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_timestamp_to_datetime_negative() {
+        // Note while testing to make sure a negative timestamp doesn't overflow, it turns out
+        // that the chrono library itself didn't handle parsing negative timestamps:
+        //
+        // thread 'window::tests::test_timestamp_to_datetime' panicked at 'invalid or out-of-range datetime',
+        //src/github.com-1ecc6299db9ec823/chrono-0.4.19/src/naive/datetime.rs:117:18
+        assert_eq!(timestamp_to_datetime(-1568756160).to_rfc3339(), "foo");
     }
 }
