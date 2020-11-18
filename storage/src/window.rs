@@ -133,8 +133,7 @@ fn timestamp_to_datetime(ts: i64) -> DateTime<Utc> {
     DateTime::from_utc(datetime, Utc)
 }
 
-// Ported from this function:
-//var lastDayOfMonths = map[time.Month]int{
+/// Original: https://github.com/influxdata/flux/blob/1e9bfd49f21c0e679b42acf6fc515ce05c6dec2b/values/time.go#L491
 const LAST_DAYS: [u32; 12] = [
     31, // time.January:   31,
     28, // time.February:  28,
@@ -157,6 +156,7 @@ fn last_day_of_month(month: i32) -> u32 {
 }
 
 // port of fun isLeapYear(year int) bool {
+/// Original: https://github.com/influxdata/flux/blob/1e9bfd49f21c0e679b42acf6fc515ce05c6dec2b/values/time.go#L506
 fn is_leap_year(year: i32) -> bool {
     year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)
 }
