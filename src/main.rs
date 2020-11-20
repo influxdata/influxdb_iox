@@ -19,8 +19,8 @@ mod commands {
     pub mod convert;
     pub mod file_meta;
     mod input;
-    pub mod stats;
     pub mod server;
+    pub mod stats;
 }
 
 use panic::SendPanicsToTracing;
