@@ -39,7 +39,7 @@ use self::predicate::{Predicate, TimestampRange};
 ///
 /// * Tag (always String type)
 /// * Field (Float64, Int64, UInt64, String, or Bool)
-/// * Time (Float64)
+/// * Time (Int64)
 ///
 /// While the underlying storage is the same for columns in different
 /// categories with the same data type, columns of different
