@@ -20,7 +20,7 @@ mod commands {
     pub mod file_meta;
     mod input;
     pub mod stats;
-    pub mod write_buffer_server;
+    pub mod server;
 }
 
 use panic::SendPanicsToTracing;
@@ -184,7 +184,7 @@ async fn dispatch_args(matches: ArgMatches<'_>) {
         }
         ("server", Some(_)) | (_, _) => {
             println!("InfluxDB IOx server starting");
-            match commands::write_buffer_server::main().await {
+            match commands::server::main().await {
                 Ok(()) => eprintln!("Shutdown OK"),
                 Err(e) => {
                     error!("Server shutdown with error: {}", e);
