@@ -1,4 +1,3 @@
-use nix::sys::uio::{pwritev, IoVec};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use snafu::{ResultExt, Snafu};
@@ -25,6 +24,8 @@ pub fn write(
     data_bytes: &[u8],
     offset: u64,
 ) -> Result<(), IoError> {
+    use nix::sys::uio::{pwritev, IoVec};
+
     let iovec = [
         IoVec::from_slice(header_bytes),
         IoVec::from_slice(data_bytes),
