@@ -199,7 +199,7 @@ pub struct WalOptions {
 
 impl WalOptions {
     pub fn rollover_size(mut self, rollover_size: u64) -> Self {
-        self.rollover_size = rollover_size;
+        self.rollover_size = rollover_size.min(Wal::MAX_FILE_ROLLOVER_SIZE_BYTES);
         self
     }
 

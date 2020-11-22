@@ -1808,18 +1808,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nix"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85db2feff6bf70ebc3a4793191517d5f0331100a2f10f9bf93b5e5214f32b7b7"
-dependencies = [
- "bitflags",
- "cc",
- "cfg-if 0.1.10",
- "libc",
-]
-
-[[package]]
 name = "nom"
 version = "5.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2718,7 +2706,7 @@ dependencies = [
  "libc",
  "log",
  "memchr",
- "nix 0.18.0",
+ "nix",
  "scopeguard",
  "unicode-segmentation",
  "unicode-width",
@@ -3712,7 +3700,6 @@ dependencies = [
  "crc32fast",
  "crossbeam-epoch 0.9.0",
  "memchr",
- "nix 0.19.0",
  "once_cell",
  "parking_lot",
  "rand 0.7.3",
