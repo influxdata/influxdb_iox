@@ -2,12 +2,14 @@ use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use tempfile::TempDir;
 use wal::{Wal, WalOptions};
 use rand::{SeedableRng, Rng};
+use std::io::{BufWriter, Write};
+use std::fs::File;
 
 fn wal(c: &mut Criterion) {
     let mut group = c.benchmark_group("wal");
 
     let mut rng = rand::rngs::StdRng::seed_from_u64(1337);
-    let bytes: Vec<u8> = (0..4096).map(|_| { rng.gen() }).collect();
+    let bytes: Vec<u8> = (0..8196).map(|_| { rng.gen() }).collect();
 
     group.throughput(Throughput::Bytes(bytes.len() as u64));
 
@@ -18,8 +20,28 @@ fn wal(c: &mut Criterion) {
             WalOptions::default().sync_writes(false).rollover_size(u64::MAX),
         )
         .unwrap();
-        b.iter(|| wal.append(&bytes))
+        b.iter(|| wal.append(&bytes).unwrap())
     });
+
+    group.bench_function("buffered_write", |b| {
+        let dir = TempDir::new().unwrap();
+        let mut writer = BufWriter::new(File::create(dir.path().to_path_buf().join("test.data")).unwrap());
+        b.iter(|| writer.write_all(&bytes).unwrap())
+    });
+
+    #[cfg(unix)]
+    {
+        group.bench_function("zero_overhead_write", |b| {
+            use std::os::unix::fs::FileExt;
+            let dir = TempDir::new().unwrap();
+            let file = File::create(dir.path().to_path_buf().join("test.data")).unwrap();
+            let mut offset = 0;
+            b.iter(|| {
+                file.write_all_at(&bytes, offset).unwrap();
+                offset += bytes.len() as u64;
+            })
+        });
+    }
 
     group.finish();
 }

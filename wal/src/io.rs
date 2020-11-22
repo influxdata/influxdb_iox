@@ -14,12 +14,7 @@ pub enum IoError {
     FailedToSeek { source: std::io::Error },
 }
 
-pub fn write(
-    file: &File,
-    header_bytes: &[u8],
-    data_bytes: &[u8],
-    offset: u64,
-) -> Result<(), IoError> {
+pub fn write(file: &File, bytes: &[u8], offset: u64) -> Result<(), IoError> {
     #[cfg(not(unix))]
     {
         use std::io::{Seek, SeekFrom, Write};
@@ -27,9 +22,7 @@ pub fn write(
         let _ = MUTEX.lock();
         let mut file = file.try_clone().context(FailedToCloneFile)?;
         file.seek(SeekFrom::Start(offset)).context(FailedToSeek)?;
-        file.write_all(header_bytes)
-            .context(FailedToWriteDataOther)?;
-        file.write_all(data_bytes).context(FailedToWriteDataOther)?;
+        file.write_all(bytes).context(FailedToWriteDataOther)?;
         Ok(())
     }
 
@@ -37,11 +30,7 @@ pub fn write(
     {
         use std::os::unix::fs::FileExt;
 
-        let mut vec = Vec::with_capacity(header_bytes.len() + data_bytes.len());
-        vec.extend_from_slice(header_bytes);
-        vec.extend_from_slice(data_bytes);
-
-        file.write_all_at(&vec, offset)
+        file.write_all_at(bytes, offset)
             .context(FailedToWriteDataUnix)?;
 
         Ok(())

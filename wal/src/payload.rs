@@ -46,7 +46,7 @@ pub enum PayloadError {
 #[derive(Debug)]
 pub struct Payload {
     header: Header,
-    data: Vec<u8>,
+    bytes: Vec<u8>,
 }
 
 impl Payload {
@@ -58,33 +58,40 @@ impl Payload {
             actual: uncompressed_len,
         })?;
 
+        let mut compressed_data =
+            vec![0u8; Header::LEN + snap::raw::max_compress_len(uncompressed_data.len())];
         let mut encoder = snap::raw::Encoder::new();
-        let compressed_data = encoder
-            .compress_vec(&uncompressed_data)
+        let written = encoder
+            .compress(&uncompressed_data, &mut compressed_data[Header::LEN..])
             .context(UnableToCompressData)?;
-        let actual_compressed_len = compressed_data.len();
+        compressed_data.truncate(Header::LEN + written);
+        let actual_compressed_len = compressed_data.len() - Header::LEN;
         let actual_compressed_len =
             u32::try_from(actual_compressed_len).context(ChunkSizeTooLarge {
                 actual: actual_compressed_len,
             })?;
 
         // Check total payload size fits in u32
-        let payload_size = Header::LEN + compressed_data.len();
+        let payload_size = compressed_data.len();
         let _ = u32::try_from(payload_size).context(ChunkSizeTooLarge {
             actual: payload_size,
         })?;
 
         let mut hasher = Hasher::new();
-        hasher.update(&compressed_data);
+        hasher.update(&compressed_data[Header::LEN..]);
         let checksum = hasher.finalize();
 
+        let header = Header {
+            magic: Header::MAGIC,
+            checksum,
+            len: actual_compressed_len,
+        };
+
+        compressed_data[..Header::LEN].copy_from_slice(&header.as_bytes());
+
         Ok(Self {
-            header: Header {
-                magic: Header::MAGIC,
-                checksum,
-                len: actual_compressed_len,
-            },
-            data: compressed_data,
+            header,
+            bytes: compressed_data,
         })
     }
 
@@ -133,12 +140,20 @@ impl Payload {
         &self.header
     }
 
-    pub fn data(&self) -> &[u8] {
-        &self.data
+    pub fn header_bytes(&self) -> &[u8] {
+        &self.bytes[..Header::LEN]
+    }
+
+    pub fn data_bytes(&self) -> &[u8] {
+        &self.bytes[Header::LEN..]
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     pub fn size(&self) -> u32 {
-        (Header::LEN + self.data.len()) as u32
+        self.bytes.len() as u32
     }
 }
 

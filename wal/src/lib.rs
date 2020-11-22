@@ -136,6 +136,7 @@ struct WalFile {
     id: u16,
     file: File,
     size: AtomicU64,
+    path: PathBuf,
 }
 
 impl WalFile {
@@ -148,8 +149,9 @@ impl WalFile {
                 .write(true)
                 .create_new(true)
                 .open(&file_path)
-                .context(UnableToCreateWal { path: file_path })?,
+                .context(UnableToCreateWal { path: file_path.clone() })?,
             size: AtomicU64::new(0),
+            path: file_path
         })
     }
 
@@ -166,10 +168,11 @@ impl WalFile {
             id,
             size: AtomicU64::new(
                 file.metadata()
-                    .context(UnableToOpenWal { path: file_path })?
+                    .context(UnableToOpenWal { path: file_path.clone() })?
                     .len(),
             ),
             file,
+            path: file_path
         })
     }
 
@@ -280,8 +283,6 @@ impl Wal {
         let active_wal_ref = unsafe { active_wal.as_ref() }.expect("active file was null!");
 
         let payload = Payload::encode(data).context(PayloadError)?;
-        let header_bytes = payload.header().as_bytes();
-        let data_bytes = payload.data();
         let payload_size = payload.size() as u64;
 
         // Optimistically increment file size even if things could still go wrong
@@ -289,15 +290,15 @@ impl Wal {
         self.total_size.fetch_add(payload_size, Relaxed);
         let new_wal_size = offset + payload_size;
 
-        io::write(&active_wal_ref.file, &header_bytes, data_bytes, offset).context(
+        io::write(&active_wal_ref.file, payload.bytes(), offset).context(
             UnableToWritePayload {
-                path: WalFile::id_to_path(&self.root, active_wal_ref.id),
+                path: &active_wal_ref.path,
             },
         )?;
 
         if self.options.sync_writes {
             active_wal_ref.file.sync_all().context(UnableToSyncWal {
-                path: WalFile::id_to_path(&self.root, active_wal_ref.id),
+                path: &active_wal_ref.path,
             })?;
         }
 
@@ -308,10 +309,7 @@ impl Wal {
                 // We were the ones who marked the active file so we will now roll it over
                 let new_id = self.next_id.fetch_add(1, Relaxed);
                 let new_active_wal = Owned::new(WalFile::create(&self.root, new_id)?);
-                // This could be a store in theory but for some practical correctness let's just use a CAS with a panic
-                self.active
-                    .compare_and_set(active_wal.with_tag(1), new_active_wal, Release, &guard)
-                    .expect("CAS on active wal failed!");
+                self.active.swap(new_active_wal, Release, &guard);
                 // SAFETY: active_wal has been successfully replaced and is no longer reachable.
                 // Once the current epoch is over it's impossible to get a ref to active_wal
                 // making this safe to destroy after this epoch is over.
