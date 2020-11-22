@@ -30,7 +30,7 @@ pub fn write(
         file.write_all(header_bytes)
             .context(FailedToWriteDataOther)?;
         file.write_all(data_bytes).context(FailedToWriteDataOther)?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(unix)]
@@ -44,6 +44,6 @@ pub fn write(
         file.write_all_at(&vec, offset)
             .context(FailedToWriteDataUnix)?;
 
-        return Ok(());
+        Ok(())
     }
 }
