@@ -149,9 +149,11 @@ impl WalFile {
                 .write(true)
                 .create_new(true)
                 .open(&file_path)
-                .context(UnableToCreateWal { path: file_path.clone() })?,
+                .context(UnableToCreateWal {
+                    path: file_path.clone(),
+                })?,
             size: AtomicU64::new(0),
-            path: file_path
+            path: file_path,
         })
     }
 
@@ -168,11 +170,13 @@ impl WalFile {
             id,
             size: AtomicU64::new(
                 file.metadata()
-                    .context(UnableToOpenWal { path: file_path.clone() })?
+                    .context(UnableToOpenWal {
+                        path: file_path.clone(),
+                    })?
                     .len(),
             ),
             file,
-            path: file_path
+            path: file_path,
         })
     }
 
@@ -290,11 +294,9 @@ impl Wal {
         self.total_size.fetch_add(payload_size, Relaxed);
         let new_wal_size = offset + payload_size;
 
-        io::write(&active_wal_ref.file, payload.bytes(), offset).context(
-            UnableToWritePayload {
-                path: &active_wal_ref.path,
-            },
-        )?;
+        io::write(&active_wal_ref.file, payload.bytes(), offset).context(UnableToWritePayload {
+            path: &active_wal_ref.path,
+        })?;
 
         if self.options.sync_writes {
             active_wal_ref.file.sync_all().context(UnableToSyncWal {

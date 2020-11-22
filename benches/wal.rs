@@ -1,15 +1,15 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use rand::{Rng, SeedableRng};
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use tempfile::TempDir;
 use wal::{Wal, WalOptions};
-use rand::{SeedableRng, Rng};
-use std::io::{BufWriter, Write};
-use std::fs::File;
 
 fn wal(c: &mut Criterion) {
     let mut group = c.benchmark_group("wal");
 
     let mut rng = rand::rngs::StdRng::seed_from_u64(1337);
-    let bytes: Vec<u8> = (0..8196).map(|_| { rng.gen() }).collect();
+    let bytes: Vec<u8> = (0..8196).map(|_| rng.gen()).collect();
 
     group.throughput(Throughput::Bytes(bytes.len() as u64));
 
@@ -17,7 +17,9 @@ fn wal(c: &mut Criterion) {
         let dir = TempDir::new().unwrap();
         let wal = Wal::with_options(
             dir.path().to_path_buf(),
-            WalOptions::default().sync_writes(false).rollover_size(u64::MAX),
+            WalOptions::default()
+                .sync_writes(false)
+                .rollover_size(u64::MAX),
         )
         .unwrap();
         b.iter(|| wal.append(&bytes).unwrap())
@@ -25,7 +27,8 @@ fn wal(c: &mut Criterion) {
 
     group.bench_function("buffered_write", |b| {
         let dir = TempDir::new().unwrap();
-        let mut writer = BufWriter::new(File::create(dir.path().to_path_buf().join("test.data")).unwrap());
+        let mut writer =
+            BufWriter::new(File::create(dir.path().to_path_buf().join("test.data")).unwrap());
         b.iter(|| writer.write_all(&bytes).unwrap())
     });
 
