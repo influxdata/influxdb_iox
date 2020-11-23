@@ -1,9 +1,9 @@
 //! This module has logic to translate gRPC structures into the native
 //! storage system form by extending the builders for those structures with new traits
 //!
-//! RPCPredicate --> storage::Predicates
+//! RPCPredicate --> query::Predicates
 //!
-//! Aggregates / windows --> storage::GroupByAndAggregate
+//! Aggregates / windows --> query::GroupByAndAggregate
 use std::convert::TryFrom;
 
 use arrow_deps::datafusion::{
@@ -16,10 +16,10 @@ use generated_types::{
     Aggregate as RPCAggregate, Duration as RPCDuration, Node as RPCNode, Predicate as RPCPredicate,
     Window as RPCWindow,
 };
+use query::groupby::WindowDuration;
+use query::groupby::{Aggregate as StorageAggregate, GroupByAndAggregate};
+use query::predicate::PredicateBuilder;
 use snafu::{ResultExt, Snafu};
-use storage::groupby::WindowDuration;
-use storage::groupby::{Aggregate as StorageAggregate, GroupByAndAggregate};
-use storage::predicate::PredicateBuilder;
 use tracing::warn;
 
 #[derive(Debug, Snafu)]

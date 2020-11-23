@@ -1,6 +1,6 @@
 //! This module contains implementations for the storage gRPC service
-//! implemented in terms of the `storage::Database` and
-//! `storage::DatabaseStore`
+//! implemented in terms of the `query::Database` and
+//! `query::DatabaseStore`
 
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
@@ -22,12 +22,12 @@ use data_types::error::ErrorLogger;
 // For some reason rust thinks these imports are unused, but then
 // complains of unresolved imports if they are not imported.
 use generated_types::{node, Node};
-use storage::groupby::GroupByAndAggregate;
+use query::groupby::GroupByAndAggregate;
 
 use crate::server::rpc::expr::{self, AddRPCNode, SpecialTagKeys};
 use crate::server::rpc::input::GrpcInputs;
 
-use storage::{
+use query::{
     exec::{
         seriesset::{Error as SeriesSetError, GroupedSeriesSetItem, SeriesSet},
         Executor as StorageExecutor,
@@ -1155,12 +1155,7 @@ mod tests {
     use super::*;
     use crate::panic::SendPanicsToTracing;
     use arrow_deps::arrow::datatypes::DataType;
-    use std::{
-        convert::TryFrom,
-        net::{IpAddr, Ipv4Addr, SocketAddr},
-        time::Duration,
-    };
-    use storage::{
+    use query::{
         exec::fieldlist::{Field, FieldList},
         exec::FieldListPlan,
         exec::GroupedSeriesSetPlans,
@@ -1172,6 +1167,11 @@ mod tests {
         test::QueryGroupsRequest,
         test::TestDatabaseStore,
         test::{ColumnValuesRequest, QuerySeriesRequest},
+    };
+    use std::{
+        convert::TryFrom,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+        time::Duration,
     };
     use test_helpers::tracing::TracingCapture;
     use tonic::Code;
@@ -2268,7 +2268,7 @@ mod tests {
             Ok(caps)
         }
 
-        /// Make a request to Storage::measurement_names and do the
+        /// Make a request to query::measurement_names and do the
         /// required async dance to flatten the resulting stream to Strings
         async fn measurement_names(
             &mut self,
@@ -2285,7 +2285,7 @@ mod tests {
             Ok(self.to_string_vec(responses))
         }
 
-        /// Make a request to Storage::read_window_aggregate and do the
+        /// Make a request to query::read_window_aggregate and do the
         /// required async dance to flatten the resulting stream to Strings
         async fn read_window_aggregate(
             &mut self,
@@ -2310,7 +2310,7 @@ mod tests {
             Ok(vec![s])
         }
 
-        /// Make a request to Storage::tag_keys and do the
+        /// Make a request to query::tag_keys and do the
         /// required async dance to flatten the resulting stream to Strings
         async fn tag_keys(
             &mut self,
@@ -2327,7 +2327,7 @@ mod tests {
             Ok(self.to_string_vec(responses))
         }
 
-        /// Make a request to Storage::measurement_tag_keys and do the
+        /// Make a request to query::measurement_tag_keys and do the
         /// required async dance to flatten the resulting stream to Strings
         async fn measurement_tag_keys(
             &mut self,
@@ -2344,7 +2344,7 @@ mod tests {
             Ok(self.to_string_vec(responses))
         }
 
-        /// Make a request to Storage::tag_values and do the
+        /// Make a request to query::tag_values and do the
         /// required async dance to flatten the resulting stream to Strings
         async fn tag_values(
             &mut self,
@@ -2361,7 +2361,7 @@ mod tests {
             Ok(self.to_string_vec(responses))
         }
 
-        /// Make a request to Storage::measurement_tag_values and do the
+        /// Make a request to query::measurement_tag_values and do the
         /// required async dance to flatten the resulting stream to Strings
         async fn measurement_tag_values(
             &mut self,
@@ -2378,7 +2378,7 @@ mod tests {
             Ok(self.to_string_vec(responses))
         }
 
-        /// Make a request to Storage::read_filter and do the
+        /// Make a request to query::read_filter and do the
         /// required async dance to flatten the resulting stream
         async fn read_filter(
             &mut self,
@@ -2403,7 +2403,7 @@ mod tests {
             Ok(vec![s])
         }
 
-        /// Make a request to Storage::query_groups and do the
+        /// Make a request to query::query_groups and do the
         /// required async dance to flatten the resulting stream
         async fn read_group(
             &mut self,
@@ -2428,7 +2428,7 @@ mod tests {
             Ok(vec![s])
         }
 
-        /// Make a request to Storage::measurement_fields and do the
+        /// Make a request to query::measurement_fields and do the
         /// required async dance to flatten the resulting stream to Strings
         async fn measurement_fields(
             &mut self,
