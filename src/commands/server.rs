@@ -10,7 +10,7 @@ use crate::server::rpc::storage;
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::Server;
-use query::exec::Executor as StorageExecutor;
+use query::exec::Executor as QueryExecutor;
 use write_buffer::{Db, WriteBufferDatabases};
 
 use snafu::{ResultExt, Snafu};
@@ -89,7 +89,7 @@ pub async fn main() -> Result<()> {
     }
 
     // Fire up the query executor
-    let executor = Arc::new(StorageExecutor::default());
+    let executor = Arc::new(QueryExecutor::default());
 
     // Construct and start up gRPC server
 

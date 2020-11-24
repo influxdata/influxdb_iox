@@ -30,7 +30,7 @@ use crate::server::rpc::input::GrpcInputs;
 use query::{
     exec::{
         seriesset::{Error as SeriesSetError, GroupedSeriesSetItem, SeriesSet},
-        Executor as StorageExecutor,
+        Executor as QueryExecutor,
     },
     org_and_bucket_to_database,
     predicate::PredicateBuilder,
@@ -213,7 +213,7 @@ impl Error {
 #[derive(Debug)]
 pub struct GrpcService<T: DatabaseStore> {
     db_store: Arc<T>,
-    executor: Arc<StorageExecutor>,
+    executor: Arc<QueryExecutor>,
 }
 
 impl<T> GrpcService<T>
@@ -221,7 +221,7 @@ where
     T: DatabaseStore + 'static,
 {
     /// Create a new GrpcService connected to `db_store`
-    pub fn new(db_store: Arc<T>, executor: Arc<StorageExecutor>) -> Self {
+    pub fn new(db_store: Arc<T>, executor: Arc<QueryExecutor>) -> Self {
         Self { db_store, executor }
     }
 }
@@ -763,7 +763,7 @@ fn get_database_name(input: &impl GrpcInputs) -> Result<String, Status> {
 /// (optional) range
 async fn measurement_name_impl<T>(
     db_store: Arc<T>,
-    executor: Arc<StorageExecutor>,
+    executor: Arc<QueryExecutor>,
     db_name: String,
     range: Option<TimestampRange>,
 ) -> Result<StringValuesResponse>
@@ -803,7 +803,7 @@ where
 /// Return tag keys with optional measurement, timestamp and arbitratry predicates
 async fn tag_keys_impl<T>(
     db_store: Arc<T>,
-    executor: Arc<StorageExecutor>,
+    executor: Arc<QueryExecutor>,
     db_name: String,
     measurement: Option<String>,
     range: Option<TimestampRange>,
@@ -854,7 +854,7 @@ where
 /// Return tag values for tag_name, with optional measurement, timestamp and arbitratry predicates
 async fn tag_values_impl<T>(
     db_store: Arc<T>,
-    executor: Arc<StorageExecutor>,
+    executor: Arc<QueryExecutor>,
     db_name: String,
     tag_name: String,
     measurement: Option<String>,
@@ -912,7 +912,7 @@ where
 async fn read_filter_impl<T>(
     tx: mpsc::Sender<Result<ReadResponse, Status>>,
     db_store: Arc<T>,
-    executor: Arc<StorageExecutor>,
+    executor: Arc<QueryExecutor>,
     db_name: String,
     range: Option<TimestampRange>,
     rpc_predicate: Option<Predicate>,
@@ -994,7 +994,7 @@ async fn convert_series_set(
 async fn query_group_impl<T>(
     tx: mpsc::Sender<Result<ReadResponse, Status>>,
     db_store: Arc<T>,
-    executor: Arc<StorageExecutor>,
+    executor: Arc<QueryExecutor>,
     db_name: String,
     range: Option<TimestampRange>,
     rpc_predicate: Option<Predicate>,
@@ -1077,7 +1077,7 @@ async fn convert_grouped_series_set(
 /// Return fields with optional measurement, timestamp and arbitratry predicates
 async fn measurement_fields_impl<T>(
     db_store: Arc<T>,
-    executor: Arc<StorageExecutor>,
+    executor: Arc<QueryExecutor>,
     db_name: String,
     measurement: String,
     range: Option<TimestampRange>,
@@ -1130,7 +1130,7 @@ where
 pub async fn make_server<T>(
     bind_addr: SocketAddr,
     storage: Arc<T>,
-    executor: Arc<StorageExecutor>,
+    executor: Arc<QueryExecutor>,
 ) -> Result<()>
 where
     T: DatabaseStore + 'static,
@@ -1160,7 +1160,7 @@ mod tests {
         exec::FieldListPlan,
         exec::GroupedSeriesSetPlans,
         exec::SeriesSetPlans,
-        groupby::{Aggregate as StorageAggregate, WindowDuration as StorageWindowDuration},
+        groupby::{Aggregate as QueryAggregate, WindowDuration as StorageWindowDuration},
         id::Id,
         test::ColumnNamesRequest,
         test::FieldColumnsRequest,
@@ -1854,7 +1854,7 @@ mod tests {
         let expected_request = QueryGroupsRequest {
             predicate: "Predicate { exprs: [#state Eq Utf8(\"MA\")] range: TimestampRange { start: 150, end: 200 }}".into(),
             gby_agg: GroupByAndAggregate::Columns {
-                agg: StorageAggregate::Sum,
+                agg: QueryAggregate::Sum,
                 group_columns: vec![String::from("tag1")],
             }
         };
@@ -1906,7 +1906,7 @@ mod tests {
         let expected_request = Some(QueryGroupsRequest {
             predicate: "Predicate {}".into(),
             gby_agg: GroupByAndAggregate::Columns {
-                agg: StorageAggregate::Sum,
+                agg: QueryAggregate::Sum,
                 group_columns: vec![],
             },
         });
@@ -1957,7 +1957,7 @@ mod tests {
         let expected_request_window_every = QueryGroupsRequest {
             predicate: "Predicate { exprs: [#state Eq Utf8(\"MA\")] range: TimestampRange { start: 150, end: 200 }}".into(),
             gby_agg: GroupByAndAggregate::Window {
-                agg: StorageAggregate::Sum,
+                agg: QueryAggregate::Sum,
                 every: StorageWindowDuration::Fixed {
                     nanoseconds: 1122,
                 },
@@ -2018,7 +2018,7 @@ mod tests {
         let expected_request_window = QueryGroupsRequest {
             predicate: "Predicate { exprs: [#state Eq Utf8(\"MA\")] range: TimestampRange { start: 150, end: 200 }}".into(),
             gby_agg : GroupByAndAggregate::Window {
-                agg: StorageAggregate::Sum,
+                agg: QueryAggregate::Sum,
                 every: StorageWindowDuration::Fixed {
                     nanoseconds: 1122,
                 },
@@ -2508,7 +2508,7 @@ mod tests {
         iox_client: IOxClient,
         storage_client: StorageClientWrapper,
         test_storage: Arc<TestDatabaseStore>,
-        _test_executor: Arc<StorageExecutor>,
+        _test_executor: Arc<QueryExecutor>,
     }
 
     impl Fixture {
@@ -2516,7 +2516,7 @@ mod tests {
         /// a fixture with the test server and clients
         async fn new(port: u16) -> Result<Self, tonic::transport::Error> {
             let test_storage = Arc::new(TestDatabaseStore::new());
-            let test_executor = Arc::new(StorageExecutor::default());
+            let test_executor = Arc::new(QueryExecutor::default());
 
             // TODO: specify port 0 to let the OS pick the port (need to
             // figure out how to get access to the actual addr from tonic)
