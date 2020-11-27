@@ -898,6 +898,7 @@ mod tests {
                     table_name,
                     tag_columns,
                     num_prefix_tag_group_columns,
+                    false, // skip_group_items
                     field_columns,
                     it,
                 )
