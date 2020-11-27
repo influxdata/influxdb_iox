@@ -519,12 +519,12 @@ pub fn make_read_window_aggregate(
     let (every, offset) = match (window, window_every, offset) {
         (None, 0, 0) => return EmptyWindow {}.fail(),
         (Some(window), 0, 0) => (
-            convert_duration(window.every, false).map_err(|e| {
+            convert_duration(window.every, DurationValidation::ForbidZero).map_err(|e| {
                 Error::InvalidWindowEveryDuration {
                     description: e.into(),
                 }
             })?,
-            convert_duration(window.offset, true).map_err(|e| {
+            convert_duration(window.offset, DurationValidation::AllowZero).map_err(|e| {
                 Error::InvalidWindowOffsetDuration {
                     description: e.into(),
                 }
@@ -546,24 +546,33 @@ pub fn make_read_window_aggregate(
     Ok(GroupByAndAggregate::Window { agg, every, offset })
 }
 
-/// Convert the RPC input to a IOx WindowDuration structure. If
-/// allow_zero is false, then empty windows produce an error
+enum DurationValidation {
+    /// Zero windows are allowed
+    AllowZero,
+    /// Zero windows are not allowed
+    ForbidZero,
+}
+
+/// Convert the RPC input to an IOx WindowDuration
+/// structure. `zero_validation` specifies what to do if the window is empty
 fn convert_duration(
     duration: Option<RPCDuration>,
-    allow_zero: bool,
+    zero_validation: DurationValidation,
 ) -> Result<WindowDuration, &'static str> {
     let duration = duration.ok_or("No duration specified in RPC")?;
 
-    match (duration.nsecs, duration.months) {
+    match (duration.nsecs, duration.months, zero_validation) {
         // Same error as Go code: https://github.com/influxdata/flux/blob/master/execute/window.go#L36
-        (0, 0) if !allow_zero => Err("duration used as an interval cannot be zero"),
-        (0, 0) => Ok(WindowDuration::empty()),
-        (nsecs, 0) => Ok(WindowDuration::from_nanoseconds(nsecs)),
-        (0, _) => Ok(WindowDuration::from_months(
+        (0, 0, DurationValidation::ForbidZero) => {
+            Err("duration used as an interval cannot be zero")
+        }
+        (0, 0, DurationValidation::AllowZero) => Ok(WindowDuration::empty()),
+        (nsecs, 0, _) => Ok(WindowDuration::from_nanoseconds(nsecs)),
+        (0, _, _) => Ok(WindowDuration::from_months(
             duration.months,
             duration.negative,
         )),
-        (_, _) => Err("duration used as an interval cannot mix month and nanosecond units"),
+        (_, _, _) => Err("duration used as an interval cannot mix month and nanosecond units"),
     }
 }
 
