@@ -5,7 +5,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use generated_types::{
-    i_ox_server::{IOx, IOxServer},
+    i_ox_testing_server::{IOxTesting, IOxTestingServer},
     storage_server::{Storage, StorageServer},
     CapabilitiesResponse, Capability, Int64ValuesResponse, MeasurementFieldsRequest,
     MeasurementFieldsResponse, MeasurementNamesRequest, MeasurementTagKeysRequest,
@@ -227,7 +227,7 @@ where
 
 #[tonic::async_trait]
 /// Implements the protobuf defined IOx rpc service for a DatabaseStore
-impl<T> IOx for GrpcService<T>
+impl<T> IOxTesting for GrpcService<T>
 where
     T: DatabaseStore + 'static,
 {
@@ -1114,7 +1114,7 @@ where
     T: DatabaseStore + 'static,
 {
     tonic::transport::Server::builder()
-        .add_service(IOxServer::new(GrpcService::new(
+        .add_service(IOxTestingServer::new(GrpcService::new(
             storage.clone(),
             executor.clone(),
         )))
@@ -1156,13 +1156,13 @@ mod tests {
     use futures::prelude::*;
 
     use generated_types::{
-        aggregate::AggregateType, i_ox_client, read_response::frame, storage_client,
+        aggregate::AggregateType, i_ox_testing_client, read_response::frame, storage_client,
         Aggregate as RPCAggregate, Duration as RPCDuration, ReadSource, Window as RPCWindow,
     };
 
     use prost::Message;
 
-    type IOxClient = i_ox_client::IOxClient<tonic::transport::Channel>;
+    type IOxTestingClient = i_ox_testing_client::IOxTestingClient<tonic::transport::Channel>;
     type StorageClient = storage_client::StorageClient<tonic::transport::Channel>;
 
     fn to_str_vec(s: &[&str]) -> Vec<String> {
@@ -2441,7 +2441,7 @@ mod tests {
 
     // Wrapper around raw clients and test database
     struct Fixture {
-        iox_client: IOxClient,
+        iox_client: IOxTestingClient,
         storage_client: StorageClientWrapper,
         test_storage: Arc<TestDatabaseStore>,
         _test_executor: Arc<QueryExecutor>,
@@ -2468,7 +2468,7 @@ mod tests {
             let server = make_server(socket, test_storage.clone(), test_executor.clone());
             tokio::task::spawn(server);
 
-            let iox_client = connect_to_server::<IOxClient>(bind_addr)
+            let iox_client = connect_to_server::<IOxTestingClient>(bind_addr)
                 .await
                 .context(Tonic)?;
             let storage_client = StorageClientWrapper::new(
@@ -2493,7 +2493,7 @@ mod tests {
     }
 
     #[tonic::async_trait]
-    impl NewClient for IOxClient {
+    impl NewClient for IOxTestingClient {
         async fn connect(addr: String) -> Result<Self, tonic::transport::Error> {
             Self::connect(addr).await
         }

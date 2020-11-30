@@ -11,6 +11,6 @@ message TestErrorResponse {
 }
 
 
-service IOx {
+service IOxTesting {
     rpc TestError(TestErrorRequest) returns (TestErrorResponse) {}
 }
