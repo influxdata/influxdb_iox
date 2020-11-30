@@ -639,7 +639,7 @@ impl<'a> Loggable<'a> for RPCPredicate {
 /// let pred = RPCPredicate (...);
 /// println!("The predicate is {:?}", loggable_predicate(pred));
 ///
-pub fn displayable_predicate<'a>(pred: Option<&'a RPCPredicate>) -> impl fmt::Display + 'a {
+pub fn displayable_predicate(pred: Option<&RPCPredicate>) -> impl fmt::Display + '_ {
     struct Wrapper<'a>(Option<&'a RPCPredicate>);
 
     impl<'a> fmt::Display for Wrapper<'a> {
@@ -713,9 +713,9 @@ fn format_value<'a>(value: &'a RPCValue, f: &mut fmt::Formatter<'_>) -> fmt::Res
         RegexValue(r) => write!(f, "RegEx:{}", r),
         TagRefValue(bytes) => {
             let temp = String::from_utf8_lossy(bytes);
-            let sval = match bytes.as_slice() {
-                &[0] => "_m[0x00]",
-                &[255] => "_f[0xff]",
+            let sval = match *bytes.as_slice() {
+                [0] => "_m[0x00]",
+                [255] => "_f[0xff]",
                 _ => &temp,
             };
             write!(f, "TagRef:{}", sval)
@@ -726,7 +726,7 @@ fn format_value<'a>(value: &'a RPCValue, f: &mut fmt::Formatter<'_>) -> fmt::Res
     }
 }
 
-fn format_logical<'a>(v: i32, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+fn format_logical(v: i32, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     if v == RPCLogical::And as i32 {
         write!(f, "AND")
     } else if v == RPCLogical::Or as i32 {
@@ -736,7 +736,7 @@ fn format_logical<'a>(v: i32, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     }
 }
 
-fn format_comparison<'a>(v: i32, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+fn format_comparison(v: i32, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     if v == RPCComparison::Equal as i32 {
         write!(f, "==")
     } else if v == RPCComparison::NotEqual as i32 {
