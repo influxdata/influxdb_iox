@@ -6,7 +6,7 @@ use query::group_by::WindowDuration;
 use query::{
     exec::{stringset::StringSet, FieldListPlan, SeriesSetPlan, SeriesSetPlans, StringSetPlan},
     predicate::Predicate,
-    TSDatabase,
+    SQLDatabase, TSDatabase,
 };
 use wal::{
     writer::{start_wal_sync_task, Error as WalWriterError, WalDetails},
@@ -509,6 +509,11 @@ impl TSDatabase for Db {
             }
         }
     }
+}
+
+#[async_trait]
+impl SQLDatabase for Db {
+    type Error = Error;
 
     async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, Self::Error> {
         let mut tables = vec![];
