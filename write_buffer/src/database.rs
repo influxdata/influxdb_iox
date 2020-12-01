@@ -339,6 +339,17 @@ impl Db {
 
         Ok(())
     }
+
+    async fn table_to_arrow(&self, table_name: &str, columns: &[&str]) -> Result<Vec<RecordBatch>> {
+        let partitions = self.partitions.read().await;
+
+        let batches = partitions
+            .iter()
+            .map(|p| p.table_to_arrow(table_name, columns))
+            .collect::<Result<Vec<_>, crate::partition::Error>>()?;
+
+        Ok(batches)
+    }
 }
 
 #[async_trait]
@@ -497,21 +508,6 @@ impl TSDatabase for Db {
                 Ok(visitor.plans.into())
             }
         }
-    }
-
-    async fn table_to_arrow(
-        &self,
-        table_name: &str,
-        columns: &[&str],
-    ) -> Result<Vec<RecordBatch>, Self::Error> {
-        let partitions = self.partitions.read().await;
-
-        let batches = partitions
-            .iter()
-            .map(|p| p.table_to_arrow(table_name, columns))
-            .collect::<Result<Vec<_>, crate::partition::Error>>()?;
-
-        Ok(batches)
     }
 
     async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, Self::Error> {

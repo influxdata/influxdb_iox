@@ -104,14 +104,6 @@ pub trait TSDatabase: Debug + Send + Sync {
         predicate: Predicate,
         gby_agg: GroupByAndAggregate,
     ) -> Result<SeriesSetPlans, Self::Error>;
-
-    /// Fetch the specified table names and columns as Arrow
-    /// RecordBatches. Columns are returned in the order specified.
-    async fn table_to_arrow(
-        &self,
-        table_name: &str,
-        columns: &[&str],
-    ) -> Result<Vec<RecordBatch>, Self::Error>;
 }
 
 #[async_trait]

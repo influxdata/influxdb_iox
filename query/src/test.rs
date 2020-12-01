@@ -400,15 +400,6 @@ impl TSDatabase for TestDatabase {
                 message: "No saved query_groups in TestDatabase",
             })
     }
-
-    /// Fetch the specified table names and columns as Arrow RecordBatches
-    async fn table_to_arrow(
-        &self,
-        _table_name: &str,
-        _columns: &[&str],
-    ) -> Result<Vec<RecordBatch>, Self::Error> {
-        unimplemented!("table_to_arrow Not yet implemented for test database");
-    }
 }
 
 #[derive(Debug)]
