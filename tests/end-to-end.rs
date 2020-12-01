@@ -304,7 +304,7 @@ async fn read_and_write_data() -> Result<()> {
         tags_source: read_source.clone(),
         range: range.clone(),
         predicate: predicate.clone(),
-        tag_key: String::from("host"),
+        tag_key: b"host".to_vec(),
     });
 
     let tag_values_response = storage_client.tag_values(tag_values_request).await?;
