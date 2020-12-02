@@ -2488,13 +2488,11 @@ mod tests {
         /// converts the byte strings to rust strings, handling the special case _m (0x00) and _f (0xff) values
         fn bytes_to_strings(bytes: Vec<u8>) -> String {
             match bytes.as_slice() {
-                [0] => return "MEASUREMENT(0x00)".into(),
-                // note this isn't valid UTF8 and thus will assert below
-                [255] => return "FIELD(0xff)".into(),
-                _ => {}
-            };
-
-            String::from_utf8(bytes).expect("string value response was not utf8")
+                [0] => "MEASUREMENT(0x00)".into(),
+                // note this isn't valid UTF8 and thus would assert below
+                [255] => "FIELD(0xff)".into(),
+                _ => String::from_utf8(bytes).expect("string value response was not utf8"),
+            }
         }
     }
 
