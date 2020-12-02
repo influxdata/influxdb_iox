@@ -830,10 +830,10 @@ where
         })?;
 
     // Map the resulting collection of Strings into a Vec<Vec<u8>>for return
-    let values = table_names
+    let values: Vec<Vec<u8>> = table_names
         .iter()
         .map(|name| name.bytes().collect())
-        .collect::<Vec<_>>();
+        .collect();
 
     Ok(StringValuesResponse { values })
 }
@@ -944,7 +944,7 @@ where
     let values: Vec<Vec<u8>> = tag_values
         .iter()
         .map(|name| name.bytes().collect())
-        .collect::<Vec<_>>();
+        .collect();
 
     // Debugging help: uncomment to see raw values coming back
     //info!("Returning tag values");
