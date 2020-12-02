@@ -295,7 +295,7 @@ async fn read_and_write_data() -> Result<()> {
     let keys = &responses[0].values;
     let keys: Vec<_> = keys
         .iter()
-        .map(|v| bytes_to_strings(v.as_slice()))
+        .map(|v| tag_key_bytes_to_strings(v.clone()))
         .collect();
 
     assert_eq!(keys, vec!["_m(0x00)", "host", "name", "region", "_f(0xff)"]);
@@ -313,7 +313,7 @@ async fn read_and_write_data() -> Result<()> {
     let values = &responses[0].values;
     let values: Vec<_> = values
         .iter()
-        .map(|v| bytes_to_strings(v.as_slice()))
+        .map(|v| tag_key_bytes_to_strings(v.clone()))
         .collect();
 
     assert_eq!(values, vec!["server01"]);
@@ -402,7 +402,7 @@ async fn read_and_write_data() -> Result<()> {
     let values = &responses[0].values;
     let values: Vec<_> = values
         .iter()
-        .map(|v| bytes_to_strings(v.as_slice()))
+        .map(|v| tag_key_bytes_to_strings(v.clone()))
         .collect();
 
     assert_eq!(values, vec!["_m(0x00)", "host", "region", "_f(0xff)"]);
@@ -426,7 +426,7 @@ async fn read_and_write_data() -> Result<()> {
     let values = &responses[0].values;
     let values: Vec<_> = values
         .iter()
-        .map(|v| bytes_to_strings(v.as_slice()))
+        .map(|v| tag_key_bytes_to_strings(v.clone()))
         .collect();
 
     assert_eq!(values, vec!["server01"]);
@@ -558,17 +558,6 @@ async fn test_read_window_aggregate(
         expected_frames.join("\n"),
         actual_frames.join("\n")
     );
-}
-
-/// converts the byte strings to rust strings, handling the special case _m (0x00) and _f (0xff) values
-fn bytes_to_strings(bytes: &[u8]) -> String {
-    match bytes {
-        [0] => return "_m(0x00)".into(),
-        [255] => return "_f(0xff)".into(),
-        _ => {}
-    };
-
-    String::from_utf8(bytes.to_vec()).expect("string value response was not utf8")
 }
 
 /// Create a predicate representing tag_name=tag_value in the horrible gRPC structs

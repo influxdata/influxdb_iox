@@ -1193,7 +1193,8 @@ mod tests {
         net::{IpAddr, Ipv4Addr, SocketAddr},
         time::Duration,
     };
-    use test_helpers::tracing::TracingCapture;
+    use test_helpers::{tag_key_bytes_to_strings, tracing::TracingCapture};
+
     use tonic::Code;
 
     use futures::prelude::*;
@@ -1319,7 +1320,7 @@ mod tests {
         test_db.set_column_names(to_string_vec(&tag_keys)).await;
 
         let actual_tag_keys = fixture.storage_client.tag_keys(request).await?;
-        let mut expected_tag_keys = vec!["FIELD(0xff)", "MEASUREMENT(0x00)"];
+        let mut expected_tag_keys = vec!["_f(0xff)", "_m(0x00)"];
         expected_tag_keys.extend(tag_keys.iter());
 
         assert_eq!(
@@ -1411,7 +1412,7 @@ mod tests {
 
         let actual_tag_keys = fixture.storage_client.measurement_tag_keys(request).await?;
 
-        let mut expected_tag_keys = vec!["FIELD(0xff)", "MEASUREMENT(0x00)"];
+        let mut expected_tag_keys = vec!["_f(0xff)", "_m(0x00)"];
         expected_tag_keys.extend(tag_keys.iter());
 
         assert_eq!(
@@ -2477,22 +2478,12 @@ mod tests {
                 .into_iter()
                 .map(|r| r.values.into_iter())
                 .flatten()
-                .map(Self::bytes_to_strings)
+                .map(tag_key_bytes_to_strings)
                 .collect::<Vec<_>>();
 
             strings.sort();
 
             strings
-        }
-
-        /// converts the byte strings to rust strings, handling the special case _m (0x00) and _f (0xff) values
-        fn bytes_to_strings(bytes: Vec<u8>) -> String {
-            match bytes.as_slice() {
-                [0] => "MEASUREMENT(0x00)".into(),
-                // note this isn't valid UTF8 and thus would assert below
-                [255] => "FIELD(0xff)".into(),
-                _ => String::from_utf8(bytes).expect("string value response was not utf8"),
-            }
         }
     }
 
