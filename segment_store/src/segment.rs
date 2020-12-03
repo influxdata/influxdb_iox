@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use arrow_deps::arrow::datatypes::SchemaRef;
 
 use crate::column::{
-    cmp::Operator, Column, OwnedValue, RowIDs, RowIDsOption, Scalar, Value, Values,
+    cmp::Operator, Column, OwnedValue, RowIDs, RowIDsOption, Scalar, Value, Values, ValuesIterator,
 };
 
 /// The name used for a timestamp column.
@@ -169,9 +169,9 @@ impl Segment {
         &self,
         columns: &[ColumnName<'a>],
         predicates: &[Predicate<'_>],
-    ) -> Vec<(ColumnName<'a>, Values)> {
+    ) -> ReadFilterResult<'a> {
         let row_ids = self.row_ids_from_predicates(predicates);
-        self.materialise_rows(columns, row_ids)
+        ReadFilterResult(self.materialise_rows(columns, row_ids))
     }
 
     fn materialise_rows<'a>(
@@ -208,67 +208,69 @@ impl Segment {
         }
     }
 
-    // Determines the set of row ids that satisfy the time range and all of the
-    // optional predicates.
-    //
-    // TODO(edd): right now `time_range` is special cased so we can use the
-    // optimised execution path in the column to filter on a range. However,
-    // eventually we should be able to express the time range as just another
-    // one or two predicates.
+    // Determines the set of row ids that satisfy the provided predicates.
+    // If `predicates` contains two predicates on the time column they are
+    // special-cased.
     fn row_ids_from_predicates(&self, predicates: &[Predicate<'_>]) -> RowIDsOption {
+        // TODO(edd): perf - potentially pool this so we can re-use it once
+        // rows have been materialised and it's no longer needed.
+        // Initialise a bitmap RowIDs because it's like that set operations will
+        // be necessary.
+        let mut result_row_ids = RowIDs::new_bitmap();
+
         // TODO(edd): perf - pool the dst buffer so we can re-use it across
         // subsequent calls to `row_ids_from_predicates`.
         // Right now this buffer will be re-used across all columns in the
-        // segment with predicates.
+        // segment but not re-used for subsequent calls _to_ the segment.
         let mut dst = RowIDs::new_bitmap();
 
-        // find the time range predicates and execute a specialised range based
-        // row id lookup.
-        let time_predicates = predicates
+        let mut predicates = Cow::Borrowed(predicates);
+        // If there is a time-range in the predicates (two time predicates), then
+        // execute an optimised version that will use a range based predicate
+        // on the time column.
+        if predicates
             .iter()
-            .filter(|(col_name, _)| col_name == &TIME_COLUMN_NAME)
-            .collect::<Vec<_>>();
-        assert!(time_predicates.len() == 2);
+            .filter(|(col, _)| *col == TIME_COLUMN_NAME)
+            .count()
+            // Check if we have two predicates on the time column, i.e., a time range.
+            == 2
+        {
+            // Apply optimised filtering to time column
+            let time_pred_row_ids =
+                self.row_ids_from_predicates_with_time_range(predicates.as_ref(), dst);
+            match time_pred_row_ids {
+                // No matching rows based on time range
+                RowIDsOption::None(_) => return time_pred_row_ids,
 
-        let time_row_ids = self.time_column().row_ids_filter_range(
-            &time_predicates[0].1, // min time
-            &time_predicates[1].1, // max time
-            dst,
-        );
+                // all rows match - continue to apply other predicates
+                RowIDsOption::All(_dst) => {
+                    dst = _dst; // hand buffer back
+                }
 
-        // TODO(edd): potentially pass this in so we can re-use it once we
-        // have materialised any results.
-        let mut result_row_ids = RowIDs::new_bitmap();
-
-        match time_row_ids {
-            // No matching rows based on time range - return buffer
-            RowIDsOption::None(_) => return time_row_ids,
-
-            // all rows match - continue to apply predicates
-            RowIDsOption::All(_dst) => {
-                dst = _dst; // hand buffer back
+                // some rows match - continue to apply predicates
+                RowIDsOption::Some(row_ids) => {
+                    // fill the result row id set with the matching rows from the
+                    // time column.
+                    result_row_ids.union(&row_ids);
+                    dst = row_ids // hand buffer back
+                }
             }
 
-            // some rows match - continue to apply predicates
-            RowIDsOption::Some(row_ids) => {
-                // union empty result set with matching timestamp rows
-                result_row_ids.union(&row_ids);
-                dst = row_ids // hand buffer back
-            }
+            // remove time predicates so they're not processed again
+            let mut filtered_predicates = predicates.to_vec();
+            filtered_predicates.retain(|(col, _)| *col != TIME_COLUMN_NAME);
+            predicates = Cow::Owned(filtered_predicates);
         }
 
-        for (col_name, (op, value)) in predicates {
-            if col_name == &TIME_COLUMN_NAME {
-                continue; // we already processed the time column as a special case.
-            }
+        for (col_name, (op, value)) in predicates.iter() {
             // N.B column should always exist because validation of
-            // predicates should happen at the `Table` level.
+            // predicates is not the responsibility of the `Segment`.
             let col = self.column_by_name(col_name).unwrap();
 
-            // Explanation of how this buffer pattern works here. The idea is
+            // Explanation of how this buffer pattern works. The idea is
             // that the buffer should be returned to the caller so it can be
-            // re-used on other columns. To do that we need to hand the buffer
-            // back even if we haven't populated it with any results.
+            // re-used on other columns. Each call to `row_ids_filter` returns
+            // the buffer back enabling it to be re-used.
             match col.row_ids_filter(op, value, dst) {
                 // No rows will be returned for the segment because this column
                 // doe not match any rows.
@@ -293,10 +295,33 @@ impl Segment {
         }
 
         if result_row_ids.is_empty() {
-            // All rows matched all predicates - return the empty buffer.
+            // All rows matched all predicates because any predictates not matching
+            // any rows would have resulted in an early return.
             return RowIDsOption::All(result_row_ids);
         }
         RowIDsOption::Some(result_row_ids)
+    }
+
+    // An optimised function for applying two comparison predicates to a time
+    // column at once.
+    fn row_ids_from_predicates_with_time_range(
+        &self,
+        predicates: &[Predicate<'_>],
+        dst: RowIDs,
+    ) -> RowIDsOption {
+        // find the time range predicates and execute a specialised range based
+        // row id lookup.
+        let time_predicates = predicates
+            .iter()
+            .filter(|(col_name, _)| col_name == &TIME_COLUMN_NAME)
+            .collect::<Vec<_>>();
+        assert!(time_predicates.len() == 2);
+
+        self.time_column().row_ids_filter_range(
+            &time_predicates[0].1, // min time
+            &time_predicates[1].1, // max time
+            dst,
+        )
     }
 }
 
@@ -409,55 +434,76 @@ impl MetaData {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::column::ValuesIterator;
+/// Encapsulates results from segments with a structure that makes them easier
+/// to work with and display.
+pub struct ReadFilterResult<'a>(pub Vec<(ColumnName<'a>, Values)>);
 
-    fn stringify_read_filter_results(results: Vec<(ColumnName<'_>, Values)>) -> String {
-        let mut out = String::new();
+impl<'a> ReadFilterResult<'a> {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<'a> std::fmt::Debug for &ReadFilterResult<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // header line.
-        for (i, (k, _)) in results.iter().enumerate() {
-            out.push_str(k);
-            if i < results.len() - 1 {
-                out.push(',');
+        for (i, (k, _)) in self.0.iter().enumerate() {
+            write!(f, "{}", k)?;
+
+            if i < self.0.len() - 1 {
+                write!(f, ",")?;
             }
         }
-        out.push('\n');
+        writeln!(f)?;
 
-        // TODO: handle empty results?
-        let expected_rows = results[0].1.len();
+        // Display the rest of the values.
+        std::fmt::Display::fmt(&self, f)
+    }
+}
+
+impl<'a> std::fmt::Display for &ReadFilterResult<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_empty() {
+            return Ok(());
+        }
+
+        let expected_rows = self.0[0].1.len();
         let mut rows = 0;
 
-        let mut iter_map = results
+        let mut iter_map = self
+            .0
             .iter()
             .map(|(k, v)| (*k, ValuesIterator::new(v)))
             .collect::<BTreeMap<&str, ValuesIterator<'_>>>();
 
         while rows < expected_rows {
             if rows > 0 {
-                out.push('\n');
+                writeln!(f)?;
             }
 
-            for (i, (k, _)) in results.iter().enumerate() {
+            for (i, (k, _)) in self.0.iter().enumerate() {
                 if let Some(itr) = iter_map.get_mut(k) {
-                    out.push_str(&format!("{}", itr.next().unwrap()));
-                    if i < results.len() - 1 {
-                        out.push(',');
+                    write!(f, "{}", itr.next().unwrap())?;
+                    if i < self.0.len() - 1 {
+                        write!(f, ",")?;
                     }
                 }
             }
 
             rows += 1;
         }
-
-        out
+        writeln!(f)
     }
+}
 
-    fn build_predicates(
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn build_predicates_with_time(
         from: i64,
         to: i64,
-        column_predicates: Vec<Predicate<'_>>,
+        others: Vec<Predicate<'_>>,
     ) -> Vec<Predicate<'_>> {
         let mut arr = vec![
             (
@@ -470,8 +516,74 @@ mod test {
             ),
         ];
 
-        arr.extend(column_predicates);
+        arr.extend(others);
         arr
+    }
+
+    #[test]
+    fn row_ids_from_predicates() {
+        let mut columns = BTreeMap::new();
+        let tc = ColumnType::Time(Column::from(&[100_i64, 200, 500, 600, 300, 300][..]));
+        columns.insert("time".to_string(), tc);
+        let rc = ColumnType::Tag(Column::from(
+            &["west", "west", "east", "west", "south", "north"][..],
+        ));
+        columns.insert("region".to_string(), rc);
+        let segment = Segment::new(6, columns);
+
+        // Closed partially covering "time range" predicate
+        let row_ids =
+            segment.row_ids_from_predicates(&build_predicates_with_time(200, 600, vec![]));
+        assert_eq!(row_ids.unwrap().to_vec(), vec![1, 2, 4, 5]);
+
+        // Fully covering "time range" predicate
+        let row_ids = segment.row_ids_from_predicates(&build_predicates_with_time(10, 601, vec![]));
+        assert!(matches!(row_ids, RowIDsOption::All(_)));
+
+        // Open ended "time range" predicate
+        let row_ids = segment.row_ids_from_predicates(&[(
+            TIME_COLUMN_NAME,
+            (Operator::GTE, Value::Scalar(Scalar::I64(300))),
+        )]);
+        assert_eq!(row_ids.unwrap().to_vec(), vec![2, 3, 4, 5]);
+
+        // Closed partially covering "time range" predicate and other column predicate
+        let row_ids = segment.row_ids_from_predicates(&build_predicates_with_time(
+            200,
+            600,
+            vec![("region", (Operator::Equal, Value::String("south")))],
+        ));
+        assert_eq!(row_ids.unwrap().to_vec(), vec![4]);
+
+        // Fully covering "time range" predicate and other column predicate
+        let row_ids = segment.row_ids_from_predicates(&build_predicates_with_time(
+            10,
+            601,
+            vec![("region", (Operator::Equal, Value::String("west")))],
+        ));
+        assert_eq!(row_ids.unwrap().to_vec(), vec![0, 1, 3]);
+
+        // "time range" predicate and other column predicate that doesn't match
+        let row_ids = segment.row_ids_from_predicates(&build_predicates_with_time(
+            200,
+            600,
+            vec![("region", (Operator::Equal, Value::String("nope")))],
+        ));
+        assert!(matches!(row_ids, RowIDsOption::None(_)));
+
+        // Just a column predicate
+        let row_ids = segment
+            .row_ids_from_predicates(&[("region", (Operator::Equal, Value::String("east")))]);
+        assert_eq!(row_ids.unwrap().to_vec(), vec![2]);
+
+        // Predicate can matches all the rows
+        let row_ids = segment
+            .row_ids_from_predicates(&[("region", (Operator::NotEqual, Value::String("abba")))]);
+        assert!(matches!(row_ids, RowIDsOption::All(_)));
+
+        // No predicates
+        let row_ids = segment.row_ids_from_predicates(&[]);
+        assert!(matches!(row_ids, RowIDsOption::All(_)));
     }
 
     #[test]
@@ -495,72 +607,81 @@ mod test {
 
         let segment = Segment::new(6, columns);
 
-        let results = segment.read_filter(
-            &["count", "region", "time"],
-            &build_predicates(1, 6, vec![]),
-        );
-        let expected = "count,region,time
+        let cases = vec![
+            (
+                vec!["count", "region", "time"],
+                build_predicates_with_time(1, 6, vec![]),
+                "count,region,time
 100,west,1
 101,west,2
 200,east,3
 203,west,4
-203,south,5";
-        assert_eq!(stringify_read_filter_results(results), expected);
+203,south,5
+",
+            ),
+            (
+                vec!["time", "region", "method"],
+                build_predicates_with_time(-19, 2, vec![]),
+                "time,region,method
+1,west,GET
+",
+            ),
+            (
+                vec!["time"],
+                build_predicates_with_time(0, 3, vec![]),
+                "time
+1
+2
+",
+            ),
+            (
+                vec!["method"],
+                build_predicates_with_time(0, 3, vec![]),
+                "method
+GET
+POST
+",
+            ),
+            (
+                vec!["count", "method", "time"],
+                build_predicates_with_time(
+                    0,
+                    6,
+                    vec![("method", (Operator::Equal, Value::String("POST")))],
+                ),
+                "count,method,time
+101,POST,2
+200,POST,3
+203,POST,4
+",
+            ),
+            (
+                vec!["region", "time"],
+                build_predicates_with_time(
+                    0,
+                    6,
+                    vec![("method", (Operator::Equal, Value::String("POST")))],
+                ),
+                "region,time
+west,2
+east,3
+west,4
+",
+            ),
+        ];
 
-        let results = segment.read_filter(
-            &["time", "region", "method"],
-            &build_predicates(-19, 2, vec![]),
-        );
-        let expected = "time,region,method
-1,west,GET";
-        assert_eq!(stringify_read_filter_results(results), expected);
+        for (cols, predicates, expected) in cases {
+            let results = segment.read_filter(&cols, &predicates);
+            assert_eq!(format!("{:?}", &results), expected);
+        }
 
+        // test no matching rows
         let results = segment.read_filter(
             &["method", "region", "time"],
-            &build_predicates(-19, 1, vec![]),
+            &build_predicates_with_time(-19, 1, vec![]),
         );
         let expected = "";
         assert!(results.is_empty());
-
-        let results = segment.read_filter(&["time"], &build_predicates(0, 3, vec![]));
-        let expected = "time
-1
-2";
-        assert_eq!(stringify_read_filter_results(results), expected);
-
-        let results = segment.read_filter(&["method"], &build_predicates(0, 3, vec![]));
-        let expected = "method
-GET
-POST";
-        assert_eq!(stringify_read_filter_results(results), expected);
-
-        let results = segment.read_filter(
-            &["count", "method", "time"],
-            &build_predicates(
-                0,
-                6,
-                vec![("method", (Operator::Equal, Value::String("POST")))],
-            ),
-        );
-        let expected = "count,method,time
-101,POST,2
-200,POST,3
-203,POST,4";
-        assert_eq!(stringify_read_filter_results(results), expected);
-
-        let results = segment.read_filter(
-            &["region", "time"],
-            &build_predicates(
-                0,
-                6,
-                vec![("method", (Operator::Equal, Value::String("POST")))],
-            ),
-        );
-        let expected = "region,time
-west,2
-east,3
-west,4";
-        assert_eq!(stringify_read_filter_results(results), expected);
     }
 
     #[test]
