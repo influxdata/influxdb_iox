@@ -955,10 +955,13 @@ impl Table {
     /// requested or there are no specific fields requested.
     fn matches_column_name_predicate(&self, column_selection: Option<&BTreeSet<u32>>) -> bool {
         match column_selection {
-            Some(column_selection) => self
-                .column_id_to_index
-                .keys()
-                .any(|column_id| column_selection.contains(column_id)),
+            Some(column_selection) => {
+                self.column_id_to_index
+                    .iter()
+                    .any(|(column_id, &column_index)| {
+                        column_selection.contains(column_id) && !self.columns[column_index].is_tag()
+                    })
+            }
             None => true, // no specific selection
         }
     }
@@ -1206,6 +1209,52 @@ mod tests {
         let mut set = BTreeSet::new();
         set.insert(37377);
         assert!(!table.matches_table_name_predicate(Some(&set)));
+    }
+
+    #[test]
+    fn test_matches_column_name_predicate() {
+        let mut partition = Partition::new("dummy_partition_key");
+        let dictionary = &mut partition.dictionary;
+        let mut table = Table::new(dictionary.lookup_value_or_insert("h2o"));
+
+        let lp_lines = vec![
+            "h2o,state=MA,city=Boston temp=70.4,awesomeness=1000 100",
+            "h2o,state=MA,city=Boston temp=72.4,awesomeness=2000 250",
+        ];
+        write_lines_to_table(&mut table, dictionary, lp_lines);
+
+        let state_symbol = dictionary.id("state").unwrap();
+        let temp_symbol = dictionary.id("temp").unwrap();
+        let awesomeness_symbol = dictionary.id("awesomeness").unwrap();
+
+        assert!(table.matches_column_name_predicate(None));
+
+        let set = BTreeSet::new();
+        assert!(!table.matches_column_name_predicate(Some(&set)));
+
+        // tag columns should not count
+        let mut set = BTreeSet::new();
+        set.insert(state_symbol);
+        assert!(!table.matches_column_name_predicate(Some(&set)));
+
+        let mut set = BTreeSet::new();
+        set.insert(temp_symbol);
+        assert!(table.matches_column_name_predicate(Some(&set)));
+
+        let mut set = BTreeSet::new();
+        set.insert(temp_symbol);
+        set.insert(awesomeness_symbol);
+        assert!(table.matches_column_name_predicate(Some(&set)));
+
+        let mut set = BTreeSet::new();
+        set.insert(temp_symbol);
+        set.insert(awesomeness_symbol);
+        set.insert(1337); // some other symbol, but that is ok
+        assert!(table.matches_column_name_predicate(Some(&set)));
+
+        let mut set = BTreeSet::new();
+        set.insert(1337);
+        assert!(!table.matches_column_name_predicate(Some(&set)));
     }
 
     #[tokio::test]
