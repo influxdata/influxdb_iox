@@ -146,7 +146,7 @@ impl PredicateBuilder {
     pub fn field_columns(mut self, columns: Vec<String>) -> Self {
         // We need to distinguish predicates like `column_name In
         // (foo, bar)` and `column_name = foo and column_name = bar` in order to handle this
-        if !self.inner.field_columns.is_none() {
+        if self.inner.field_columns.is_some() {
             unimplemented!("Complex/Multi field predicates are not yet supported");
         }
 
