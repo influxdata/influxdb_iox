@@ -48,7 +48,7 @@ pub struct Predicate {
     /// to only tables whose names are in `table_names`
     pub table_names: Option<BTreeSet<String>>,
 
-    // Optional field restriction. If present, restrict the results to only
+    // Optional field restriction. If present, restricts the results to only
     // tables which have *at least one* of the fields in field_columns.
     pub field_columns: Option<BTreeSet<String>>,
 
@@ -86,7 +86,7 @@ impl From<Predicate> for PredicateBuilder {
 impl PredicateBuilder {
     /// Sets the timestamp range
     pub fn timestamp_range(mut self, start: i64, end: i64) -> Self {
-        // without more thought, redefining the timestamp range would
+        // Without more thought, redefining the timestamp range would
         // lose the old range. Asser that that cannot happen.
         assert!(
             self.inner.range.is_none(),
@@ -98,7 +98,7 @@ impl PredicateBuilder {
 
     /// sets the optional timestamp range, if any
     pub fn timestamp_range_option(mut self, range: Option<TimestampRange>) -> Self {
-        // without more thought, redefining the timestamp range would
+        // Without more thought, redefining the timestamp range would
         // lose the old range. Asser that that cannot happen.
         assert!(
             range.is_none() || self.inner.range.is_none(),
