@@ -345,9 +345,6 @@ impl Table {
             projected_schema,
         });
 
-        // Shouldn't have field selections here (as we are getting the tags...)
-        assert!(!partition_predicate.has_field_restriction());
-
         let plan_builder = Self::add_datafusion_predicate(plan_builder, partition_predicate)?;
 
         // add optional selection to remove time column
@@ -414,9 +411,6 @@ impl Table {
             projection,
             projected_schema,
         });
-
-        // shouldn't have columns selection (as this is getting tag values...)
-        assert!(!partition_predicate.has_field_restriction());
 
         let plan_builder = Self::add_datafusion_predicate(plan_builder, partition_predicate)?;
 
@@ -948,7 +942,7 @@ impl Table {
     /// false means that no rows in this table could possibly match
     pub fn could_match_predicate(&self, partition_predicate: &PartitionPredicate) -> Result<bool> {
         Ok(
-            self.matches_column_selection(partition_predicate.field_restriction.as_ref())
+            self.matches_column_name_predicate(partition_predicate.field_name_predicate.as_ref())
                 && self.matches_table_name_predicate(
                     partition_predicate.table_name_predicate.as_ref(),
                 )
@@ -957,16 +951,14 @@ impl Table {
         )
     }
 
-    /// Returns true if the table contains at least one of the fields
+    /// Returns true if the table contains any of the field columns
     /// requested or there are no specific fields requested.
-    fn matches_column_selection(&self, column_selection: Option<&BTreeSet<u32>>) -> bool {
+    fn matches_column_name_predicate(&self, column_selection: Option<&BTreeSet<u32>>) -> bool {
         match column_selection {
-            Some(column_selection) => {
-                // figure out if any of the columns exists
-                self.column_id_to_index
-                    .keys()
-                    .any(|column_id| column_selection.contains(column_id))
-            }
+            Some(column_selection) => self
+                .column_id_to_index
+                .keys()
+                .any(|column_id| column_selection.contains(column_id)),
             None => true, // no specific selection
         }
     }
