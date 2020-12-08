@@ -120,7 +120,7 @@ pub enum ApplicationError {
     #[snafu(display("No handler for {:?} {}", method, path))]
     RouteNotFound { method: Method, path: String },
 
-    #[snafu(display("Internal error from database {}:  {}", database, source))]
+    #[snafu(display("Internal error from database {}: {}", database, source))]
     DatabaseError {
         database: String,
         source: Box<dyn std::error::Error + Send + Sync>,

@@ -408,15 +408,6 @@ impl SQLDatabase for TestDatabase {
         unimplemented!("query Not yet implemented");
     }
 
-    /// Return the partition metadata with the arrow data
-    async fn partition_table_to_arrow_with_meta(
-        &self,
-        _table_name: &str,
-        _partition_key: &str,
-    ) -> Result<(RecordBatch, data_types::partition_metadata::Table), Self::Error> {
-        unimplemented!("partition_table_to_arrow_with_meta not yet implemented for test database");
-    }
-
     /// Return the partition keys for data in this DB
     async fn partition_keys(&self) -> Result<Vec<String>, Self::Error> {
         unimplemented!("partition_keys not yet implemented for test database");
@@ -427,7 +418,7 @@ impl SQLDatabase for TestDatabase {
         &self,
         _partition_key: &str,
     ) -> Result<Vec<String>, Self::Error> {
-        unimplemented!("table_names_for_partitino not yet implemented for test database");
+        unimplemented!("table_names_for_partition not yet implemented for test database");
     }
 
     async fn remove_partition(

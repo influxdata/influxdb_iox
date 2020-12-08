@@ -1,9 +1,9 @@
+//! This module contains code for snapshotting a database partition to Parquet files in object
+//! storage.
 use arrow_deps::{
     arrow::record_batch::RecordBatch,
     parquet::{self, arrow::ArrowWriter, file::writer::TryClone},
 };
-/// This module contains code for snapshotting a database partition to Parquet files in object
-/// storage.
 use data_types::partition_metadata::{Partition as PartitionMeta, Table};
 use object_store::ObjectStore;
 use query::PartitionChunk;
@@ -55,7 +55,10 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug)]
-pub struct Snapshot<T: Send + Sync + 'static + PartitionChunk> {
+pub struct Snapshot<T>
+where
+    T: Send + Sync + 'static + PartitionChunk,
+{
     pub id: Uuid,
     pub partition_meta: PartitionMeta,
     pub metadata_path: String,
@@ -65,7 +68,10 @@ pub struct Snapshot<T: Send + Sync + 'static + PartitionChunk> {
     status: Mutex<Status>,
 }
 
-impl<T: Send + Sync + 'static + PartitionChunk> Snapshot<T> {
+impl<T> Snapshot<T>
+where
+    T: Send + Sync + 'static + PartitionChunk,
+{
     fn new(
         partition_key: String,
         metadata_path: String,
@@ -99,17 +105,14 @@ impl<T: Send + Sync + 'static + PartitionChunk> Snapshot<T> {
     fn next_table(&self) -> Option<(usize, &str)> {
         let mut status = self.status.lock().expect("mutex poisoned");
 
-        match status
+        status
             .table_states
             .iter()
             .position(|s| s == &TableState::NotStarted)
-        {
-            Some(pos) => {
+            .map(|pos| {
                 status.table_states[pos] = TableState::Running;
-                Some((pos, &self.partition_meta.tables[pos].name))
-            }
-            None => None,
-        }
+                (pos, &*self.partition_meta.tables[pos].name)
+            })
     }
 
     fn mark_table_finished(&self, position: usize) {
@@ -128,14 +131,10 @@ impl<T: Send + Sync + 'static + PartitionChunk> Snapshot<T> {
     pub fn finished(&self) -> bool {
         let status = self.status.lock().expect("mutex poisoned");
 
-        for s in &status.table_states {
-            match s {
-                TableState::Finished => continue,
-                _ => return false,
-            }
-        }
-
-        true
+        status
+            .table_states
+            .iter()
+            .all(|state| matches!(state, TableState::Finished))
     }
 
     fn should_stop(&self) -> bool {
@@ -202,7 +201,7 @@ impl<T: Send + Sync + 'static + PartitionChunk> Snapshot<T> {
 
         let len = data.len();
         let data = Bytes::from(data);
-        let stream_data = std::io::Result::Ok(data);
+        let stream_data = Result::Ok(data);
 
         self.store
             .put(
@@ -211,9 +210,7 @@ impl<T: Send + Sync + 'static + PartitionChunk> Snapshot<T> {
                 len,
             )
             .await
-            .context(WritingToObjectStore)?;
-
-        Ok(())
+            .context(WritingToObjectStore)
     }
 
     fn set_error(&self, e: Error) {
@@ -237,13 +234,16 @@ pub struct Status {
     error: Option<Error>,
 }
 
-pub fn snapshot_partition<T: Send + Sync + 'static + PartitionChunk>(
+pub fn snapshot_partition<T>(
     metadata_path: impl Into<String>,
     data_path: impl Into<String>,
     store: Arc<ObjectStore>,
     partition: Arc<T>,
     notify: Option<oneshot::Sender<()>>,
-) -> Result<Arc<Snapshot<T>>> {
+) -> Result<Arc<Snapshot<T>>>
+where
+    T: Send + Sync + 'static + PartitionChunk,
+{
     let table_stats = partition
         .table_stats()
         .map_err(|e| Box::new(e) as _)

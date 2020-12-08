@@ -605,27 +605,6 @@ impl SQLDatabase for Db {
         self.table_to_arrow(table_name, columns).await
     }
 
-    async fn partition_table_to_arrow_with_meta(
-        &self,
-        table_name: &str,
-        partition_key: &str,
-    ) -> Result<(RecordBatch, data_types::partition_metadata::Table), Self::Error> {
-        let partitions = self.partitions.read().await;
-        let partition = partitions
-            .iter()
-            .find(|p| p.key == partition_key)
-            .context(PartitionNotFound { partition_key })?;
-
-        let result = partition
-            .partition_table_to_arrow_with_meta(table_name)
-            .context(PartitionTableToArrowError {
-                partition_key,
-                table_name,
-            })?;
-
-        Ok(result)
-    }
-
     /// Return the partition keys for data in this DB
     async fn partition_keys(&self) -> Result<Vec<String>, Self::Error> {
         let partitions = self.partitions.read().await;

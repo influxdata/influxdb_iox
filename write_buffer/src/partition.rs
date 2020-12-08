@@ -371,27 +371,6 @@ impl Partition {
         Ok(stats)
     }
 
-    /// Convert the table specified into arrow record batch and return partition metadata with
-    /// summary statistics.
-    pub fn partition_table_to_arrow_with_meta(
-        &self,
-        table_name: &str,
-    ) -> Result<(RecordBatch, TableStats)> {
-        let table = self.table(table_name)?;
-
-        let batch = table
-            .to_arrow(&self, &[])
-            .context(NamedTableError { table_name })?;
-
-        let columns = table.stats();
-        let table_stats = TableStats {
-            name: table_name.to_string(),
-            columns,
-        };
-
-        Ok((batch, table_stats))
-    }
-
     fn table(&self, table_name: &str) -> Result<&Table> {
         let table_id =
             self.dictionary
