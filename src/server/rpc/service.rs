@@ -166,6 +166,12 @@ pub enum Error {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    #[snafu(display(
+        "Unexpected hint value on read_group request. Expected 0, got {}",
+        hints
+    ))]
+    InternalHintsFieldNotSupported { hints: u32 },
+
     #[snafu(display("Operation not yet implemented:  {}", operation))]
     NotYetImplemented { operation: String },
 }
@@ -210,6 +216,7 @@ impl Error {
             Self::ConvertingSeriesSet { .. } => Status::invalid_argument(self.to_string()),
             Self::ConvertingFieldList { .. } => Status::invalid_argument(self.to_string()),
             Self::SendingResults { .. } => Status::internal(self.to_string()),
+            Self::InternalHintsFieldNotSupported { .. } => Status::internal(self.to_string()),
             Self::NotYetImplemented { .. } => Status::internal(self.to_string()),
         }
     }
@@ -310,7 +317,7 @@ where
             group_keys,
             group,
             aggregate,
-            hints: _,
+            hints,
         } = read_group_request;
 
         info!(
@@ -318,6 +325,10 @@ where
             db_name, range, group_keys, group, aggregate,
               predicate.loggable()
         );
+
+        if hints != 0 {
+            InternalHintsFieldNotSupported { hints }.fail()?
+        }
 
         warn!("read_group implementation not yet complete: https://github.com/influxdata/influxdb_iox/issues/448");
 
@@ -1898,7 +1909,38 @@ mod tests {
         );
 
         // ---
-        // test error
+        // test error hit in request processing
+        // ---
+        let request = ReadGroupRequest {
+            read_source: source.clone(),
+            range: None,
+            predicate: None,
+            group_keys: vec![],
+            group,
+            aggregate: Some(RPCAggregate {
+                r#type: AggregateType::Sum as i32,
+            }),
+            hints: 42,
+        };
+
+        // Note we don't set the response on the test database, so we expect an error
+        let response = fixture.storage_client.read_group(request).await;
+        assert!(response.is_err());
+        let response_string = format!("{:?}", response);
+        let expected_error = "Unexpected hint value on read_group request. Expected 0, got 42";
+        assert!(
+            response_string.contains(expected_error),
+            "'{}' did not contain expected content '{}'",
+            response_string,
+            expected_error
+        );
+
+        // Errored out in gRPC and never got to database layer
+        let expected_request: Option<QueryGroupsRequest> = None;
+        assert_eq!(test_db.get_query_groups_request().await, expected_request);
+
+        // ---
+        // test error returned in database processing
         // ---
         let request = ReadGroupRequest {
             read_source: source.clone(),
