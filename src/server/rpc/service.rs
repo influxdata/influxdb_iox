@@ -1869,7 +1869,7 @@ mod tests {
             partition_id,
         ));
 
-        let group = generated_types::read_group_request::Group::None as i32;
+        let group = generated_types::read_group_request::Group::By as i32;
 
         let request = ReadGroupRequest {
             read_source: source.clone(),
@@ -1915,7 +1915,7 @@ mod tests {
             read_source: source.clone(),
             range: None,
             predicate: None,
-            group_keys: vec![],
+            group_keys: vec![String::from("tag1")],
             group,
             aggregate: Some(RPCAggregate {
                 r#type: AggregateType::Sum as i32,
@@ -1923,7 +1923,6 @@ mod tests {
             hints: 42,
         };
 
-        // Note we don't set the response on the test database, so we expect an error
         let response = fixture.storage_client.read_group(request).await;
         assert!(response.is_err());
         let response_string = format!("{:?}", response);
@@ -1946,7 +1945,7 @@ mod tests {
             read_source: source.clone(),
             range: None,
             predicate: None,
-            group_keys: vec![],
+            group_keys: vec![String::from("tag1")],
             group,
             aggregate: Some(RPCAggregate {
                 r#type: AggregateType::Sum as i32,
@@ -1970,7 +1969,7 @@ mod tests {
             predicate: "Predicate {}".into(),
             gby_agg: GroupByAndAggregate::Columns {
                 agg: QueryAggregate::Sum,
-                group_columns: vec![],
+                group_columns: vec![String::from("tag1")],
             },
         });
         assert_eq!(test_db.get_query_groups_request().await, expected_request);
