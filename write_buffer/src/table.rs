@@ -396,20 +396,10 @@ impl Table {
         partition_predicate: &PartitionPredicate,
         partition: &Partition,
     ) -> Result<LogicalPlan> {
-        // TODO avoid materializing all the columns here (ideally
-        // DataFusion can prune them out)
-        let data = self.all_to_arrow(partition)?;
+        // Scan and Filter
+        let plan_builder = self.scan_with_predicates(partition_predicate, partition)?;
 
-        let schema = data.schema();
-
-        let projection = None;
         let select_exprs = vec![col(column_name)];
-
-        // And build the plan!
-        let plan_builder = LogicalPlanBuilder::scan_memory(vec![vec![data]], schema, projection)
-            .context(BuildingPlan)?;
-
-        let plan_builder = Self::add_datafusion_predicate(plan_builder, partition_predicate)?;
 
         plan_builder
             .project(select_exprs)
@@ -437,8 +427,10 @@ impl Table {
         self.series_set_plan_impl(partition_predicate, None, partition)
     }
 
-    /// Creates the plans for computing series set, pulling prefix_columns, if
-    /// any, as a prefix of the ordering The created plan looks like:
+    /// Creates the plans for computing series set, ensuring that
+    /// prefix_columns, if any, are the prefix of the ordering.
+    ///
+    /// The created plan looks like:
     ///
     ///    Projection (select the columns columns needed)
     ///      Order by (tag_columns, timestamp_column)
@@ -458,20 +450,10 @@ impl Table {
             tag_columns = reorder_prefix(prefix_columns, tag_columns)?;
         }
 
-        // TODO avoid materializing all the columns here (ideally
-        // DataFusion can prune them out)
-        let data = self.all_to_arrow(partition)?;
-
-        let schema = data.schema();
-
-        let projection = None;
-
-        // And build the plan from the bottom up
-        let plan_builder = LogicalPlanBuilder::scan_memory(vec![vec![data]], schema, projection)
-            .context(BuildingPlan)?;
-
-        // Filtering
-        let plan_builder = Self::add_datafusion_predicate(plan_builder, partition_predicate)?;
+        // TODO avoid materializing all the columns here (ideally we
+        // would use a data source and then let DataFusion prune out
+        // column references during its optimizer phase).
+        let plan_builder = self.scan_with_predicates(partition_predicate, partition)?;
 
         let mut sort_exprs = Vec::new();
         sort_exprs.extend(tag_columns.iter().map(|c| c.into_sort_expr()));
@@ -499,6 +481,37 @@ impl Table {
         ))
     }
 
+    /// Returns a LogialPlannBuilder which scans all columns in this
+    /// Table and has applied any predicates in `partition_predicate`
+    ///
+    ///  Filter(predicate)
+    ///    InMemoryScan
+    fn scan_with_predicates(
+        &self,
+        partition_predicate: &PartitionPredicate,
+        partition: &Partition,
+    ) -> Result<LogicalPlanBuilder> {
+        // TODO avoid materializing all the columns here (ideally
+        // DataFusion can prune some of them out)
+        let data = self.all_to_arrow(partition)?;
+
+        let schema = data.schema();
+
+        let projection = None;
+        let projected_schema = schema.clone();
+
+        // And build the plan from the bottom up
+        let plan_builder = LogicalPlanBuilder::from(&LogicalPlan::InMemoryScan {
+            data: vec![vec![data]],
+            schema,
+            projection,
+            projected_schema,
+        });
+
+        // Filtering
+        Self::add_datafusion_predicate(plan_builder, partition_predicate)
+    }
+
     /// Look up this table's name as a string
     fn table_name(&self, partition: &Partition) -> Arc<String> {
         // I wonder if all this string creation will be too slow?
@@ -511,36 +524,105 @@ impl Table {
         Arc::new(table_name)
     }
 
-    /// Creates a GroupedSeriesSet plan that produces an output table with rows
-    /// that match the predicate
-    ///
-    /// The output looks like:
-    /// (group_tag_column1, group_tag_column2, ... tag_col1, tag_col2, ...
-    /// field1, field2, ... timestamp)
-    ///
-    /// The order of the tag_columns is ordered by name.
-    ///
-    /// The data is sorted on tag_col1, tag_col2, ...) so that all
-    /// rows for a particular series (groups where all tags are the
-    /// same) occur together in the plan
-    ///
-    /// The created plan looks like:
-    ///
-    ///    Projection (select the columns columns needed)
-    ///      Order by (tag_columns, timestamp_column)
-    ///        Filter(predicate)
-    ///          InMemoryScan
+    /// Creates a GroupedSeriesSet plan that produces an output table
+    /// with rows that match the predicate. See documentation on
+    /// series_set_plan_impl for more details.
     pub fn grouped_series_set_plan(
         &self,
         partition_predicate: &PartitionPredicate,
+        agg: Aggregate,
         group_columns: &[String],
         partition: &Partition,
     ) -> Result<SeriesSetPlan> {
-        let series_set_plan =
-            self.series_set_plan_impl(partition_predicate, Some(&group_columns), partition)?;
         let num_prefix_tag_group_columns = group_columns.len();
 
-        Ok(series_set_plan.grouped(num_prefix_tag_group_columns))
+        let plan = match agg {
+            Aggregate::None => {
+                self.series_set_plan_impl(partition_predicate, Some(&group_columns), partition)?
+            }
+            Aggregate::Sum | Aggregate::Count | Aggregate::Mean => {
+                self.aggregate_series_set_plan(partition_predicate, agg, group_columns, partition)?
+            }
+            _ => todo!("Aggregate {:?} not implemented", agg),
+        };
+
+        Ok(plan.grouped(num_prefix_tag_group_columns))
+    }
+
+    /// Creates a GroupedSeriesSet plan that produces an output table
+    /// with rows grouped by an aggregate function. Note that we still
+    /// group by all tags (so group within series) and the
+    /// group_columns define the order of the result
+    ///
+    /// Equivalent to this SQL query:
+    /// SELECT
+    ///   tag1...tagN
+    ///   agg_function(_val) as _value
+    ///   agg_function(time) as time
+    /// GROUP BY
+    ///   group_key1, group_key2, remaining tags,
+    /// ORDER BY
+    ///   group_key1, group_key2, remaining tags, time,
+    ///
+    /// The created plan looks like:
+    ///
+    ///  OrderBy(gby: tag columns, window_function; agg: aggregate(field)
+    ///      GroupBy(gby: tag columns, window_function; agg: aggregate(field)
+    ///        Filter(predicate)
+    ///          InMemoryScan
+    ///
+    pub fn aggregate_series_set_plan(
+        &self,
+        partition_predicate: &PartitionPredicate,
+        agg: Aggregate,
+        group_columns: &[String],
+        partition: &Partition,
+    ) -> Result<SeriesSetPlan> {
+        let (tag_columns, field_columns) =
+            self.tag_and_field_column_names(partition_predicate, partition)?;
+
+        // order the tag columns so that the group keys come first (we will group and order in the same order)
+        let tag_columns = reorder_prefix(group_columns, tag_columns)?;
+
+        // Scan and Filter
+        let plan_builder = self.scan_with_predicates(partition_predicate, partition)?;
+
+        // Group by all tag columns
+        let group_exprs = tag_columns
+            .iter()
+            .map(|tag_name| col(tag_name.as_ref()))
+            .collect::<Vec<_>>();
+
+        // aggregate each field *and* the timestamp field
+        let mut agg_exprs = field_columns
+            .iter()
+            .map(|field_name| make_agg_expr(agg, field_name.as_ref()))
+            .collect::<Result<Vec<_>>>()?;
+        // also aggregate the time column itself
+        agg_exprs.push(make_agg_expr(agg, TIME_COLUMN_NAME)?);
+
+        // sort by the group by expressions as well as (aggregated) time value
+        let mut sort_exprs = group_exprs
+            .iter()
+            .map(|expr| expr.into_sort_expr())
+            .collect::<Vec<_>>();
+        sort_exprs.push(TIME_COLUMN_NAME.into_sort_expr());
+
+        let plan_builder = plan_builder
+            .aggregate(group_exprs, agg_exprs)
+            .context(BuildingPlan)?
+            .sort(sort_exprs)
+            .context(BuildingPlan)?;
+
+        // and finally create the plan
+        let plan = plan_builder.build().context(BuildingPlan)?;
+
+        Ok(SeriesSetPlan::new(
+            self.table_name(partition),
+            plan,
+            tag_columns,
+            field_columns,
+        ))
     }
 
     /// Creates a GroupedSeriesSet plan that produces an output table with rows
@@ -574,7 +656,7 @@ impl Table {
     pub fn window_grouped_series_set_plan(
         &self,
         partition_predicate: &PartitionPredicate,
-        agg: &Aggregate,
+        agg: Aggregate,
         every: &WindowDuration,
         offset: &WindowDuration,
         partition: &Partition,
@@ -582,20 +664,8 @@ impl Table {
         let (tag_columns, field_columns) =
             self.tag_and_field_column_names(partition_predicate, partition)?;
 
-        // TODO avoid materializing all the columns here (ideally
-        // DataFusion can prune some of them out)
-        let data = self.all_to_arrow(partition)?;
-
-        let schema = data.schema();
-
-        let projection = None;
-
-        // And build the plan from the bottom up
-        let plan_builder = LogicalPlanBuilder::scan_memory(vec![vec![data]], schema, projection)
-            .context(BuildingPlan)?;
-
-        // Filtering
-        let plan_builder = Self::add_datafusion_predicate(plan_builder, partition_predicate)?;
+        // Scan and Filter
+        let plan_builder = self.scan_with_predicates(partition_predicate, partition)?;
 
         // Group by all tag columns and the window bounds
         let mut group_exprs = tag_columns
@@ -610,11 +680,7 @@ impl Table {
         // aggregate each field
         let agg_exprs = field_columns
             .iter()
-            .map(|field_name| {
-                agg.to_datafusion_expr(col(field_name.as_ref()))
-                    .context(CreatingAggregates)
-                    .map(|agg| agg.alias(field_name.as_ref()))
-            })
+            .map(|field_name| make_agg_expr(agg, field_name))
             .collect::<Result<Vec<_>>>()?;
 
         // sort by the group by expressions as well
@@ -657,20 +723,8 @@ impl Table {
         partition_predicate: &PartitionPredicate,
         partition: &Partition,
     ) -> Result<LogicalPlan> {
-        // TODO avoid materializing all the columns here (ideally
-        // DataFusion can prune them out)
-        let data = self.all_to_arrow(partition)?;
-
-        let schema = data.schema();
-
-        let projection = None;
-
-        // And build the plan from the bottom up
-        let plan_builder = LogicalPlanBuilder::scan_memory(vec![vec![data]], schema, projection)
-            .context(BuildingPlan)?;
-
-        // Filtering
-        let plan_builder = Self::add_datafusion_predicate(plan_builder, partition_predicate)?;
+        // Scan and Filter
+        let plan_builder = self.scan_with_predicates(partition_predicate, partition)?;
 
         // Selection
         let select_exprs = self
@@ -1125,6 +1179,16 @@ impl IntoExpr for Expr {
     }
 }
 
+/// Creates a DataFusion expression suitable for calculating an aggregate:
+///
+/// equivalent to `CAST agg(field) as field`
+///
+fn make_agg_expr(agg: Aggregate, field_name: &str) -> Result<Expr> {
+    agg.to_datafusion_expr(col(field_name))
+        .context(CreatingAggregates)
+        .map(|agg| agg.alias(field_name))
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -1430,7 +1494,12 @@ mod tests {
         let group_columns = vec![String::from("state")];
 
         let grouped_series_set_plan = table
-            .grouped_series_set_plan(&partition_predicate, &group_columns, &partition)
+            .grouped_series_set_plan(
+                &partition_predicate,
+                Aggregate::None,
+                &group_columns,
+                &partition,
+            )
             .expect("creating the grouped_series set plan");
 
         assert_eq!(
@@ -1490,7 +1559,7 @@ mod tests {
         let offset = WindowDuration::from_nanoseconds(0);
 
         let plan = table
-            .window_grouped_series_set_plan(&partition_predicate, &agg, &every, &offset, &partition)
+            .window_grouped_series_set_plan(&partition_predicate, agg, &every, &offset, &partition)
             .expect("creating the grouped_series set plan");
 
         assert_eq!(plan.tag_columns, *str_vec_to_arc_vec(&["city", "state"]));
@@ -1539,7 +1608,7 @@ mod tests {
         let offset = WindowDuration::from_months(0, false);
 
         let plan = table
-            .window_grouped_series_set_plan(&partition_predicate, &agg, &every, &offset, &partition)
+            .window_grouped_series_set_plan(&partition_predicate, agg, &every, &offset, &partition)
             .expect("creating the grouped_series set plan");
 
         assert_eq!(plan.tag_columns, *str_vec_to_arc_vec(&["city", "state"]));
