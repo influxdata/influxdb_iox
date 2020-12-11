@@ -1875,7 +1875,7 @@ mod tests {
             read_source: source.clone(),
             range: make_timestamp_range(150, 200),
             predicate: make_state_ma_predicate(),
-            group_keys: vec![String::from("tag1")],
+            group_keys: vec!["tag1".into()],
             group,
             aggregate: Some(RPCAggregate {
                 r#type: AggregateType::Sum as i32,
@@ -1887,7 +1887,7 @@ mod tests {
             predicate: "Predicate { exprs: [#state Eq Utf8(\"MA\")] range: TimestampRange { start: 150, end: 200 }}".into(),
             gby_agg: GroupByAndAggregate::Columns {
                 agg: QueryAggregate::Sum,
-                group_columns: vec![String::from("tag1")],
+                group_columns: vec!["tag1".into()],
             }
         };
 
@@ -1915,7 +1915,7 @@ mod tests {
             read_source: source.clone(),
             range: None,
             predicate: None,
-            group_keys: vec![String::from("tag1")],
+            group_keys: vec!["tag1".into()],
             group,
             aggregate: Some(RPCAggregate {
                 r#type: AggregateType::Sum as i32,
@@ -1945,7 +1945,7 @@ mod tests {
             read_source: source.clone(),
             range: None,
             predicate: None,
-            group_keys: vec![String::from("tag1")],
+            group_keys: vec!["tag1".into()],
             group,
             aggregate: Some(RPCAggregate {
                 r#type: AggregateType::Sum as i32,
@@ -1969,7 +1969,7 @@ mod tests {
             predicate: "Predicate {}".into(),
             gby_agg: GroupByAndAggregate::Columns {
                 agg: QueryAggregate::Sum,
-                group_columns: vec![String::from("tag1")],
+                group_columns: vec!["tag1".into()],
             },
         });
         assert_eq!(test_db.get_query_groups_request().await, expected_request);
@@ -2158,7 +2158,7 @@ mod tests {
 
         let request = MeasurementFieldsRequest {
             source: source.clone(),
-            measurement: String::from("TheMeasurement"),
+            measurement: "TheMeasurement".into(),
             range: make_timestamp_range(150, 200),
             predicate: make_state_ma_predicate(),
         };
@@ -2196,7 +2196,7 @@ mod tests {
         // ---
         let request = MeasurementFieldsRequest {
             source: source.clone(),
-            measurement: String::from("TheMeasurement"),
+            measurement: "TheMeasurement".into(),
             range: None,
             predicate: None,
         };
