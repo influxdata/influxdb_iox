@@ -489,10 +489,12 @@ pub fn make_read_group_aggregate(
 ) -> Result<GroupByAndAggregate> {
     // validate Group setting
     match group {
+        // Group:None is invalid if grouping keys are specified
         RPCGroup::None if !group_keys.is_empty() => InvalidGroupNone {
             num_group_keys: group_keys.len(),
         }
         .fail(),
+        // Group:By is invalid if no grouping keys are specified
         RPCGroup::By if group_keys.is_empty() => InvalidGroupBy {}.fail(),
         _ => Ok(()),
     }?;
