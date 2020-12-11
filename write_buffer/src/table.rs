@@ -498,15 +498,10 @@ impl Table {
         let schema = data.schema();
 
         let projection = None;
-        let projected_schema = schema.clone();
 
         // And build the plan from the bottom up
-        let plan_builder = LogicalPlanBuilder::from(&LogicalPlan::InMemoryScan {
-            data: vec![vec![data]],
-            schema,
-            projection,
-            projected_schema,
-        });
+        let plan_builder = LogicalPlanBuilder::scan_memory(vec![vec![data]], schema, projection)
+            .context(BuildingPlan)?;
 
         // Filtering
         Self::add_datafusion_predicate(plan_builder, partition_predicate)
@@ -570,7 +565,6 @@ impl Table {
     ///      GroupBy(gby: tag columns, window_function; agg: aggregate(field)
     ///        Filter(predicate)
     ///          InMemoryScan
-    ///
     pub fn aggregate_series_set_plan(
         &self,
         partition_predicate: &PartitionPredicate,
@@ -581,7 +575,8 @@ impl Table {
         let (tag_columns, field_columns) =
             self.tag_and_field_column_names(partition_predicate, partition)?;
 
-        // order the tag columns so that the group keys come first (we will group and order in the same order)
+        // order the tag columns so that the group keys come first (we will group and
+        // order in the same order)
         let tag_columns = reorder_prefix(group_columns, tag_columns)?;
 
         // Scan and Filter
@@ -1182,7 +1177,6 @@ impl IntoExpr for Expr {
 /// Creates a DataFusion expression suitable for calculating an aggregate:
 ///
 /// equivalent to `CAST agg(field) as field`
-///
 fn make_agg_expr(agg: Aggregate, field_name: &str) -> Result<Expr> {
     agg.to_datafusion_expr(col(field_name))
         .context(CreatingAggregates)
@@ -1195,7 +1189,10 @@ mod tests {
     use arrow::util::pretty::pretty_format_batches;
     use data_types::data::split_lines_into_write_entry_partitions;
     use influxdb_line_protocol::{parse_lines, ParsedLine};
-    use query::{exec::Executor, predicate::PredicateBuilder};
+    use query::{
+        exec::Executor,
+        predicate::{Predicate, PredicateBuilder},
+    };
     use test_helpers::str_vec_to_arc_vec;
 
     use super::*;
@@ -1471,11 +1468,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_grouped_series_set_plan() {
-        let mut partition = Partition::new("dummy_partition_key");
-        let dictionary = &mut partition.dictionary;
-        let mut table = Table::new(dictionary.lookup_value_or_insert("table_name"));
-
+    async fn test_grouped_series_set_plan_none() {
         let lp_lines = vec![
             "h2o,state=MA,city=Boston temp=70.4 100",
             "h2o,state=MA,city=Boston temp=72.4 250",
@@ -1483,32 +1476,17 @@ mod tests {
             "h2o,state=CA,city=LA temp=90.0 350",
         ];
 
-        write_lines_to_table(&mut table, dictionary, lp_lines);
+        let mut fixture = TableFixture::new(lp_lines);
 
         let predicate = PredicateBuilder::default()
             .add_expr(col("city").eq(lit("LA")))
             .timestamp_range(190, 210)
             .build();
-        let partition_predicate = partition.compile_predicate(&predicate).unwrap();
-
-        let group_columns = vec![String::from("state")];
-
-        let grouped_series_set_plan = table
-            .grouped_series_set_plan(
-                &partition_predicate,
-                Aggregate::None,
-                &group_columns,
-                &partition,
-            )
-            .expect("creating the grouped_series set plan");
-
-        assert_eq!(
-            grouped_series_set_plan.num_prefix_tag_group_columns,
-            Some(1)
-        );
 
         // run the created plan, ensuring the output is as expected
-        let results = run_plan(grouped_series_set_plan.plan).await;
+        let results = fixture
+            .grouped_series_set(predicate, Aggregate::Sum, &["state"])
+            .await;
 
         let expected = vec![
             "+-------+------+------+------+",
@@ -1518,6 +1496,188 @@ mod tests {
             "+-------+------+------+------+",
         ];
 
+        assert_eq!(expected, results, "expected output");
+    }
+
+    #[tokio::test]
+    async fn test_grouped_series_set_plan_sum() {
+        let lp_lines = vec![
+            "h2o,state=MA,city=Cambridge temp=80 50",
+            "h2o,state=MA,city=Cambridge temp=81 100",
+            "h2o,state=MA,city=Cambridge temp=82 200",
+            "h2o,state=MA,city=Boston temp=70 300",
+            "h2o,state=MA,city=Boston temp=71 400",
+            "h2o,state=CA,city=LA temp=90,humidity=10 500",
+            "h2o,state=CA,city=LA temp=91,humidity=11 600",
+        ];
+
+        let mut fixture = TableFixture::new(lp_lines);
+
+        let predicate = PredicateBuilder::default()
+            // city=Boston OR city=Cambridge (filters out LA rows)
+            .add_expr(
+                col("city")
+                    .eq(lit("Boston"))
+                    .or(col("city").eq(lit("Cambridge"))),
+            )
+            // fiter out first Cambridge row
+            .timestamp_range(100, 1000)
+            .build();
+
+        // run the created plan, ensuring the output is as expected
+        let results = fixture
+            .grouped_series_set(predicate, Aggregate::Sum, &["state"])
+            .await;
+
+        // The null field (after predicates) are not sent as series
+        // Note order of city key (boston --> cambridge)
+        let expected = vec![
+            "+-------+-----------+----------+------+------+",
+            "| state | city      | humidity | temp | time |",
+            "+-------+-----------+----------+------+------+",
+            "| MA    | Boston    |          | 141  | 700  |",
+            "| MA    | Cambridge |          | 163  | 300  |",
+            "+-------+-----------+----------+------+------+",
+        ];
+
+        assert_eq!(expected, results, "expected output");
+    }
+
+    #[tokio::test]
+    async fn test_grouped_series_set_plan_count() {
+        let lp_lines = vec![
+            "h2o,state=MA,city=Cambridge temp=80 50",
+            "h2o,state=MA,city=Cambridge temp=81 100",
+            "h2o,state=MA,city=Cambridge temp=82 200",
+            "h2o,state=MA,city=Boston temp=70 300",
+            "h2o,state=MA,city=Boston temp=71 400",
+            "h2o,state=CA,city=LA temp=90,humidity=10 500",
+            "h2o,state=CA,city=LA temp=91,humidity=11 600",
+        ];
+
+        let mut fixture = TableFixture::new(lp_lines);
+
+        let predicate = PredicateBuilder::default()
+            // city=Boston OR city=Cambridge (filters out LA rows)
+            .add_expr(
+                col("city")
+                    .eq(lit("Boston"))
+                    .or(col("city").eq(lit("Cambridge"))),
+            )
+            // fiter out first Cambridge row
+            .timestamp_range(100, 1000)
+            .build();
+
+        // run the created plan, ensuring the output is as expected
+        let results = fixture
+            .grouped_series_set(predicate, Aggregate::Count, &["state"])
+            .await;
+
+        // The null field (after predicates) are not sent as series
+        let expected = vec![
+            "+-------+-----------+----------+------+------+",
+            "| state | city      | humidity | temp | time |",
+            "+-------+-----------+----------+------+------+",
+            "| MA    | Boston    | 0        | 2    | 2    |",
+            "| MA    | Cambridge | 0        | 2    | 2    |",
+            "+-------+-----------+----------+------+------+",
+        ];
+
+        assert_eq!(expected, results, "expected output");
+    }
+
+    #[tokio::test]
+    async fn test_grouped_series_set_plan_mean() {
+        let lp_lines = vec![
+            "h2o,state=MA,city=Cambridge temp=80 50",
+            "h2o,state=MA,city=Cambridge temp=81 100",
+            "h2o,state=MA,city=Cambridge temp=82 200",
+            "h2o,state=MA,city=Boston temp=70 300",
+            "h2o,state=MA,city=Boston temp=71 400",
+            "h2o,state=CA,city=LA temp=90,humidity=10 500",
+            "h2o,state=CA,city=LA temp=91,humidity=11 600",
+        ];
+
+        let mut fixture = TableFixture::new(lp_lines);
+
+        let predicate = PredicateBuilder::default()
+            // city=Boston OR city=Cambridge (filters out LA rows)
+            .add_expr(
+                col("city")
+                    .eq(lit("Boston"))
+                    .or(col("city").eq(lit("Cambridge"))),
+            )
+            // fiter out first Cambridge row
+            .timestamp_range(100, 1000)
+            .build();
+
+        // run the created plan, ensuring the output is as expected
+        let results = fixture
+            .grouped_series_set(predicate, Aggregate::Mean, &["state"])
+            .await;
+
+        // The null field (after predicates) are not sent as series
+        let expected = vec![
+            "+-------+-----------+----------+------+------+",
+            "| state | city      | humidity | temp | time |",
+            "+-------+-----------+----------+------+------+",
+            "| MA    | Boston    |          | 70.5 | 350  |",
+            "| MA    | Cambridge |          | 81.5 | 150  |",
+            "+-------+-----------+----------+------+------+",
+        ];
+
+        assert_eq!(expected, results, "expected output");
+    }
+
+    #[tokio::test]
+    async fn test_grouped_series_set_plan_group_by_keys() {
+        let lp_lines = vec![
+            "h2o,state=MA,city=Cambridge temp=80 50",
+            "h2o,state=MA,city=Cambridge temp=81 100",
+            "h2o,state=MA,city=Cambridge temp=82 200",
+            "h2o,state=MA,city=Boston temp=70 300",
+            "h2o,state=MA,city=Boston temp=71 400",
+            "h2o,state=CA,city=LA temp=90,humidity=10 500",
+            "h2o,state=CA,city=LA temp=91,humidity=11 600",
+        ];
+
+        let mut fixture = TableFixture::new(lp_lines);
+
+        // no predicate
+        let predicate = PredicateBuilder::default().build();
+
+        // check that group_by state, city results in the right output ordering
+        let group_keys = ["state", "city"];
+        let results = fixture
+            .grouped_series_set(predicate.clone(), Aggregate::Sum, &group_keys)
+            .await;
+
+        let expected = vec![
+            "+-------+-----------+----------+------+------+",
+            "| state | city      | humidity | temp | time |",
+            "+-------+-----------+----------+------+------+",
+            "| CA    | LA        | 21       | 181  | 1100 |",
+            "| MA    | Boston    |          | 141  | 700  |",
+            "| MA    | Cambridge |          | 243  | 350  |",
+            "+-------+-----------+----------+------+------+",
+        ];
+        assert_eq!(expected, results, "expected output");
+
+        // Test with alternate group key order
+        let group_keys = ["city", "state"];
+        let results = fixture
+            .grouped_series_set(predicate, Aggregate::Sum, &group_keys)
+            .await;
+
+        let expected = vec![
+            "+-----------+-------+----------+------+------+",
+            "| city      | state | humidity | temp | time |",
+            "+-----------+-------+----------+------+------+",
+            "| Boston    | MA    |          | 141  | 700  |",
+            "| Cambridge | MA    |          | 243  | 350  |",
+            "| LA        | CA    | 21       | 181  | 1100 |",
+            "+-----------+-------+----------+------+------+",
+        ];
         assert_eq!(expected, results, "expected output");
     }
 
@@ -1798,5 +1958,50 @@ mod tests {
 
     fn partition_key_func(_: &ParsedLine<'_>) -> String {
         String::from("the_partition_key")
+    }
+
+    /// Pre-loaded Table for use in tests
+    struct TableFixture {
+        partition: Partition,
+        table: Table,
+    }
+
+    impl TableFixture {
+        /// Create an Table with the specified lines loaded
+        fn new(lp_lines: Vec<&str>) -> Self {
+            let mut partition = Partition::new("dummy_partition_key");
+            let dictionary = &mut partition.dictionary;
+            let mut table = Table::new(dictionary.lookup_value_or_insert("table_name"));
+
+            write_lines_to_table(&mut table, dictionary, lp_lines);
+            Self { partition, table }
+        }
+
+        /// create a series set plan from the predicate ane aggregates
+        /// and return the results as a vector of strings
+        async fn grouped_series_set(
+            &mut self,
+            predicate: Predicate,
+            agg: Aggregate,
+            group_columns: &[&str],
+        ) -> Vec<String> {
+            let partition_predicate = self.partition.compile_predicate(&predicate).unwrap();
+
+            let group_columns: Vec<_> = group_columns.iter().map(|s| String::from(*s)).collect();
+
+            let grouped_series_set_plan = self
+                .table
+                .grouped_series_set_plan(&partition_predicate, agg, &group_columns, &self.partition)
+                .expect("creating the grouped_series set plan");
+
+            // ensure the group prefix got to the right place
+            assert_eq!(
+                grouped_series_set_plan.num_prefix_tag_group_columns,
+                Some(group_columns.len())
+            );
+
+            // run the created plan, ensuring the output is as expected
+            run_plan(grouped_series_set_plan.plan).await
+        }
     }
 }
