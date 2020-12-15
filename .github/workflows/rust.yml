@@ -38,13 +38,13 @@ jobs:
         with:
           path: target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      
+
       # Build!
       - name: Run dev build
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --workspace
+          args: --all-targets --workspace
 
   test:
     name: Test
