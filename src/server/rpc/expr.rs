@@ -1,5 +1,6 @@
 //! This module has logic to translate gRPC structures into the native
-//! storage system form by extending the builders for those structures with new traits
+//! storage system form by extending the builders for those structures with new
+//! traits
 //!
 //! RPCPredicate --> query::Predicates
 //!
@@ -37,6 +38,17 @@ pub enum Error {
 
     #[snafu(display("Error creating aggregate: Unknown group type: {}", group_type))]
     UnknownGroup { group_type: i32 },
+
+    #[snafu(display(
+        "Incompatible read_group request: Group::None had {} group keys (expected 0)",
+        num_group_keys
+    ))]
+    InvalidGroupNone { num_group_keys: usize },
+
+    #[snafu(display(
+        "Incompatible read_group request: Group::By had no group keys (expected at least 1)"
+    ))]
+    InvalidGroupBy {},
 
     #[snafu(display("Error creating predicate: Unexpected empty predicate: Node"))]
     EmptyPredicateNode {},
@@ -122,17 +134,21 @@ impl AddRPCNode for PredicateBuilder {
     /// Adds the predicates represented by the Node (predicate tree)
     /// into predicates that can be evaluted by the storage system
     ///
-    /// RPC predicates can have several different types of 'predicate' embedded in them.
+    /// RPC predicates can have several different types of 'predicate' embedded
+    /// in them.
     ///
     /// Predicates on tag value (where a tag is a column)
     ///
     /// Predicates on field value (where field is also a column)
     ///
-    /// Predicates on 'measurement name' (encoded as tag_ref=\x00), aka select from a particular table
+    /// Predicates on 'measurement name' (encoded as tag_ref=\x00), aka select
+    /// from a particular table
     ///
-    /// Predicates on 'field name' (encoded as tag_ref=\xff), aka select only specific fields
+    /// Predicates on 'field name' (encoded as tag_ref=\xff), aka select only
+    /// specific fields
     ///
-    /// This code pulls apart the predicates, if any, into a StoragePredicate that breaks the predicate apart
+    /// This code pulls apart the predicates, if any, into a StoragePredicate
+    /// that breaks the predicate apart
     fn rpc_predicate(self, rpc_predicate: Option<RPCPredicate>) -> Result<Self> {
         match rpc_predicate {
             // no input predicate, is fine
@@ -172,7 +188,6 @@ impl AddRPCNode for PredicateBuilder {
 /// ```
 /// child
 /// ```
-///
 fn normalize_node(node: RPCNode) -> Result<RPCNode> {
     let RPCNode {
         node_type,
@@ -202,7 +217,8 @@ fn normalize_node(node: RPCNode) -> Result<RPCNode> {
     }
 }
 
-/// Converts the node and updates the `StoragePredicate` being built, as appropriate
+/// Converts the node and updates the `StoragePredicate` being built, as
+/// appropriate
 ///
 /// It recognizes special predicate patterns and pulls them into
 /// the fields on `StoragePredicate` for special processing. If no
@@ -246,8 +262,8 @@ fn flatten_ands(node: RPCNode, mut dst: Vec<RPCNode>) -> Result<Vec<RPCNode>> {
 
 // Represents a predicate like <expr> IN (option1, option2, option3, ....)
 //
-// use `try_from_node1 to convert a tree like as ((expr = option1) OR (expr = option2)) or (expr = option3)) ...
-// into such a form
+// use `try_from_node1 to convert a tree like as ((expr = option1) OR (expr =
+// option2)) or (expr = option3)) ... into such a form
 #[derive(Debug)]
 struct InList {
     lhs: RPCNode,
@@ -257,8 +273,8 @@ struct InList {
 impl TryFrom<&RPCNode> for InList {
     type Error = &'static str;
 
-    /// If node represents an OR tree like (expr = option1) OR (expr=option2)... extracts
-    /// an InList like expr IN (option1, option2)
+    /// If node represents an OR tree like (expr = option1) OR (expr=option2)...
+    /// extracts an InList like expr IN (option1, option2)
     fn try_from(node: &RPCNode) -> Result<Self, &'static str> {
         InListBuilder::default().append(node)?.build()
     }
@@ -473,9 +489,21 @@ fn build_binary_expr(op: Operator, inputs: Vec<Expr>) -> Result<Expr> {
 
 pub fn make_read_group_aggregate(
     aggregate: Option<RPCAggregate>,
-    _group: RPCGroup,
+    group: RPCGroup,
     group_keys: Vec<String>,
 ) -> Result<GroupByAndAggregate> {
+    // validate Group setting
+    match group {
+        // Group:None is invalid if grouping keys are specified
+        RPCGroup::None if !group_keys.is_empty() => InvalidGroupNone {
+            num_group_keys: group_keys.len(),
+        }
+        .fail(),
+        // Group:By is invalid if no grouping keys are specified
+        RPCGroup::By if group_keys.is_empty() => InvalidGroupBy {}.fail(),
+        _ => Ok(()),
+    }?;
+
     let gby_agg = GroupByAndAggregate::Columns {
         agg: convert_aggregate(aggregate)?,
         group_columns: group_keys,
@@ -623,12 +651,12 @@ impl<'a> Loggable<'a> for RPCPredicate {
     }
 }
 
-/// Returns a struct that can format gRPC predicate (aka `RPCPredicates`) for Display
+/// Returns a struct that can format gRPC predicate (aka `RPCPredicates`) for
+/// Display
 ///
 /// For example:
 /// let pred = RPCPredicate (...);
 /// println!("The predicate is {:?}", loggable_predicate(pred));
-///
 pub fn displayable_predicate(pred: Option<&RPCPredicate>) -> impl fmt::Display + '_ {
     struct Wrapper<'a>(Option<&'a RPCPredicate>);
 
@@ -918,7 +946,8 @@ mod tests {
 
     #[test]
     fn test_convert_predicate_field_selection_wrapped() {
-        // test wrapping the whole predicate in a None value (aka what influxql does for some reason
+        // test wrapping the whole predicate in a None value (aka what influxql does for
+        // some reason
         let field_selection = make_field_ref_node("field1");
         let wrapped = RPCNode {
             node_type: RPCNodeType::ParenExpression as i32,
@@ -1129,6 +1158,47 @@ mod tests {
             Ok(_) => "UNEXPECTED SUCCESS".into(),
             Err(e) => format!("{}", e),
         }
+    }
+
+    #[test]
+    fn test_make_read_group_aggregate() {
+        assert_eq!(
+            make_read_group_aggregate(Some(make_aggregate(1)), RPCGroup::None, vec![]).unwrap(),
+            GroupByAndAggregate::Columns {
+                agg: QueryAggregate::Sum,
+                group_columns: vec![]
+            }
+        );
+
+        assert_eq!(
+            make_read_group_aggregate(Some(make_aggregate(1)), RPCGroup::By, vec!["gcol".into()])
+                .unwrap(),
+            GroupByAndAggregate::Columns {
+                agg: QueryAggregate::Sum,
+                group_columns: vec!["gcol".into()]
+            }
+        );
+
+        // error cases
+        assert_eq!(
+            make_read_group_aggregate(None, RPCGroup::None, vec![])
+                .unwrap_err()
+                .to_string(),
+            "Error creating aggregate: Unexpected empty aggregate"
+        );
+
+        assert_eq!(
+            make_read_group_aggregate(Some(make_aggregate(1)), RPCGroup::None, vec!["gcol".into()])
+                .unwrap_err()
+                .to_string(),
+            "Incompatible read_group request: Group::None had 1 group keys (expected 0)"
+        );
+        assert_eq!(
+            make_read_group_aggregate(Some(make_aggregate(1)), RPCGroup::By, vec![])
+                .unwrap_err()
+                .to_string(),
+            "Incompatible read_group request: Group::By had no group keys (expected at least 1)"
+        );
     }
 
     #[test]

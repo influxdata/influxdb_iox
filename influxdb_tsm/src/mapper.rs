@@ -17,7 +17,6 @@ use std::iter::Peekable;
 /// The main purpose of the `TSMMeasurementMapper` is to provide a
 /// transformation step that allows one to convert per-series/per-field data
 /// into measurement-oriented table data.
-///
 #[derive(Debug)]
 pub struct TSMMeasurementMapper<R>
 where
@@ -36,7 +35,8 @@ where
     }
 }
 
-/// either assign a value from a `Result` or return an error wrapped in an Option.
+/// either assign a value from a `Result` or return an error wrapped in an
+/// Option.
 macro_rules! try_or_some {
     ($e:expr) => {
         match $e {
@@ -82,17 +82,19 @@ impl<R: Read + Seek> Iterator for TSMMeasurementMapper<R> {
                 }
                 Err(e) => return Some(Err(e.clone())),
             }
-            self.iter.next(); // advance iterator - we got what we needed from the peek
+            self.iter.next(); // advance iterator - we got what we needed from
+                              // the peek
         }
         Some(Ok(measurement)) // final measurement in index.
     }
 }
 
-/// FieldKeyBlocks is a mapping between a set of field keys and all of the blocks
-/// for those keys.
+/// FieldKeyBlocks is a mapping between a set of field keys and all of the
+/// blocks for those keys.
 pub type FieldKeyBlocks = BTreeMap<String, Vec<Block>>;
 
-/// A collection of related blocks, fields and tag-sets for a single measurement.
+/// A collection of related blocks, fields and tag-sets for a single
+/// measurement.
 ///
 /// A `MeasurementTable` should be derived from a single TSM index (file).
 /// Given a single series key, an invariant is that none of the blocks for that
@@ -231,7 +233,6 @@ impl MeasurementTable {
     /// files) it is possible that blocks for the same tagset and field will
     /// overlap with each other. It is the callers responsibility to handle
     /// merging this data when decoding those blocks.
-    ///
     pub fn merge(&mut self, other: &mut Self) -> Result<(), TSMError> {
         if self.name != other.name {
             return Err(TSMError {
@@ -320,9 +321,9 @@ impl Display for MeasurementTable {
 
 /// A partial collection of columns belonging to the same table.
 ///
-/// A TableSection always contains a column of timestamps, which indicates how many
-/// rows each column has. Each field column is the same length as the timestamp
-/// column, but may contain values or NULL for each entry.
+/// A TableSection always contains a column of timestamps, which indicates how
+/// many rows each column has. Each field column is the same length as the
+/// timestamp column, but may contain values or NULL for each entry.
 ///
 /// Tag columns all have the same value in their column within this column set.
 /// It is up to the caller to materialise these column vectors when required.
@@ -361,6 +362,7 @@ pub enum ColumnData {
     Unsigned(Vec<Option<u64>>),
 }
 
+#[rustfmt::skip]
 // Maps multiple columnar field blocks to a single tablular representation.
 //
 // Given a set of field keys and a set of blocks for each key,
@@ -501,7 +503,8 @@ fn map_blocks_to_columns(
                                 vs.push(Some(*value));
                                 blocks[i] = None;
                             } else {
-                                vs.push(None); // block has a value available but timestamp doesn't join
+                                vs.push(None); // block has a value available
+                                               // but timestamp doesn't join
                             }
                         };
                     }
@@ -511,7 +514,8 @@ fn map_blocks_to_columns(
                                 vs.push(Some(*value));
                                 blocks[i] = None;
                             } else {
-                                vs.push(None); // block has a value available but timestamp doesn't join
+                                vs.push(None); // block has a value available
+                                               // but timestamp doesn't join
                             }
                         };
                     }
@@ -521,7 +525,8 @@ fn map_blocks_to_columns(
                                 vs.push(Some(*value));
                                 blocks[i] = None;
                             } else {
-                                vs.push(None); // block has a value available but timestamp doesn't join
+                                vs.push(None); // block has a value available
+                                               // but timestamp doesn't join
                             }
                         };
                     }
@@ -532,7 +537,8 @@ fn map_blocks_to_columns(
                                 vs.push(Some(value.clone()));
                                 blocks[i] = None;
                             } else {
-                                vs.push(None); // block has a value available but timestamp doesn't join
+                                vs.push(None); // block has a value available
+                                               // but timestamp doesn't join
                             }
                         };
                     }
@@ -542,7 +548,8 @@ fn map_blocks_to_columns(
                                 vs.push(Some(*value));
                                 blocks[i] = None;
                             } else {
-                                vs.push(None); // block has a value available but timestamp doesn't join
+                                vs.push(None); // block has a value available
+                                               // but timestamp doesn't join
                             }
                         };
                     }

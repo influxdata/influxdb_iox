@@ -1,4 +1,5 @@
-//! This module contains plumbing to connect InfluxDB IOx extensions to DataFusion
+//! This module contains plumbing to connect InfluxDB IOx extensions to
+//! DataFusion
 
 use std::sync::Arc;
 
@@ -128,8 +129,8 @@ impl IOxExecutionContext {
         self.inner.collect(physical_plan).await
     }
 
-    /// Executes the physical plan and produces a RecordBatchStream to stream over the result
-    /// that iterates over the results.
+    /// Executes the physical plan and produces a RecordBatchStream to stream
+    /// over the result that iterates over the results.
     pub async fn execute(
         &self,
         physical_plan: Arc<dyn ExecutionPlan>,
@@ -154,19 +155,20 @@ fn window_bounds(
     every: &WindowDuration,
     offset: &WindowDuration,
 ) -> Result<ArrayRef> {
-    // Note:  At the time of writing, DataFusion creates arrays of
-    // constants for constant arguments (which 4 of 5 arguments to
-    // window bounds are). We should eventually contribute someway
-    // back upstream to make DataFusion pass 4 constants rather than 4
-    // arrays of constants.
+    // Note:  At the time of writing, DataFusion creates arrays of constants for
+    // constant arguments (which 4 of 5 arguments to window bounds are). We
+    // should eventually contribute some way back upstream to make DataFusion
+    // pass 4 constants rather than 4 arrays of constants.
 
-    // There are any number of ways this function could also be
-    // further optimized, which we leave as an exercise to our future
-    // selves
+    // There are any number of ways this function could also be further
+    // optimized, which we leave as an exercise to our future selves
 
-    // `args` and output are dynamically-typed Arrow arrays, which means that we need to:
+    // `args` and output are dynamically-typed Arrow arrays, which means that we
+    // need to:
+    //
     // 1. cast the values to the type we want
-    // 2. perform the window_bounds calculation for every element in the timestamp array
+    // 2. perform the window_bounds calculation for every element in the
+    //     timestamp array
     // 3. construct the resulting array
 
     // this is guaranteed by DataFusion based on the function's signature.
@@ -177,8 +179,8 @@ fn window_bounds(
         .downcast_ref::<Int64Array>()
         .expect("cast of time failed");
 
-    // Note: the Go code uses the `Stop` field of the `GetEarliestBounds` call as the window boundary
-    // https://github.com/influxdata/influxdb/blob/master/storage/reads/array_cursor.gen.go#L546
+    // Note: the Go code uses the `Stop` field of the `GetEarliestBounds` call as
+    // the window boundary https://github.com/influxdata/influxdb/blob/master/storage/reads/array_cursor.gen.go#L546
 
     // Note window doesn't use the period argument
     let period = window::Duration::from_nsecs(0);

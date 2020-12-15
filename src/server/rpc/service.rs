@@ -166,6 +166,12 @@ pub enum Error {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    #[snafu(display(
+        "Unexpected hint value on read_group request. Expected 0, got {}",
+        hints
+    ))]
+    InternalHintsFieldNotSupported { hints: u32 },
+
     #[snafu(display("Operation not yet implemented:  {}", operation))]
     NotYetImplemented { operation: String },
 }
@@ -173,7 +179,8 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl From<Error> for tonic::Status {
-    /// Converts a result from the business logic into the appropriate tonic status
+    /// Converts a result from the business logic into the appropriate tonic
+    /// status
     fn from(err: Error) -> Self {
         error!("Error handling gRPC request: {}", err);
         err.to_status()
@@ -181,7 +188,8 @@ impl From<Error> for tonic::Status {
 }
 
 impl Error {
-    /// Converts a result from the business logic into the appropriate tonic status
+    /// Converts a result from the business logic into the appropriate tonic
+    /// status
     fn to_status(&self) -> tonic::Status {
         match &self {
             Self::ServerError { .. } => Status::internal(self.to_string()),
@@ -210,6 +218,7 @@ impl Error {
             Self::ConvertingSeriesSet { .. } => Status::invalid_argument(self.to_string()),
             Self::ConvertingFieldList { .. } => Status::invalid_argument(self.to_string()),
             Self::SendingResults { .. } => Status::internal(self.to_string()),
+            Self::InternalHintsFieldNotSupported { .. } => Status::internal(self.to_string()),
             Self::NotYetImplemented { .. } => Status::internal(self.to_string()),
         }
     }
@@ -310,7 +319,7 @@ where
             group_keys,
             group,
             aggregate,
-            hints: _,
+            hints,
         } = read_group_request;
 
         info!(
@@ -318,6 +327,10 @@ where
             db_name, range, group_keys, group, aggregate,
               predicate.loggable()
         );
+
+        if hints != 0 {
+            InternalHintsFieldNotSupported { hints }.fail()?
+        }
 
         warn!("read_group implementation not yet complete: https://github.com/influxdata/influxdb_iox/issues/448");
 
@@ -465,7 +478,8 @@ where
 
         let measurement = None;
 
-        // Special case a request for 'tag_key=_measurement" means to list all measurements
+        // Special case a request for 'tag_key=_measurement" means to list all
+        // measurements
         let response = if tag_key.is_measurement() {
             info!(
                 "tag_values with tag_key=[x00] (measurement name) for database {}, range: {:?}, predicate: {} --> returning measurement_names",
@@ -837,7 +851,8 @@ where
     Ok(StringValuesResponse { values })
 }
 
-/// Return tag keys with optional measurement, timestamp and arbitratry predicates
+/// Return tag keys with optional measurement, timestamp and arbitratry
+/// predicates
 async fn tag_keys_impl<T>(
     db_store: Arc<T>,
     executor: Arc<QueryExecutor>,
@@ -891,7 +906,8 @@ where
     Ok(StringValuesResponse { values })
 }
 
-/// Return tag values for tag_name, with optional measurement, timestamp and arbitratry predicates
+/// Return tag values for tag_name, with optional measurement, timestamp and
+/// arbitratry predicates
 async fn tag_values_impl<T>(
     db_store: Arc<T>,
     executor: Arc<QueryExecutor>,
@@ -1095,7 +1111,8 @@ where
     Ok(())
 }
 
-/// Return field names, restricted via optional measurement, timestamp and predicate
+/// Return field names, restricted via optional measurement, timestamp and
+/// predicate
 async fn field_names_impl<T>(
     db_store: Arc<T>,
     executor: Arc<QueryExecutor>,
@@ -1341,7 +1358,8 @@ mod tests {
             predicate: None,
         };
 
-        // Note we don't set the column_names on the test database, so we expect an error
+        // Note we don't set the column_names on the test database, so we expect an
+        // error
         let response = fixture.storage_client.tag_keys(request).await;
         assert!(response.is_err());
         let response_string = format!("{:?}", response);
@@ -1361,9 +1379,9 @@ mod tests {
         Ok(())
     }
 
-    /// test the plumbing of the RPC layer for measurement_tag_keys-- specifically that
-    /// the right parameters are passed into the Database interface
-    /// and that the returned values are sent back via gRPC.
+    /// test the plumbing of the RPC layer for measurement_tag_keys--
+    /// specifically that the right parameters are passed into the Database
+    /// interface and that the returned values are sent back via gRPC.
     #[tokio::test]
     async fn test_storage_rpc_measurement_tag_keys() -> Result<(), tonic::Status> {
         // Start a test gRPC server on a randomally allocated port
@@ -1435,7 +1453,8 @@ mod tests {
             predicate: None,
         };
 
-        // Note we don't set the column_names on the test database, so we expect an error
+        // Note we don't set the column_names on the test database, so we expect an
+        // error
         let response = fixture.storage_client.measurement_tag_keys(request).await;
         assert!(response.is_err());
         let response_string = format!("{:?}", response);
@@ -1566,7 +1585,8 @@ mod tests {
             tag_key: "the_tag_key".into(),
         };
 
-        // Note we don't set the column_names on the test database, so we expect an error
+        // Note we don't set the column_names on the test database, so we expect an
+        // error
         let response = fixture.storage_client.tag_values(request).await;
         assert!(response.is_err());
         let response_string = format!("{:?}", response);
@@ -1606,9 +1626,9 @@ mod tests {
         );
     }
 
-    /// test the plumbing of the RPC layer for measurement_tag_values-- specifically that
-    /// the right parameters are passed into the Database interface
-    /// and that the returned values are sent back via gRPC.
+    /// test the plumbing of the RPC layer for measurement_tag_values--
+    /// specifically that the right parameters are passed into the Database
+    /// interface and that the returned values are sent back via gRPC.
     #[tokio::test]
     async fn test_storage_rpc_measurement_tag_values() {
         // Start a test gRPC server on a randomally allocated port
@@ -1673,7 +1693,8 @@ mod tests {
             tag_key: "the_tag_key".into(),
         };
 
-        // Note we don't set the column_names on the test database, so we expect an error
+        // Note we don't set the column_names on the test database, so we expect an
+        // error
         let response = fixture.storage_client.measurement_tag_values(request).await;
         assert!(response.is_err());
         let response_string = format!("{:?}", response);
@@ -1858,13 +1879,13 @@ mod tests {
             partition_id,
         ));
 
-        let group = generated_types::read_group_request::Group::None as i32;
+        let group = generated_types::read_group_request::Group::By as i32;
 
         let request = ReadGroupRequest {
             read_source: source.clone(),
             range: make_timestamp_range(150, 200),
             predicate: make_state_ma_predicate(),
-            group_keys: vec![String::from("tag1")],
+            group_keys: vec!["tag1".into()],
             group,
             aggregate: Some(RPCAggregate {
                 r#type: AggregateType::Sum as i32,
@@ -1876,7 +1897,7 @@ mod tests {
             predicate: "Predicate { exprs: [#state Eq Utf8(\"MA\")] range: TimestampRange { start: 150, end: 200 }}".into(),
             gby_agg: GroupByAndAggregate::Columns {
                 agg: QueryAggregate::Sum,
-                group_columns: vec![String::from("tag1")],
+                group_columns: vec!["tag1".into()],
             }
         };
 
@@ -1898,13 +1919,43 @@ mod tests {
         );
 
         // ---
-        // test error
+        // test error hit in request processing
         // ---
         let request = ReadGroupRequest {
             read_source: source.clone(),
             range: None,
             predicate: None,
-            group_keys: vec![],
+            group_keys: vec!["tag1".into()],
+            group,
+            aggregate: Some(RPCAggregate {
+                r#type: AggregateType::Sum as i32,
+            }),
+            hints: 42,
+        };
+
+        let response = fixture.storage_client.read_group(request).await;
+        assert!(response.is_err());
+        let response_string = format!("{:?}", response);
+        let expected_error = "Unexpected hint value on read_group request. Expected 0, got 42";
+        assert!(
+            response_string.contains(expected_error),
+            "'{}' did not contain expected content '{}'",
+            response_string,
+            expected_error
+        );
+
+        // Errored out in gRPC and never got to database layer
+        let expected_request: Option<QueryGroupsRequest> = None;
+        assert_eq!(test_db.get_query_groups_request().await, expected_request);
+
+        // ---
+        // test error returned in database processing
+        // ---
+        let request = ReadGroupRequest {
+            read_source: source.clone(),
+            range: None,
+            predicate: None,
+            group_keys: vec!["tag1".into()],
             group,
             aggregate: Some(RPCAggregate {
                 r#type: AggregateType::Sum as i32,
@@ -1928,7 +1979,7 @@ mod tests {
             predicate: "Predicate {}".into(),
             gby_agg: GroupByAndAggregate::Columns {
                 agg: QueryAggregate::Sum,
-                group_columns: vec![],
+                group_columns: vec!["tag1".into()],
             },
         });
         assert_eq!(test_db.get_query_groups_request().await, expected_request);
@@ -2117,7 +2168,7 @@ mod tests {
 
         let request = MeasurementFieldsRequest {
             source: source.clone(),
-            measurement: String::from("TheMeasurement"),
+            measurement: "TheMeasurement".into(),
             range: make_timestamp_range(150, 200),
             predicate: make_state_ma_predicate(),
         };
@@ -2155,7 +2206,7 @@ mod tests {
         // ---
         let request = MeasurementFieldsRequest {
             source: source.clone(),
-            measurement: String::from("TheMeasurement"),
+            measurement: "TheMeasurement".into(),
             range: None,
             predicate: None,
         };
@@ -2220,7 +2271,8 @@ mod tests {
     struct OrgAndBucket {
         org_id: u64,
         bucket_id: u64,
-        /// The influxdb_iox database name corresponding to `org_id` and `bucket_id`
+        /// The influxdb_iox database name corresponding to `org_id` and
+        /// `bucket_id`
         db_name: DatabaseName<'static>,
     }
 
@@ -2471,8 +2523,8 @@ mod tests {
             Ok(responses)
         }
 
-        /// Convert the StringValueResponses into rust Strings, sorting the values
-        /// to ensure  consistency.
+        /// Convert the StringValueResponses into rust Strings, sorting the
+        /// values to ensure  consistency.
         fn to_string_vec(&self, responses: Vec<StringValuesResponse>) -> Vec<String> {
             let mut strings = responses
                 .into_iter()
