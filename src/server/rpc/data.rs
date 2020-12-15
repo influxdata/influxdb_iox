@@ -131,7 +131,8 @@ fn data_type(array: &ArrayRef) -> Result<DataType> {
     }
 }
 
-/// Returns true if the array is entirely null between start_row and start_row+num_rows
+/// Returns true if the array is entirely null between start_row and
+/// start_row+num_rows
 fn is_all_null(arr: &ArrayRef, start_row: usize, num_rows: usize) -> bool {
     let end_row = start_row + num_rows;
     (start_row..end_row).all(|i| arr.is_null(i))
@@ -369,7 +370,6 @@ mod tests {
 
         let response =
             series_set_to_read_response(series_set).expect("Correctly converted series set");
-        println!("Response is: {:#?}", response);
 
         assert_eq!(response.frames.len(), 8); // 2 per field x 4 fields = 8
 
@@ -434,11 +434,11 @@ mod tests {
             batch,
         };
 
-        // Expect only a single series (for the data in float_field, int_field is all nulls)
+        // Expect only a single series (for the data in float_field, int_field is all
+        // nulls)
 
         let response =
             series_set_to_read_response(series_set).expect("Correctly converted series set");
-        println!("Response is: {:#?}", response);
 
         let dumped_frames = response
             .frames
@@ -471,7 +471,6 @@ mod tests {
 
         let response = series_set_item_to_read_response(grouped_series_set_item)
             .expect("Correctly converted grouped_series_set_item");
-        println!("Response is: {:#?}", response);
 
         let dumped_frames = response
             .frames
@@ -516,8 +515,6 @@ mod tests {
 
         let response = series_set_item_to_read_response(series_set_item)
             .expect("Correctly converted series_set_item");
-
-        println!("Response is: {:#?}", response);
 
         let dumped_frames = response
             .frames
