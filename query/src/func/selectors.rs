@@ -44,9 +44,9 @@ use internal::{
 /// Returns a DataFusion user defined aggregate function for computing
 /// one field of the first() selector function.
 ///
-/// Note that until XXX is fixed, selector functions must be computed
-/// using two separate function calls, one each for the value and time
-/// part
+/// Note that until https://issues.apache.org/jira/browse/ARROW-10945
+/// is fixed, selector functions must be computed using two separate
+/// function calls, one each for the value and time part
 ///
 /// first(value_column, timestamp_column) -> value and timestamp
 ///
@@ -74,9 +74,9 @@ pub fn selector_first(data_type: &DataType, output: SelectorOutput) -> Aggregate
 /// Returns a DataFusion user defined aggregate function for computing
 /// one field of the last() selector function.
 ///
-/// Note that until XXX is fixed, selector functions must be computed
-/// using two separate function calls, one each for the value and time
-/// part
+/// Note that until https://issues.apache.org/jira/browse/ARROW-10945
+/// is fixed, selector functions must be computed using two separate
+/// function calls, one each for the value and time part
 ///
 /// selector_last(data_column, timestamp_column) -> value and timestamp
 ///
@@ -104,9 +104,9 @@ pub fn selector_last(data_type: &DataType, output: SelectorOutput) -> AggregateU
 /// Returns a DataFusion user defined aggregate function for computing
 /// one field of the min() selector function.
 ///
-/// Note that until XXX is fixed, selector functions must be computed
-/// using two separate function calls, one each for the value and time
-/// part
+/// Note that until https://issues.apache.org/jira/browse/ARROW-10945
+/// is fixed, selector functions must be computed using two separate
+/// function calls, one each for the value and time part
 ///
 /// selector_min(data_column, timestamp_column) -> value and timestamp
 ///
@@ -134,9 +134,9 @@ pub fn selector_min(data_type: &DataType, output: SelectorOutput) -> AggregateUD
 /// Returns a DataFusion user defined aggregate function for computing
 /// one field of the max() selector function.
 ///
-/// Note that until XXX is fixed, selector functions must be computed
-/// using two separate function calls, one each for the value and time
-/// part
+/// Note that until https://issues.apache.org/jira/browse/ARROW-10945
+/// is fixed, selector functions must be computed using two separate
+/// function calls, one each for the value and time part
 ///
 /// selector_max(data_column, timestamp_column) -> value and timestamp
 ///
@@ -180,7 +180,8 @@ trait Selector: Debug + Default + Send + Sync {
 }
 
 // Describes which part of the selector to return: the timestamp or
-// the value (note when XXX is fixed, this enum should be removed)
+// the value (when https://issues.apache.org/jira/browse/ARROW-10945
+// is fixed, this enum should be removed)
 #[derive(Debug, Clone, Copy)]
 pub enum SelectorOutput {
     Value,
