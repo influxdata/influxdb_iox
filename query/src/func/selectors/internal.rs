@@ -29,8 +29,9 @@ use super::{Selector, SelectorOutput};
 /// This is some version of `min_max_helper` from
 /// aggregate.rs in arrow
 ///
-/// XXX TODO: file a ticket to implement bool min in arrow and remove
-/// this implementation.
+/// This code should be contribited upstream and then removed from
+/// here when arrow gets this feature:
+/// https://issues.apache.org/jira/browse/ARROW-10944
 fn min_max_helper<F>(array: &BooleanArray, cmp: F) -> Option<bool>
 where
     F: Fn(bool, bool) -> bool,
