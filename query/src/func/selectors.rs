@@ -11,8 +11,6 @@
 //! Note: At the time of writing, DataFusion aggregate functions have
 //! no way to handle aggregates that produce multiple columns.
 //!
-//! TODO: file an arrow ticket to support this behavior
-//!
 //! This module implements a workaround of "do the aggregation twice
 //! with two distinct functions" to get something working. It should
 //! should be removed when DataFusion / Arrow has proper support
