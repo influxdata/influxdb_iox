@@ -668,7 +668,7 @@ mod test {
         .unwrap();
 
         let provider =
-            MemTable::new(schema.clone(), vec![vec![batch1], vec![batch2, batch3]]).unwrap();
+            MemTable::try_new(schema.clone(), vec![vec![batch1], vec![batch2, batch3]]).unwrap();
         let mut ctx = ExecutionContext::new();
         ctx.register_table("t", Box::new(provider));
 

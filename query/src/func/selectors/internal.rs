@@ -14,10 +14,8 @@ use arrow_deps::{
         min_string as array_min_string,
     },
     arrow::{
-        array::{
-            Array, ArrayRef, BooleanArray, Float64Array, Int64Array, PrimitiveArray, StringArray,
-        },
-        datatypes::{ArrowPrimitiveType, DataType},
+        array::{Array, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray},
+        datatypes::DataType,
     },
     datafusion::{error::Result as DataFusionResult, scalar::ScalarValue},
 };
@@ -28,16 +26,14 @@ use super::{Selector, SelectorOutput};
 /// bools... Which is a silly operation anyways, when you think about
 /// it. However, we include it here for completeness.
 ///
-/// This is a copy/paste modify version of `min_max_helper` from
-/// aggregate.rs in arrow to use ArrowPrimitiveType rather than ArrowNumericType
-/// so it can be used in bool.
+/// This is some version of `min_max_helper` from
+/// aggregate.rs in arrow
 ///
 /// XXX TODO: file a ticket to implement bool min in arrow and remove
 /// this implementation.
-fn min_max_helper<T, F>(array: &PrimitiveArray<T>, cmp: F) -> Option<T::Native>
+fn min_max_helper<F>(array: &BooleanArray, cmp: F) -> Option<bool>
 where
-    T: ArrowPrimitiveType,
-    F: Fn(&T::Native, &T::Native) -> bool,
+    F: Fn(bool, bool) -> bool,
 {
     let null_count = array.null_count();
 
@@ -46,34 +42,25 @@ where
         return None;
     }
 
-    let data = array.data();
-    let m = array.value_slice(0, data.len());
-    let mut n;
+    // optimized path for arrays without null values
+    let m0: Option<bool> = array.iter().next().unwrap();
 
-    if null_count == 0 {
-        // optimized path for arrays without null values
-        n = m[1..]
-            .iter()
-            .fold(m[0], |max, item| if cmp(&max, item) { *item } else { max });
-    } else {
-        n = T::default_value();
-        let mut has_value = false;
-        for (i, item) in m.iter().enumerate() {
-            if data.is_valid(i) && (!has_value || cmp(&n, item)) {
-                has_value = true;
-                n = *item
-            }
-        }
-    }
-    Some(n)
+    array.iter().fold(m0, |max, item| match (max, item) {
+        (Some(max), Some(item)) => Some(if cmp(max, item) { item } else { max }),
+        (Some(max), None) => Some(max),
+        (None, Some(item)) => Some(item),
+        (None, None) => None,
+    })
 }
 
 fn array_min_bool(array: &BooleanArray) -> Option<bool> {
-    min_max_helper(array, |a, b| a > b)
+    // a > b == a & !b
+    min_max_helper(array, |a, b| a & !b)
 }
 
 fn array_max_bool(array: &BooleanArray) -> Option<bool> {
-    min_max_helper(array, |a, b| a < b)
+    // a < b == !a & b
+    min_max_helper(array, |a, b| !a & b)
 }
 
 /// Trait for comparing values in arrays with their native
