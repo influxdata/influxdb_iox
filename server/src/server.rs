@@ -156,10 +156,8 @@ impl<M: ConnectionManager> Server<M> {
     pub async fn store_configuration(&self) -> Result<()> {
         let id = self.require_id().await?;
 
-        let data = {
-            let config = self.config.read().await;
-            Bytes::from(serde_json::to_vec(&*config).context(ErrorSerializing)?)
-        };
+        let config = self.config.read().await;
+        let data = Bytes::from(serde_json::to_vec(&*config).context(ErrorSerializing)?);
         let len = data.len();
         let location = config_location(id);
 
@@ -323,8 +321,6 @@ impl<M: ConnectionManager> Server<M> {
     }
 }
 
-// TODO: refactor other parts of codebase to not use this DatabaseStore trait.
-// They shouldn't        be accessing the DB directly.
 #[async_trait]
 impl DatabaseStore for Server<ConnectionManagerImpl> {
     type Database = WriteBufferDb;
@@ -342,23 +338,21 @@ impl DatabaseStore for Server<ConnectionManagerImpl> {
     //       explicitly create a database.
     async fn db_or_create(&self, name: &str) -> Result<Arc<Self::Database>, Self::Error> {
         let db_name = DatabaseName::new(name.to_string()).context(InvalidDatabaseName)?;
-        let mut config = self.config.write().await;
-        let db = config.databases.entry(db_name).or_insert_with(|| {
-            let sequence = AtomicU64::new(STARTING_SEQUENCE);
-            let rules = DatabaseRules::default();
-            Db {
-                rules,
-                local_store: Some(Arc::new(WriteBufferDb::new(name))),
-                wal_buffer: None,
-                sequence,
-            }
-        });
 
-        Ok(db
-            .local_store
-            .as_ref()
-            .expect("this should be refactored out")
-            .clone())
+        let db = match self.db(&db_name).await {
+            Some(db) => db,
+            None => {
+                let rules = DatabaseRules {
+                    store_locally: true,
+                    ..Default::default()
+                };
+
+                self.create_database(name, rules).await?;
+                self.db(&db_name).await.expect("db not inserted")
+            }
+        };
+
+        Ok(db)
     }
 }
 

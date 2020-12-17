@@ -1,4 +1,4 @@
-use tracing::info;
+use tracing::{info, warn};
 
 use std::fs;
 use std::net::SocketAddr;
@@ -93,7 +93,7 @@ pub async fn main() -> Result<()> {
         info!("setting server ID to {}", id);
         app_server.set_id(id).await;
     } else {
-        info!("server ID not set. This must be set via API before writing or querying data.");
+        warn!("server ID not set. This must be set via API before writing or querying data.");
     }
 
     // Fire up the query executor
