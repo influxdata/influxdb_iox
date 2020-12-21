@@ -1763,7 +1763,7 @@ mod tests {
 
         let predicate = PredicateBuilder::default()
             // fiter out first row (ts 1000)
-            .timestamp_range(1001, 4000)
+            .timestamp_range(1001, 4001)
             .build();
 
         // run the created plan, ensuring the output is as expected
@@ -1817,10 +1817,10 @@ mod tests {
     #[tokio::test]
     async fn test_grouped_series_set_plan_min() {
         let lp_lines = vec![
-            "h2o,state=MA,city=Cambridge f=8.0,i=8i,b=true,s=\"d\" 1000",
-            "h2o,state=MA,city=Cambridge f=7.0,i=7i,b=true,s=\"c\" 2000",
-            "h2o,state=MA,city=Cambridge f=6.0,i=6i,b=false,s=\"b\" 3000",
-            "h2o,state=MA,city=Cambridge f=5.0,i=5i,b=false,s=\"a\" 4000",
+            "h2o,state=MA,city=Cambridge f=8.0,i=8i,b=false,s=\"c\" 1000",
+            "h2o,state=MA,city=Cambridge f=7.0,i=7i,b=false,s=\"a\" 2000",
+            "h2o,state=MA,city=Cambridge f=6.0,i=6i,b=true,s=\"z\" 3000",
+            "h2o,state=MA,city=Cambridge f=5.0,i=5i,b=true,s=\"c\" 4000",
         ];
 
         let mut fixture = TableFixture::new(lp_lines);
@@ -1839,7 +1839,7 @@ mod tests {
             "+-------+-----------+-------+--------+---+--------+---+--------+---+--------+",
             "| state | city      | b     | time_b | f | time_f | i | time_i | s | time_s |",
             "+-------+-----------+-------+--------+---+--------+---+--------+---+--------+",
-            "| MA    | Cambridge | false | 3000   | 6 | 3000   | 6 | 3000   | b | 3000   |",
+            "| MA    | Cambridge | false | 1000   | 6 | 3000   | 6 | 3000   | a | 2000   |",
             "+-------+-----------+-------+--------+---+--------+---+--------+---+--------+",
         ];
 
@@ -1849,17 +1849,17 @@ mod tests {
     #[tokio::test]
     async fn test_grouped_series_set_plan_max() {
         let lp_lines = vec![
-            "h2o,state=MA,city=Cambridge f=8.0,i=8i,b=true,s=\"d\" 1000",
-            "h2o,state=MA,city=Cambridge f=7.0,i=7i,b=true,s=\"c\" 2000",
-            "h2o,state=MA,city=Cambridge f=6.0,i=6i,b=false,s=\"b\" 3000",
-            "h2o,state=MA,city=Cambridge f=5.0,i=5i,b=false,s=\"a\" 4000",
+            "h2o,state=MA,city=Cambridge f=8.0,i=8i,b=true,s=\"c\" 1000",
+            "h2o,state=MA,city=Cambridge f=7.0,i=7i,b=false,s=\"d\" 2000",
+            "h2o,state=MA,city=Cambridge f=6.0,i=6i,b=true,s=\"a\" 3000",
+            "h2o,state=MA,city=Cambridge f=5.0,i=5i,b=true,s=\"z\" 4000",
         ];
 
         let mut fixture = TableFixture::new(lp_lines);
 
         let predicate = PredicateBuilder::default()
             // fiter out first row (ts 1000)
-            .timestamp_range(1001, 4000)
+            .timestamp_range(1001, 4001)
             .build();
 
         // run the created plan, ensuring the output is as expected
@@ -1871,7 +1871,7 @@ mod tests {
             "+-------+-----------+------+--------+---+--------+---+--------+---+--------+",
             "| state | city      | b    | time_b | f | time_f | i | time_i | s | time_s |",
             "+-------+-----------+------+--------+---+--------+---+--------+---+--------+",
-            "| MA    | Cambridge | true | 2000   | 7 | 2000   | 7 | 2000   | c | 2000   |",
+            "| MA    | Cambridge | true | 3000   | 7 | 2000   | 7 | 2000   | z | 4000   |",
             "+-------+-----------+------+--------+---+--------+---+--------+---+--------+",
         ];
 
