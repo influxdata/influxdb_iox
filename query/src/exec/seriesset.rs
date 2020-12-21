@@ -47,7 +47,7 @@ pub enum Error {
     ))]
     ReadingRecordBatch { source: arrow::error::ArrowError },
 
-    #[snafu(display("Intrnal field error while converting series set: {}", source))]
+    #[snafu(display("Internal field error while converting series set: {}", source))]
     InternalField { source: super::field::Error },
 
     #[snafu(display("Sending series set results during conversion: {:?}", source))]
