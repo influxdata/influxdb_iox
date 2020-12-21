@@ -1,9 +1,9 @@
 use generated_types::wal as wb;
 use query::{
-    func::window::make_window_bound_expr,
-    group_by::{Aggregate, WindowDuration},
     exec::{field::FieldColumns, make_schema_pivot, SeriesSetPlan},
     func::selectors::{selector_first, selector_last, selector_max, selector_min, SelectorOutput},
+    func::window::make_window_bound_expr,
+    group_by::{Aggregate, WindowDuration},
 };
 use tracing::debug;
 
