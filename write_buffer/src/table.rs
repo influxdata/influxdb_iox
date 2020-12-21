@@ -567,7 +567,7 @@ impl Table {
     ///   group_key1, group_key2, remaining tags
     ///
     /// Equivalent to this SQL query for 'selector' functions: first, last, min,
-    /// max as they can have different values of the timestamp colum
+    /// max as they can have different values of the timestamp column
     ///
     /// SELECT
     ///   tag1...tagN
