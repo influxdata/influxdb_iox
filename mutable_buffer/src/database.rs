@@ -34,7 +34,7 @@ use crate::dictionary::Error as DictionaryError;
 
 use async_trait::async_trait;
 use chrono::{offset::TimeZone, Utc};
-use snafu::{OptionExt, ResultExt, Snafu};
+use snafu::{ResultExt, Snafu};
 use sqlparser::{
     ast::{SetExpr, Statement, TableFactor},
     dialect::GenericDialect,
@@ -185,11 +185,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub struct MutableBufferDb {
     pub name: String,
 
-    /// Maps partition keys to partitions.
+    /// Maps partition keys to partitions which hold the actual data
     partitions: RwLock<HashMap<String, Arc<RwLock<Partition>>>>,
-
-    // TODO: REMOVE THIS field
-    chunks: RwLock<Vec<Chunk>>,
 }
 
 impl MutableBufferDb {
@@ -197,16 +194,6 @@ impl MutableBufferDb {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            ..Default::default()
-        }
-    }
-
-    /// New creates a new in-memory only write buffer database with pre-existing
-    /// chunks
-    pub fn new_from_chunks(name: impl Into<String>, chunks: Vec<Chunk>) -> Self {
-        Self {
-            name: name.into(),
-            chunks: RwLock::new(chunks),
             ..Default::default()
         }
     }
@@ -229,24 +216,21 @@ impl MutableBufferDb {
     }
 
     async fn table_to_arrow(&self, table_name: &str, columns: &[&str]) -> Result<Vec<RecordBatch>> {
-        let chunks = self.chunks.read().await;
-
-        let batches = chunks
-            .iter()
-            .map(|p| p.table_to_arrow(table_name, columns))
-            .collect::<Result<Vec<_>, crate::chunk::Error>>()?;
+        let mut batches = Vec::new();
+        for partition in self.partition_snapshot().await.into_iter() {
+            let partition = partition.read().await;
+            for chunk in partition.iter() {
+                chunk.table_to_arrow(&mut batches, table_name, columns)?
+            }
+        }
 
         Ok(batches)
     }
 
-    pub async fn remove_chunk(&self, partition_key: &str) -> Result<Chunk> {
-        let mut chunks = self.chunks.write().await;
-        let pos = chunks
-            .iter()
-            .position(|p| p.key == partition_key)
-            .context(ChunkNotFound { partition_key })?;
-
-        Ok(chunks.remove(pos))
+    pub async fn rollover_partition(&self, partition_key: &str) -> Result<Arc<Chunk>> {
+        let partition = self.get_partition(partition_key).await;
+        let mut partition = partition.write().await;
+        Ok(partition.rollover_chunk())
     }
 }
 
@@ -455,17 +439,6 @@ impl SQLDatabase for MutableBufferDb {
         let names = visitor.into_inner().into_iter().collect();
         Ok(names)
     }
-
-    async fn remove_chunk(&self, partition_key: &str) -> Result<Arc<Chunk>> {
-        // TODO handle partitions
-        let mut chunks = self.chunks.write().await;
-        let pos = chunks
-            .iter()
-            .position(|p| p.key == partition_key)
-            .context(ChunkNotFound { partition_key })?;
-
-        Ok(Arc::new(chunks.remove(pos)))
-    }
 }
 
 /// This trait is used to implement a "Visitor" pattern for Database
@@ -550,14 +523,14 @@ trait Visitor {
 }
 
 impl MutableBufferDb {
-    /// returns the number of chunks in this database
+    /// returns the number of partitions in this database
     pub async fn len(&self) -> usize {
-        self.chunks.read().await.len()
+        self.partitions.read().await.len()
     }
 
     /// returns true if the database has no partititons
     pub async fn is_empty(&self) -> bool {
-        self.chunks.read().await.is_empty()
+        self.partitions.read().await.is_empty()
     }
 
     /// Retrieve (or create) the partition for the specified partition key
@@ -576,6 +549,19 @@ impl MutableBufferDb {
         }
     }
 
+    /// get a snapshot of all the current partitions -- useful so that
+    /// while doing stuff with one partition we don't prevent creating
+    /// new partitions
+    ///
+    /// Note that since we don't hold the lock on self.partitions
+    /// after this returns, new partitions can be added, and some
+    /// partitions in the snapshot could be dropped from the overall
+    /// database
+    async fn partition_snapshot(&self) -> Vec<Arc<RwLock<Partition>>> {
+        let partitions = self.partitions.read().await;
+        partitions.values().map(|v| v.clone()).collect()
+    }
+
     /// Traverse this database's tables, calling the relevant
     /// functions, in order, of `visitor`, as described on the Visitor
     /// trait.
@@ -587,14 +573,7 @@ impl MutableBufferDb {
         filter: &mut ChunkTableFilter,
         visitor: &mut V,
     ) -> Result<()> {
-        // take a snapshot of all partitions so we dont lock the
-        // entire mutable buffer as we implement this
-        let partition_snapshot: Vec<_> = {
-            let partitions = self.partitions.read().await;
-            partitions.values().map(|v| v.clone()).collect()
-        };
-
-        for partition in partition_snapshot.into_iter() {
+        for partition in self.partition_snapshot().await.into_iter() {
             let partition = partition.read().await;
 
             if filter.should_visit_partition(&partition)? {
@@ -796,15 +775,13 @@ impl Visitor for TableNameVisitor {
         &mut self,
         table: &Table,
         chunk: &Chunk,
-        filter: &mut ChunkTableFilter,
+        _filter: &mut ChunkTableFilter,
     ) -> Result<()> {
         // If the table has rows that could match the filter, add it
-        if table.could_match_predicate(filter.chunk_predicate())? {
-            // the table name should always have an encoded value in the dictionary
-            let table_name = chunk.dictionary.lookup_id(table.id).unwrap();
-            if !self.table_names.contains(table_name) {
-                self.table_names.insert(table_name.to_string());
-            }
+        // the table name should always have an encoded value in the dictionary
+        let table_name = chunk.dictionary.lookup_id(table.id).unwrap();
+        if !self.table_names.contains(table_name) {
+            self.table_names.insert(table_name.to_string());
         }
         Ok(())
     }
@@ -1509,7 +1486,7 @@ mod tests {
     // "#;
     //             let smaller_cpu_columns = &["host", "new_tag", "new_field",
     // "time"];             let chunks = db.table_to_arrow("cpu",
-    // smaller_cpu_columns).await?;             
+    // smaller_cpu_columns).await?;
     // assert_table_eq(smaller_cpu_table, &chunks);
 
     //             // all of mem

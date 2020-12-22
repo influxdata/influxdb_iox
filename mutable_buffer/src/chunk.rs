@@ -321,13 +321,22 @@ impl Chunk {
         self.key.starts_with(key)
     }
 
-    /// Convert the table specified in this chunk into an arrow record batch
-    pub fn table_to_arrow(&self, table_name: &str, columns: &[&str]) -> Result<RecordBatch> {
+    /// Convert the table specified in this chunk into some number of
+    /// record batches, appended to dst
+    pub fn table_to_arrow(
+        &self,
+        dst: &mut Vec<RecordBatch>,
+        table_name: &str,
+        columns: &[&str],
+    ) -> Result<()> {
         let table = self.table(table_name)?;
 
-        table
-            .to_arrow(&self, columns)
-            .context(NamedTableError { table_name })
+        dst.push(
+            table
+                .to_arrow(&self, columns)
+                .context(NamedTableError { table_name })?,
+        );
+        Ok(())
     }
 
     /// Returns a vec of the summary statistics of the tables in this chunk
@@ -403,10 +412,11 @@ impl query::PartitionChunk for Chunk {
 
     fn table_to_arrow(
         &self,
+        dst: &mut Vec<RecordBatch>,
         table_name: &str,
         columns: &[&str],
-    ) -> Result<RecordBatch, Self::Error> {
-        self.table_to_arrow(table_name, columns)
+    ) -> Result<(), Self::Error> {
+        self.table_to_arrow(dst, table_name, columns)
     }
 }
 

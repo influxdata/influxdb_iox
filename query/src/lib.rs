@@ -132,12 +132,6 @@ pub trait SQLDatabase: Debug + Send + Sync {
         &self,
         partition_key: &str,
     ) -> Result<Vec<String>, Self::Error>;
-
-    /// Removes the partition from the database and returns it
-    async fn remove_chunk(
-        &self,
-        partition_key: &str,
-    ) -> Result<Arc<Self::Chunk>, Self::Error>;
 }
 
 /// Collection of data that shares the same partition key
@@ -150,12 +144,13 @@ pub trait PartitionChunk: Debug + Send + Sync {
     /// returns the partition metadata stats for every table in the partition
     fn table_stats(&self) -> Result<Vec<TableStats>, Self::Error>;
 
-    /// converts the table to an Arrow RecordBatch
+    /// converts the table to an Arrow RecordBatch and writes to dst
     fn table_to_arrow(
         &self,
+        dst: &mut Vec<RecordBatch>,
         table_name: &str,
         columns: &[&str],
-    ) -> Result<RecordBatch, Self::Error>;
+    ) -> Result<(), Self::Error>;
 }
 
 #[async_trait]

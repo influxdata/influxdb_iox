@@ -45,11 +45,6 @@ impl Partition {
         }
     }
 
-    // /// Return true if the current active mutable chunk has data
-    // pub fn has_mutable_data(&self) -> bool {
-    //     todo!();
-    // }
-
     /// write data to the active mutable chunk
     pub fn write_entry(&mut self, entry: &wb::WriteBufferEntry<'_>) -> Result<()> {
         assert_eq!(

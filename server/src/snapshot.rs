@@ -144,15 +144,15 @@ where
 
     async fn run(&self, notify: Option<oneshot::Sender<()>>) -> Result<()> {
         while let Some((pos, table_name)) = self.next_table() {
-            let batch = self
-                .partition
-                .table_to_arrow(table_name, &[])
+
+            let mut batches = Vec::new();
+            self.partition
+                .table_to_arrow(&mut batches, table_name, &[])
                 .map_err(|e| Box::new(e) as _)
                 .context(PartitionError)?;
 
             let file_name = format!("{}/{}.parquet", &self.data_path, table_name);
-
-            self.write_batch(batch, &file_name).await?;
+            self.write_batches(batches, &file_name).await?;
             self.mark_table_finished(pos);
 
             if self.should_stop() {
@@ -186,12 +186,14 @@ where
         Ok(())
     }
 
-    async fn write_batch(&self, batch: RecordBatch, file_name: &str) -> Result<()> {
+    async fn write_batches(&self, batches: Vec<RecordBatch>, file_name: &str) -> Result<()> {
         let mem_writer = MemWriter::default();
         {
-            let mut writer = ArrowWriter::try_new(mem_writer.clone(), batch.schema(), None)
+            let mut writer = ArrowWriter::try_new(mem_writer.clone(), batches[0].schema(), None)
                 .context(OpeningParquetWriter)?;
-            writer.write(&batch).context(WritingParquetToMemory)?;
+            for batch in batches.into_iter() {
+                writer.write(&batch).context(WritingParquetToMemory)?;
+            }
             writer.close().context(ClosingParquetWriter)?;
         } // drop the reference to the MemWriter that the SerializedFileWriter has
 

@@ -429,13 +429,6 @@ impl SQLDatabase for TestDatabase {
         unimplemented!("table_names_for_partition not yet implemented for test database");
     }
 
-    async fn remove_chunk(
-        &self,
-        _partition_key: &str,
-    ) -> Result<Arc<Self::Chunk>, Self::Error> {
-        unimplemented!()
-    }
-
     /// Fetch the specified table names and columns as Arrow
     /// RecordBatches. Columns are returned in the order specified.
     async fn table_to_arrow(
@@ -463,9 +456,10 @@ impl PartitionChunk for TestChunk {
 
     fn table_to_arrow(
         &self,
+        _dst: &mut Vec<RecordBatch>,
         _table_name: &str,
         _columns: &[&str],
-    ) -> Result<RecordBatch, Self::Error> {
+    ) -> Result<(), Self::Error> {
         unimplemented!()
     }
 }
