@@ -87,6 +87,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug)]
 pub struct Partition {
+    /// Partition key for all rows in this the partition
     pub key: String,
 
     /// `dictionary` maps &str -> u32. The u32s are used in place of String or
@@ -97,8 +98,6 @@ pub struct Partition {
 
     /// map of the dictionary ID for the table name to the table
     pub tables: HashMap<u32, Table>,
-
-    pub is_open: bool,
 }
 
 /// Describes the result of translating a set of strings into
@@ -202,7 +201,6 @@ impl Partition {
             key: key.into(),
             dictionary: Dictionary::new(),
             tables: HashMap::new(),
-            is_open: true,
         }
     }
 
@@ -337,7 +335,7 @@ impl Partition {
     /// returns true if data with partition key `key` should be
     /// written to this partition,
     pub fn should_write(&self, key: &str) -> bool {
-        self.key.starts_with(key) && self.is_open
+        self.key.starts_with(key)
     }
 
     /// Convert the table specified in this partition into an arrow record batch

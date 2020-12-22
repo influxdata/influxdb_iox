@@ -1,4 +1,7 @@
-//! Contains an in memory write buffer that stores incoming data, durably.
+//! Contains an in memory mutable buffer that stores incoming data in
+//! a structure that is designed to be quickly appended to as well as queried
+//!
+//! The mutable buffer is
 
 #![deny(rust_2018_idioms)]
 #![warn(
