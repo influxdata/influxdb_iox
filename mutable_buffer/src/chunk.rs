@@ -456,12 +456,6 @@ impl ExpressionVisitor for SupportVisitor {
     }
 }
 
-#[derive(Default, Debug)]
-pub struct RestorationStats {
-    pub row_count: usize,
-    pub tables: BTreeSet<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

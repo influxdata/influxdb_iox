@@ -25,7 +25,3 @@ tracing = "0.1"
 [dev-dependencies]
 test_helpers = { path = "../test_helpers" }
 criterion = "0.3"
-
-[[bench]]
-name = "benchmark"
-harness = false
