@@ -221,6 +221,7 @@ fn predicate_to_test_string(predicate: &Predicate) -> String {
         field_columns,
         exprs,
         range,
+        partition_key,
     } = predicate;
 
     let mut result = String::new();
@@ -240,6 +241,10 @@ fn predicate_to_test_string(predicate: &Predicate) -> String {
 
     if let Some(range) = range {
         write!(result, " range: {:?}", range).unwrap();
+    }
+
+    if let Some(partition_key) = partition_key {
+        write!(result, " partition_key: {:?}", partition_key).unwrap();
     }
 
     write!(result, "}}").unwrap();

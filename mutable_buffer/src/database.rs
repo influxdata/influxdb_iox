@@ -1,6 +1,6 @@
 use generated_types::wal as wb;
 use influxdb_line_protocol::ParsedLine;
-use query::group_by::Aggregate;
+use query::{group_by::Aggregate, predicate::PredicateBuilder};
 use query::group_by::GroupByAndAggregate;
 use query::group_by::WindowDuration;
 use query::{
@@ -13,15 +13,18 @@ use wal::{
     WalBuilder,
 };
 
-use crate::chunk::Chunk;
 use crate::column::Column;
-use crate::{chunk::ChunkPredicate, table::Table};
+use crate::table::Table;
+use crate::{
+    chunk::{restore_chunks_from_wal, Chunk, ChunkPredicate},
+    partition::Partition,
+};
 
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     path::Path,
 };
 
@@ -35,7 +38,6 @@ use arrow_deps::{
 };
 use data_types::data::{split_lines_into_write_entry_partitions, ReplicatedWrite};
 
-use crate::chunk::restore_chunks_from_wal;
 use crate::dictionary::Error as DictionaryError;
 
 use async_trait::async_trait;
@@ -105,13 +107,6 @@ pub enum Error {
     #[snafu(display("Table name {} not found in dictionary of chunk {}", table, chunk))]
     TableNameNotFoundInDictionary {
         table: String,
-        chunk: String,
-        source: DictionaryError,
-    },
-
-    #[snafu(display("Table ID {} not found in dictionary of chunk {}", table, chunk))]
-    TableIdNotFoundInDictionary {
-        table: u32,
         chunk: String,
         source: DictionaryError,
     },
@@ -220,13 +215,28 @@ impl From<crate::chunk::Error> for Error {
     }
 }
 
+impl From<crate::partition::Error> for Error {
+    fn from(e: crate::partition::Error) -> Self {
+        Self::PassThrough {
+            source_module: "Partition",
+            source: Box::new(e),
+        }
+    }
+}
+
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, Default)]
 pub struct MutableBufferDb {
     pub name: String,
-    // TODO: chunks need to be wrapped in an Arc if they're going to be used without this lock
+
+    /// Maps partition keys to partitions.
+    partitions: RwLock<HashMap<String, Arc<RwLock<Partition>>>>,
+
+    // TODO: REMOVE THIS field
     chunks: RwLock<Vec<Chunk>>,
+
+    /// a local file system based WAL, if present
     wal_details: Option<WalDetails>,
 }
 
@@ -239,8 +249,18 @@ impl MutableBufferDb {
         }
     }
 
-    /// Create a new DB that will create and use the Write Ahead Log
-    /// (WAL) directory `wal_dir`
+    /// New creates a new in-memory only write buffer database with pre-existing
+    /// chunks
+    pub fn new_from_chunks(name: impl Into<String>, chunks: Vec<Chunk>) -> Self {
+        Self {
+            name: name.into(),
+            chunks: RwLock::new(chunks),
+            ..Default::default()
+        }
+    }
+
+    /// Create a new DB that will create and use a local Write Ahead
+    /// Log (WAL) directory `wal_dir`
     pub async fn try_with_wal(name: impl Into<String>, wal_dir: &mut PathBuf) -> Result<Self> {
         let name = name.into();
         wal_dir.push(&name);
@@ -312,27 +332,21 @@ impl MutableBufferDb {
             name,
             chunks: RwLock::new(chunks),
             wal_details: Some(wal_details),
+            ..Default::default()
         })
     }
 
+    /// Directs the writes from batch into the appropriate partitions
     async fn write_entries_to_partitions(&self, batch: &wb::WriteBufferBatch<'_>) -> Result<()> {
-        // TODO handle partitions
         if let Some(entries) = batch.entries() {
-            let mut chunks = self.chunks.write().await;
-
             for entry in entries {
                 let key = entry
                     .partition_key()
                     .expect("partition key should have been inserted");
 
-                match chunks.iter_mut().find(|p| p.should_write(key)) {
-                    Some(p) => p.write_entry(&entry)?,
-                    None => {
-                        let mut p = Chunk::new(key);
-                        p.write_entry(&entry)?;
-                        chunks.push(p)
-                    }
-                }
+                let partition = self.get_partition(key).await;
+                let mut partition = partition.write().await;
+                partition.write_entry(&entry)?
             }
         }
 
@@ -410,37 +424,10 @@ impl TSDatabase for MutableBufferDb {
     }
 
     async fn table_names(&self, predicate: Predicate) -> Result<StringSetPlan, Self::Error> {
-        // TODO: Cache this information to avoid creating this each time
-        let chunks = self.chunks.read().await;
-
-        let mut table_names: BTreeSet<String> = BTreeSet::new();
-        for chunk in chunks.iter() {
-            let chunk_predicate = chunk.compile_predicate(&predicate)?;
-            // this doesn't seem to make any sense
-            assert!(
-                chunk_predicate.field_name_predicate.is_none(),
-                "Column selection for table names not supported"
-            );
-
-            // It might make sense to ask for all table names that
-            // have rows that pass a general purpose predicate. I am
-            // not sure if it is needed now, so panic
-            assert!(
-                chunk_predicate.chunk_exprs.is_empty(),
-                "General chunk exprs on table name list are not supported"
-            );
-
-            for (table_name_symbol, table) in &chunk.tables {
-                if table.could_match_predicate(&chunk_predicate)? {
-                    let table_name = chunk.dictionary.lookup_id(*table_name_symbol).unwrap();
-
-                    if !table_names.contains(table_name) {
-                        table_names.insert(table_name.to_string());
-                    }
-                }
-            }
-        }
-        Ok(table_names.into())
+        let mut filter = ChunkTableFilter::new(predicate);
+        let mut visitor = TableNameVisitor::new();
+        self.accept(&mut filter, &mut visitor).await?;
+        Ok(visitor.into_inner().into())
     }
 
     // return all column names in this database, while applying optional predicates
@@ -450,11 +437,11 @@ impl TSDatabase for MutableBufferDb {
 
         if has_exprs {
             let mut visitor = NamePredVisitor::new();
-            self.visit_tables(&mut filter, &mut visitor).await?;
+            self.accept(&mut filter, &mut visitor).await?;
             Ok(visitor.plans.into())
         } else {
             let mut visitor = NameVisitor::new();
-            self.visit_tables(&mut filter, &mut visitor).await?;
+            self.accept(&mut filter, &mut visitor).await?;
             Ok(visitor.column_names.into())
         }
     }
@@ -464,7 +451,7 @@ impl TSDatabase for MutableBufferDb {
     async fn field_column_names(&self, predicate: Predicate) -> Result<FieldListPlan, Self::Error> {
         let mut filter = ChunkTableFilter::new(predicate);
         let mut visitor = TableFieldPredVisitor::new();
-        self.visit_tables(&mut filter, &mut visitor).await?;
+        self.accept(&mut filter, &mut visitor).await?;
         Ok(visitor.into_fieldlist_plan())
     }
 
@@ -480,11 +467,11 @@ impl TSDatabase for MutableBufferDb {
 
         if has_exprs {
             let mut visitor = ValuePredVisitor::new(column_name);
-            self.visit_tables(&mut filter, &mut visitor).await?;
+            self.accept(&mut filter, &mut visitor).await?;
             Ok(visitor.plans.into())
         } else {
             let mut visitor = ValueVisitor::new(column_name);
-            self.visit_tables(&mut filter, &mut visitor).await?;
+            self.accept(&mut filter, &mut visitor).await?;
             Ok(visitor.column_values.into())
         }
     }
@@ -492,7 +479,7 @@ impl TSDatabase for MutableBufferDb {
     async fn query_series(&self, predicate: Predicate) -> Result<SeriesSetPlans, Self::Error> {
         let mut filter = ChunkTableFilter::new(predicate);
         let mut visitor = SeriesVisitor::new();
-        self.visit_tables(&mut filter, &mut visitor).await?;
+        self.accept(&mut filter, &mut visitor).await?;
         Ok(visitor.plans.into())
     }
 
@@ -509,12 +496,12 @@ impl TSDatabase for MutableBufferDb {
                 // can skip tables without those tags)
                 let mut filter = filter.add_required_columns(&group_columns);
                 let mut visitor = GroupsVisitor::new(agg, group_columns);
-                self.visit_tables(&mut filter, &mut visitor).await?;
+                self.accept(&mut filter, &mut visitor).await?;
                 Ok(visitor.plans.into())
             }
             GroupByAndAggregate::Window { agg, every, offset } => {
                 let mut visitor = WindowGroupsVisitor::new(agg, every, offset);
-                self.visit_tables(&mut filter, &mut visitor).await?;
+                self.accept(&mut filter, &mut visitor).await?;
                 Ok(visitor.plans.into())
             }
         }
@@ -591,39 +578,27 @@ impl SQLDatabase for MutableBufferDb {
 
     /// Return the partition keys for data in this DB
     async fn partition_keys(&self) -> Result<Vec<String>, Self::Error> {
-        let chunks = self.chunks.read().await;
-        let keys = chunks.iter().map(|p| p.key.clone()).collect();
-
+        let partitions = self.partitions.read().await;
+        let keys = partitions.keys().map(|key| key.clone()).collect();
         Ok(keys)
     }
 
-    /// Return the table names that are in a given partition key
+    /// Return all table names that are in a given partition key
     async fn table_names_for_partition(
         &self,
         partition_key: &str,
     ) -> Result<Vec<String>, Self::Error> {
-        // TODO iterate over partitions
-        let chunks = self.chunks.read().await;
-        let chunk = chunks
-            .iter()
-            .find(|p| p.key == partition_key)
-            .context(ChunkNotFound { partition_key })?;
-
-        let mut tables = Vec::with_capacity(chunk.tables.len());
-
-        for id in chunk.tables.keys() {
-            let name = chunk
-                .dictionary
-                .lookup_id(*id)
-                .context(TableIdNotFoundInDictionary {
-                    table: *id,
-                    chunk: &chunk.key,
-                })?;
-
-            tables.push(name.to_string());
-        }
-
-        Ok(tables)
+        let predicate = PredicateBuilder::default()
+            .partition_key(partition_key)
+            .build();
+        let mut filter = ChunkTableFilter::new(predicate);
+        let mut visitor = TableNameVisitor::new();
+        self.accept(&mut filter, &mut visitor).await?;
+        let names  = visitor
+            .into_inner()
+            .into_iter()
+            .collect();
+        Ok(names)
     }
 
     async fn remove_chunk(&self, partition_key: &str) -> Result<Arc<Chunk>> {
@@ -645,26 +620,43 @@ impl SQLDatabase for MutableBufferDb {
 ///
 /// Specifically, if we had a database like the following:
 ///
-/// YesterdayChunk
-///   CPU Table1
-///    Col1
-/// TodayChunk
-///   CPU Table2
-///    Col2
+/// YesterdayPartition
+///   Chunk1
+///     CPU Table1
+///      Col1
+///   Chunk2
+///     CPU Table1
+///      Col2
+///  TodayPartition
+///   Chunk3
+///     CPU Table3
+///      Col3
 ///
 /// Then the methods would be invoked in the following order
 ///
-///  visitor.pre_visit_chunk(YesterdayChunk)
+///  visitor.pre_visit_partition(YesterdayPartition)
+///  visitor.pre_visit_chunk(Chunk1)
 ///  visitor.pre_visit_table(CPU Table1)
 ///  visitor.visit_column(Col1)
 ///  visitor.post_visit_table(CPU Table1)
-///  visitor.post_visit_chunk(YesterdayChunk)
-///  visitor.pre_visit_chunk(TodayChunk)
+///  visitor.post_visit_chunk(Chunk1)
+///  visitor.pre_visit_chunk(Chunk2)
 ///  visitor.pre_visit_table(CPU Table2)
 ///  visitor.visit_column(Col2)
 ///  visitor.post_visit_table(CPU Table2)
-///  visitor.post_visit_chunk(TodayChunk)
+///  visitor.post_visit_chunk(Chunk2)
+///  visitor.pre_visit_partition(TodayPartition)
+///  visitor.pre_visit_chunk(Chunk3)
+///  visitor.pre_visit_table(CPU Table3)
+///  visitor.visit_column(Col3)
+///  visitor.post_visit_table(CPU Table3)
+///  visitor.post_visit_chunk(Chunk3)
 trait Visitor {
+    // called once before any chunk in a partition is visisted
+    fn pre_visit_partition(&mut self, _partition: &Partition) -> Result<()> {
+        Ok(())
+    }
+
     // called once before any column in a chunk is visisted
     fn pre_visit_chunk(&mut self, _chunk: &Chunk) -> Result<()> {
         Ok(())
@@ -713,47 +705,74 @@ impl MutableBufferDb {
         self.chunks.read().await.is_empty()
     }
 
+    /// Retrieve (or create) the partition for the specified partition key
+    async fn get_partition(&self, partition_key: &str) -> Arc<RwLock<Partition>> {
+        // until we think this code is likely to be a contention hot
+        // spot, simply use a write lock even when often a read lock
+        // would do.
+        let mut partitions = self.partitions.write().await;
+
+        if let Some(partition) = partitions.get(partition_key) {
+            partition.clone()
+        } else {
+            let partition = Arc::new(RwLock::new(Partition::new(partition_key)));
+            partitions.insert(partition_key.to_string(), partition.clone());
+            partition
+        }
+    }
+
     /// Traverse this database's tables, calling the relevant
     /// functions, in order, of `visitor`, as described on the Visitor
     /// trait.
     ///
     /// Skips visiting any table or columns of `filter.should_visit_table`
     /// returns false
-    async fn visit_tables<V: Visitor>(
+    async fn accept<V: Visitor>(
         &self,
         filter: &mut ChunkTableFilter,
         visitor: &mut V,
     ) -> Result<()> {
-        let chunks = self.chunks.read().await;
+        // take a snapshot of all partitions so we dont lock the
+        // entire mutable buffer as we implement this
+        let partition_snapshot: Vec<_> = {
+            let partitions = self.partitions.read().await;
+            partitions.values().map(|v| v.clone()).collect()
+        };
 
-        for chunk in chunks.iter() {
-            visitor.pre_visit_chunk(chunk)?;
-            filter.pre_visit_chunk(chunk)?;
+        for partition in partition_snapshot.into_iter() {
+            let partition = partition.read().await;
 
-            for table in chunk.tables.values() {
-                if filter.should_visit_table(table)? {
-                    visitor.pre_visit_table(table, chunk, filter)?;
+            if filter.should_visit_partition(&partition)? {
+                for chunk in partition.iter() {
+                    visitor.pre_visit_chunk(chunk)?;
+                    filter.pre_visit_chunk(chunk)?;
 
-                    for (column_id, column_index) in &table.column_id_to_index {
-                        visitor.visit_column(
-                            table,
-                            *column_id,
-                            &table.columns[*column_index],
-                            filter,
-                        )?
+                    for table in chunk.tables.values() {
+                        if filter.should_visit_table(table)? {
+                            visitor.pre_visit_table(table, chunk, filter)?;
+
+                            for (column_id, column_index) in &table.column_id_to_index {
+                                visitor.visit_column(
+                                    table,
+                                    *column_id,
+                                    &table.columns[*column_index],
+                                    filter,
+                                )?
+                            }
+
+                            visitor.post_visit_table(table, chunk)?;
+                        }
                     }
-
-                    visitor.post_visit_table(table, chunk)?;
+                    visitor.post_visit_chunk(chunk)?;
                 }
             }
-            visitor.post_visit_chunk(chunk)?;
         } // next chunk
 
         Ok(())
     }
 }
 
-/// Common logic for processing and filtering tables in the write buffer
+/// Common logic for processing and filtering tables in the mutable buffer
 ///
 /// Note that since each chunk has its own dictionary, mappings
 /// between Strings --> we cache the String->id mappings per chunk
@@ -827,6 +846,14 @@ impl ChunkTableFilter {
         Ok(table.could_match_predicate(self.chunk_predicate())?)
     }
 
+    /// If returns false, skips visiting partition
+    fn should_visit_partition(&mut self, partition: &Partition) -> Result<bool> {
+        match &self.predicate.partition_key {
+            Some(partition_key) => Ok(partition.key() == partition_key),
+            None => Ok(true)
+        }
+    }
+
     pub fn chunk_predicate(&self) -> &ChunkPredicate {
         self.chunk_predicate
             .as_ref()
@@ -885,6 +912,43 @@ impl Visitor for NameVisitor {
 
             if !self.column_names.contains(column_name) {
                 self.column_names.insert(column_name.to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Return all table names in this database, while applying a
+/// general purpose predicates
+struct TableNameVisitor {
+    table_names: BTreeSet<String>,
+}
+
+impl TableNameVisitor {
+    fn new() -> Self {
+        Self {
+            table_names: BTreeSet::new(),
+        }
+    }
+    fn into_inner(self) -> BTreeSet<String> {
+        let Self { table_names } = self;
+        table_names
+    }
+}
+
+impl Visitor for TableNameVisitor {
+    fn pre_visit_table(
+        &mut self,
+        table: &Table,
+        chunk: &Chunk,
+        filter: &mut ChunkTableFilter,
+    ) -> Result<()> {
+        // If the table has rows that could match the filter, add it
+        if table.could_match_predicate(filter.chunk_predicate())? {
+            // the table name should always have an encoded value in the dictionary
+            let table_name = chunk.dictionary.lookup_id(table.id).unwrap();
+            if !self.table_names.contains(table_name) {
+                self.table_names.insert(table_name.to_string());
             }
         }
         Ok(())
@@ -1571,11 +1635,7 @@ mod tests {
 
             let (chunks, _stats) = restore_chunks_from_wal(wal_entries)?;
 
-            let db = MutableBufferDb {
-                name,
-                chunks: RwLock::new(chunks),
-                wal_details: None,
-            };
+            let db = MutableBufferDb::new_from_chunks(name, chunks);
 
             // some cpu
             let smaller_cpu_table = r#"+------+---------+-----------+------+

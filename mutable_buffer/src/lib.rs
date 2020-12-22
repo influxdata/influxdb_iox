@@ -15,6 +15,7 @@ pub mod chunk;
 mod column;
 mod database;
 mod dictionary;
+mod partition;
 mod store;
 mod table;
 

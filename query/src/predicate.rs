@@ -62,6 +62,9 @@ pub struct Predicate {
     /// Optional timestamp range: only rows within this range are included in
     /// results. Other rows are excluded
     pub range: Option<TimestampRange>,
+
+    /// Optional partition key filter
+    pub partition_key: Option<String>,
 }
 
 impl Predicate {
@@ -156,6 +159,14 @@ impl PredicateBuilder {
         self.inner.field_columns = Some(column_names);
         self
     }
+
+    /// Set the partition key restriction
+    pub fn partition_key(mut self, partition_key: impl Into<String>) -> Self {
+        assert!(self.inner.partition_key.is_none(), "multiple partition key predicates not suported");
+        self.inner.partition_key = Some(partition_key.into());
+        self
+    }
+
 
     /// Create a predicate, consuming this builder
     pub fn build(self) -> Predicate {
