@@ -248,7 +248,7 @@ fn predicate_to_test_string(predicate: &Predicate) -> String {
 
 #[async_trait]
 impl TSDatabase for TestDatabase {
-    type Partition = TestPartition;
+    type Chunk = TestChunk;
     type Error = TestError;
 
     /// Writes parsed lines into this database
@@ -402,7 +402,7 @@ impl TSDatabase for TestDatabase {
 
 #[async_trait]
 impl SQLDatabase for TestDatabase {
-    type Partition = TestPartition;
+    type Chunk = TestChunk;
     type Error = TestError;
 
     /// Execute the specified query and return arrow record batches with the
@@ -424,10 +424,10 @@ impl SQLDatabase for TestDatabase {
         unimplemented!("table_names_for_partition not yet implemented for test database");
     }
 
-    async fn remove_partition(
+    async fn remove_chunk(
         &self,
         _partition_key: &str,
-    ) -> Result<Arc<Self::Partition>, Self::Error> {
+    ) -> Result<Arc<Self::Chunk>, Self::Error> {
         unimplemented!()
     }
 
@@ -443,9 +443,9 @@ impl SQLDatabase for TestDatabase {
 }
 
 #[derive(Debug)]
-pub struct TestPartition {}
+pub struct TestChunk {}
 
-impl PartitionChunk for TestPartition {
+impl PartitionChunk for TestChunk {
     type Error = TestError;
 
     fn key(&self) -> &str {

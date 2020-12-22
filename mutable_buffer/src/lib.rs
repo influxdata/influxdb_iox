@@ -11,15 +11,15 @@
     clippy::use_self
 )]
 
+pub mod chunk;
 mod column;
 mod database;
 mod dictionary;
-pub mod partition;
 mod store;
 mod table;
 
-// Allow restore partitions to be used outside of this crate (for
+// Allow restore chunks to be used outside of this crate (for
 // benchmarking)
+pub use crate::chunk::restore_chunks_from_wal;
 pub use crate::database::MutableBufferDb;
-pub use crate::partition::restore_partitions_from_wal;
 pub use crate::store::MutableBufferDatabases;

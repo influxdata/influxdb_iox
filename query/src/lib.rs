@@ -46,7 +46,7 @@ use self::predicate::{Predicate, TimestampRange};
 #[async_trait]
 pub trait TSDatabase: Debug + Send + Sync {
     /// the type of partition that is stored by this database
-    type Partition: Send + Sync + 'static + PartitionChunk;
+    type Chunk: Send + Sync + 'static + PartitionChunk;
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// writes parsed lines into this database
@@ -109,7 +109,7 @@ pub trait TSDatabase: Debug + Send + Sync {
 #[async_trait]
 pub trait SQLDatabase: Debug + Send + Sync {
     /// the type of partition that is stored by this database
-    type Partition: Send + Sync + 'static + PartitionChunk;
+    type Chunk: Send + Sync + 'static + PartitionChunk;
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Execute the specified query and return arrow record batches with the
@@ -134,10 +134,10 @@ pub trait SQLDatabase: Debug + Send + Sync {
     ) -> Result<Vec<String>, Self::Error>;
 
     /// Removes the partition from the database and returns it
-    async fn remove_partition(
+    async fn remove_chunk(
         &self,
         partition_key: &str,
-    ) -> Result<Arc<Self::Partition>, Self::Error>;
+    ) -> Result<Arc<Self::Chunk>, Self::Error>;
 }
 
 /// Collection of data that shares the same partition key

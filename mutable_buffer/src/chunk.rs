@@ -1,3 +1,5 @@
+//! Represents a Chunk of data (a collection of tables and their data within
+//! some chunk) in the mutable store.
 use arrow_deps::{
     arrow::record_batch::RecordBatch,
     datafusion::{
@@ -25,17 +27,13 @@ pub enum Error {
     #[snafu(display("Could not read WAL entry: {}", source))]
     WalEntryRead { source: wal::Error },
 
-    #[snafu(display("Partition {} not found", partition))]
-    PartitionNotFound { partition: String },
+    #[snafu(display("Chunk {} not found", chunk))]
+    ChunkNotFound { chunk: String },
 
-    #[snafu(display(
-        "Column name {} not found in dictionary of partition {}",
-        column,
-        partition
-    ))]
+    #[snafu(display("Column name {} not found in dictionary of chunk {}", column, chunk))]
     ColumnNameNotFoundInDictionary {
         column: String,
-        partition: String,
+        chunk: String,
         source: crate::dictionary::Error,
     },
 
@@ -51,30 +49,22 @@ pub enum Error {
         source: crate::table::Error,
     },
 
-    #[snafu(display(
-        "Table name {} not found in dictionary of partition {}",
-        table,
-        partition
-    ))]
+    #[snafu(display("Table name {} not found in dictionary of chunk {}", table, chunk))]
     TableNameNotFoundInDictionary {
         table: String,
-        partition: String,
+        chunk: String,
         source: crate::dictionary::Error,
     },
 
-    #[snafu(display(
-        "Table ID {} not found in dictionary of partition {}",
-        table,
-        partition
-    ))]
+    #[snafu(display("Table ID {} not found in dictionary of chunk {}", table, chunk))]
     TableIdNotFoundInDictionary {
         table: u32,
-        partition: String,
+        chunk: String,
         source: DictionaryError,
     },
 
-    #[snafu(display("Table {} not found in partition {}", table, partition))]
-    TableNotFoundInPartition { table: u32, partition: String },
+    #[snafu(display("Table {} not found in chunk {}", table, chunk))]
+    TableNotFoundInChunk { table: u32, chunk: String },
 
     #[snafu(display("Attempt to write table batch without a name"))]
     TableWriteWithoutName,
@@ -86,8 +76,8 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug)]
-pub struct Partition {
-    /// Partition key for all rows in this the partition
+pub struct Chunk {
+    /// Chunk key for all rows in this the chunk
     pub key: String,
 
     /// `dictionary` maps &str -> u32. The u32s are used in place of String or
@@ -101,29 +91,29 @@ pub struct Partition {
 }
 
 /// Describes the result of translating a set of strings into
-/// partition specific ids
+/// chunk specific ids
 #[derive(Debug, PartialEq, Eq)]
-pub enum PartitionIdSet {
-    /// At least one of the strings was not present in the partitions'
+pub enum ChunkIdSet {
+    /// At least one of the strings was not present in the chunks'
     /// dictionary.
     ///
     /// This is important when testing for the presence of all ids in
     /// a set, as we know they can not all be present
     AtLeastOneMissing,
 
-    /// All strings existed in this partition's dictionary
+    /// All strings existed in this chunk's dictionary
     Present(BTreeSet<u32>),
 }
 
 /// a 'Compiled' set of predicates / filters that can be evaluated on
-/// this partition (where strings have been translated to partition
+/// this chunk (where strings have been translated to chunk
 /// specific u32 ids)
 #[derive(Debug)]
-pub struct PartitionPredicate {
+pub struct ChunkPredicate {
     /// If present, restrict the request to just those tables whose
     /// names are in table_names. If present but empty, means there
     /// was a predicate but no tables named that way exist in the
-    /// partition (so no table can pass)
+    /// chunk (so no table can pass)
     pub table_name_predicate: Option<BTreeSet<u32>>,
 
     /// Optional column restriction. If present, further
@@ -136,20 +126,20 @@ pub struct PartitionPredicate {
     /// as a filter using logical conjuction (aka are 'AND'ed
     /// together). Only rows that evaluate to TRUE for all these
     /// expressions should be returned.
-    pub partition_exprs: Vec<Expr>,
+    pub chunk_exprs: Vec<Expr>,
 
     /// If Some, then the table must contain all columns specified
     /// to pass the predicate
-    pub required_columns: Option<PartitionIdSet>,
+    pub required_columns: Option<ChunkIdSet>,
 
-    /// The id of the "time" column in this partition
+    /// The id of the "time" column in this chunk
     pub time_column_id: u32,
 
     /// Timestamp range: only rows within this range should be considered
     pub range: Option<TimestampRange>,
 }
 
-impl PartitionPredicate {
+impl ChunkPredicate {
     /// Creates and adds a datafuson predicate representing the
     /// combination of predicate and timestamp.
     pub fn filter_expr(&self) -> Option<Expr> {
@@ -157,7 +147,7 @@ impl PartitionPredicate {
         let mut builder =
             AndExprBuilder::default().append_opt(self.make_timestamp_predicate_expr());
 
-        for expr in &self.partition_exprs {
+        for expr in &self.chunk_exprs {
             builder = builder.append_expr(expr.clone());
         }
 
@@ -195,7 +185,7 @@ fn make_range_expr(range: &TimestampRange) -> Expr {
     ts_low.and(ts_high)
 }
 
-impl Partition {
+impl Chunk {
     pub fn new(key: impl Into<String>) -> Self {
         Self {
             key: key.into(),
@@ -232,9 +222,9 @@ impl Partition {
         Ok(())
     }
 
-    /// Translates `predicate` into per-partition ids that can be
-    /// directly evaluated against tables in this partition
-    pub fn compile_predicate(&self, predicate: &Predicate) -> Result<PartitionPredicate> {
+    /// Translates `predicate` into per-chunk ids that can be
+    /// directly evaluated against tables in this chunk
+    pub fn compile_predicate(&self, predicate: &Predicate) -> Result<ChunkPredicate> {
         let table_name_predicate = self.compile_string_list(predicate.table_names.as_ref());
 
         let field_restriction = self.compile_string_list(predicate.field_columns.as_ref());
@@ -242,19 +232,19 @@ impl Partition {
         let time_column_id = self
             .dictionary
             .lookup_value(TIME_COLUMN_NAME)
-            .expect("time is in the partition dictionary");
+            .expect("time is in the chunk dictionary");
 
         let range = predicate.range;
 
         // it would be nice to avoid cloning all the exprs here.
-        let partition_exprs = predicate.exprs.clone();
+        let chunk_exprs = predicate.exprs.clone();
 
         // In order to evaluate expressions in the table, all columns
         // referenced in the expression must appear (I think, not sure
         // about NOT, etc so panic if we see one of those);
         let mut visitor = SupportVisitor {};
         let mut predicate_columns: HashSet<String> = HashSet::new();
-        for expr in &partition_exprs {
+        for expr in &chunk_exprs {
             visit_expression(expr, &mut visitor);
             expr_to_column_names(&expr, &mut predicate_columns).unwrap();
         }
@@ -264,13 +254,13 @@ impl Partition {
         let required_columns = if predicate_columns.is_empty() {
             None
         } else {
-            Some(self.make_partition_ids(predicate_columns.iter()))
+            Some(self.make_chunk_ids(predicate_columns.iter()))
         };
 
-        Ok(PartitionPredicate {
+        Ok(ChunkPredicate {
             table_name_predicate,
             field_name_predicate: field_restriction,
-            partition_exprs,
+            chunk_exprs,
             required_columns,
             time_column_id,
             range,
@@ -279,7 +269,7 @@ impl Partition {
 
     /// Converts a potential set of strings into a set of ids in terms
     /// of this dictionary. If there are no matching Strings in the
-    /// partitions dictionary, those strings are ignored and a
+    /// chunks dictionary, those strings are ignored and a
     /// (potentially empty) set is returned.
     fn compile_string_list(&self, names: Option<&BTreeSet<String>>) -> Option<BTreeSet<u32>> {
         names.map(|names| {
@@ -295,12 +285,12 @@ impl Partition {
     pub fn add_required_columns_to_predicate(
         &self,
         additional_required_columns: &HashSet<String>,
-        predicate: &mut PartitionPredicate,
+        predicate: &mut ChunkPredicate,
     ) {
         for column_name in additional_required_columns {
             // Once know we have missing columns, no need to try
             // and figure out if these any additional columns are needed
-            if Some(PartitionIdSet::AtLeastOneMissing) == predicate.required_columns {
+            if Some(ChunkIdSet::AtLeastOneMissing) == predicate.required_columns {
                 return;
             }
 
@@ -312,33 +302,33 @@ impl Partition {
                     if let Some(column_id) = column_id {
                         let mut symbols = BTreeSet::new();
                         symbols.insert(column_id);
-                        PartitionIdSet::Present(symbols)
+                        ChunkIdSet::Present(symbols)
                     } else {
-                        PartitionIdSet::AtLeastOneMissing
+                        ChunkIdSet::AtLeastOneMissing
                     }
                 }
-                Some(PartitionIdSet::Present(mut symbols)) => {
+                Some(ChunkIdSet::Present(mut symbols)) => {
                     if let Some(column_id) = column_id {
                         symbols.insert(column_id);
-                        PartitionIdSet::Present(symbols)
+                        ChunkIdSet::Present(symbols)
                     } else {
-                        PartitionIdSet::AtLeastOneMissing
+                        ChunkIdSet::AtLeastOneMissing
                     }
                 }
-                Some(PartitionIdSet::AtLeastOneMissing) => {
+                Some(ChunkIdSet::AtLeastOneMissing) => {
                     unreachable!("Covered by case above while adding required columns to predicate")
                 }
             });
         }
     }
 
-    /// returns true if data with partition key `key` should be
-    /// written to this partition,
+    /// returns true if data with chunk key `key` should be
+    /// written to this chunk,
     pub fn should_write(&self, key: &str) -> bool {
         self.key.starts_with(key)
     }
 
-    /// Convert the table specified in this partition into an arrow record batch
+    /// Convert the table specified in this chunk into an arrow record batch
     pub fn table_to_arrow(&self, table_name: &str, columns: &[&str]) -> Result<RecordBatch> {
         let table = self.table(table_name)?;
 
@@ -347,7 +337,7 @@ impl Partition {
             .context(NamedTableError { table_name })
     }
 
-    /// Returns a vec of the summary statistics of the tables in this partition
+    /// Returns a vec of the summary statistics of the tables in this chunk
     pub fn table_stats(&self) -> Result<Vec<TableStats>> {
         let mut stats = Vec::with_capacity(self.tables.len());
 
@@ -357,7 +347,7 @@ impl Partition {
                 .lookup_id(*id)
                 .context(TableIdNotFoundInDictionary {
                     table: *id,
-                    partition: &self.key,
+                    chunk: &self.key,
                 })?;
 
             let columns = table.stats();
@@ -377,23 +367,20 @@ impl Partition {
                 .lookup_value(table_name)
                 .context(TableNameNotFoundInDictionary {
                     table: table_name,
-                    partition: &self.key,
+                    chunk: &self.key,
                 })?;
 
-        let table = self
-            .tables
-            .get(&table_id)
-            .context(TableNotFoundInPartition {
-                table: table_id,
-                partition: &self.key,
-            })?;
+        let table = self.tables.get(&table_id).context(TableNotFoundInChunk {
+            table: table_id,
+            chunk: &self.key,
+        })?;
 
         Ok(table)
     }
 
     /// Translate a bunch of strings into a set of ids relative to this
-    /// partition
-    pub fn make_partition_ids<'a, I>(&self, predicate_columns: I) -> PartitionIdSet
+    /// chunk
+    pub fn make_chunk_ids<'a, I>(&self, predicate_columns: I) -> ChunkIdSet
     where
         I: Iterator<Item = &'a String>,
     {
@@ -402,15 +389,15 @@ impl Partition {
             if let Some(column_id) = self.dictionary.id(column_name) {
                 symbols.insert(column_id);
             } else {
-                return PartitionIdSet::AtLeastOneMissing;
+                return ChunkIdSet::AtLeastOneMissing;
             }
         }
 
-        PartitionIdSet::Present(symbols)
+        ChunkIdSet::Present(symbols)
     }
 }
 
-impl query::PartitionChunk for Partition {
+impl query::PartitionChunk for Chunk {
     type Error = Error;
 
     fn key(&self) -> &str {
@@ -472,13 +459,13 @@ pub struct RestorationStats {
     pub tables: BTreeSet<String>,
 }
 
-/// Given a set of WAL entries, restore them into a set of Partitions.
-pub fn restore_partitions_from_wal(
+/// Given a set of WAL entries, restore them into a set of Chunks.
+pub fn restore_chunks_from_wal(
     wal_entries: impl Iterator<Item = WalResult<WalEntry>>,
-) -> Result<(Vec<Partition>, RestorationStats)> {
+) -> Result<(Vec<Chunk>, RestorationStats)> {
     let mut stats = RestorationStats::default();
 
-    let mut partitions = BTreeMap::new();
+    let mut chunks = BTreeMap::new();
 
     for wal_entry in wal_entries {
         let wal_entry = wal_entry.context(WalEntryRead)?;
@@ -490,30 +477,25 @@ pub fn restore_partitions_from_wal(
             for entry in entries {
                 let partition_key = entry.partition_key().context(MissingPartitionKey)?;
 
-                if !partitions.contains_key(partition_key) {
-                    partitions.insert(
+                if !chunks.contains_key(partition_key) {
+                    chunks.insert(
                         partition_key.to_string(),
-                        Partition::new(partition_key.to_string()),
+                        Chunk::new(partition_key.to_string()),
                     );
                 }
 
-                let partition = partitions
-                    .get_mut(partition_key)
-                    .context(PartitionNotFound {
-                        partition: partition_key,
-                    })?;
+                let chunk = chunks.get_mut(partition_key).context(ChunkNotFound {
+                    chunk: partition_key,
+                })?;
 
-                partition.write_entry(&entry)?;
+                chunk.write_entry(&entry)?;
             }
         }
     }
-    let partitions = partitions
-        .into_iter()
-        .map(|(_, p)| p)
-        .collect::<Vec<Partition>>();
+    let chunks = chunks.into_iter().map(|(_, p)| p).collect::<Vec<Chunk>>();
 
     // compute the stats
-    for p in &partitions {
+    for p in &chunks {
         for (id, table) in &p.tables {
             let name = p
                 .dictionary
@@ -527,7 +509,7 @@ pub fn restore_partitions_from_wal(
         }
     }
 
-    Ok((partitions, stats))
+    Ok((chunks, stats))
 }
 
 #[cfg(test)]

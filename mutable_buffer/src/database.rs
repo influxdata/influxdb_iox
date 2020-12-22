@@ -13,9 +13,9 @@ use wal::{
     WalBuilder,
 };
 
+use crate::chunk::Chunk;
 use crate::column::Column;
-use crate::partition::Partition;
-use crate::{partition::PartitionPredicate, table::Table};
+use crate::{chunk::ChunkPredicate, table::Table};
 
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -35,8 +35,8 @@ use arrow_deps::{
 };
 use data_types::data::{split_lines_into_write_entry_partitions, ReplicatedWrite};
 
+use crate::chunk::restore_chunks_from_wal;
 use crate::dictionary::Error as DictionaryError;
-use crate::partition::restore_partitions_from_wal;
 
 use async_trait::async_trait;
 use chrono::{offset::TimeZone, Utc};
@@ -75,11 +75,11 @@ pub enum Error {
     #[snafu(display("Error recovering WAL for database {}: {}", database, source))]
     WalRecoverError {
         database: String,
-        source: crate::partition::Error,
+        source: crate::chunk::Error,
     },
 
-    #[snafu(display("Error recovering WAL for partition {} on table {}", partition, table))]
-    WalPartitionError { partition: String, table: String },
+    #[snafu(display("Error recovering WAL for chunk {} on table {}", chunk, table))]
+    WalChunkError { chunk: String, table: String },
 
     #[snafu(display("Error recovering write from WAL, column id {} not found", column_id))]
     WalColumnError { column_id: u16 },
@@ -93,8 +93,8 @@ pub enum Error {
     #[snafu(display("Database {} doesn't exist", database))]
     DatabaseNotFound { database: String },
 
-    #[snafu(display("Partition {} is full", partition))]
-    PartitionFull { partition: String },
+    #[snafu(display("Chunk {} is full", chunk))]
+    ChunkFull { chunk: String },
 
     #[snafu(display("Error in {}: {}", source_module, source))]
     PassThrough {
@@ -102,58 +102,42 @@ pub enum Error {
         source: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
 
-    #[snafu(display(
-        "Table name {} not found in dictionary of partition {}",
-        table,
-        partition
-    ))]
+    #[snafu(display("Table name {} not found in dictionary of chunk {}", table, chunk))]
     TableNameNotFoundInDictionary {
         table: String,
-        partition: String,
+        chunk: String,
         source: DictionaryError,
     },
 
-    #[snafu(display(
-        "Table ID {} not found in dictionary of partition {}",
-        table,
-        partition
-    ))]
+    #[snafu(display("Table ID {} not found in dictionary of chunk {}", table, chunk))]
     TableIdNotFoundInDictionary {
         table: u32,
-        partition: String,
+        chunk: String,
         source: DictionaryError,
     },
 
     #[snafu(display(
-        "Column name {} not found in dictionary of partition {}",
+        "Column name {} not found in dictionary of chunk {}",
         column_name,
-        partition
+        chunk
     ))]
     ColumnNameNotFoundInDictionary {
         column_name: String,
-        partition: String,
+        chunk: String,
         source: DictionaryError,
     },
 
-    #[snafu(display(
-        "Column ID {} not found in dictionary of partition {}",
-        column_id,
-        partition
-    ))]
+    #[snafu(display("Column ID {} not found in dictionary of chunk {}", column_id, chunk))]
     ColumnIdNotFoundInDictionary {
         column_id: u32,
-        partition: String,
+        chunk: String,
         source: DictionaryError,
     },
 
-    #[snafu(display(
-        "Value ID {} not found in dictionary of partition {}",
-        value_id,
-        partition
-    ))]
+    #[snafu(display("Value ID {} not found in dictionary of chunk {}", value_id, chunk))]
     ColumnValueIdNotFoundInDictionary {
         value_id: u32,
-        partition: String,
+        chunk: String,
         source: DictionaryError,
     },
 
@@ -163,8 +147,8 @@ pub enum Error {
     ))]
     UnsupportedColumnTypeForListingValues { column_name: String },
 
-    #[snafu(display("Table {} not found in partition {}", table, partition))]
-    TableNotFoundInPartition { table: u32, partition: String },
+    #[snafu(display("Table {} not found in chunk {}", table, chunk))]
+    TableNotFoundInChunk { table: u32, chunk: String },
 
     #[snafu(display("Internal Error: Column {} not found", column))]
     InternalColumnNotFound { column: u32 },
@@ -202,19 +186,19 @@ pub enum Error {
     #[snafu(display("replicated write from writer {} missing payload", writer))]
     MissingPayload { writer: u32 },
 
-    #[snafu(display("partition {} not found", partition_key))]
-    PartitionNotFound { partition_key: String },
+    #[snafu(display("chunk {} not found", partition_key))]
+    ChunkNotFound { partition_key: String },
 
     #[snafu(display(
-        "error converting partition table to arrow on partition {} with table {}: {}",
+        "error converting chunk table to arrow on chunk {} with table {}: {}",
         partition_key,
         table_name,
         source
     ))]
-    PartitionTableToArrowError {
+    ChunkTableToArrowError {
         partition_key: String,
         table_name: String,
-        source: crate::partition::Error,
+        source: crate::chunk::Error,
     },
 }
 
@@ -227,10 +211,10 @@ impl From<crate::table::Error> for Error {
     }
 }
 
-impl From<crate::partition::Error> for Error {
-    fn from(e: crate::partition::Error) -> Self {
+impl From<crate::chunk::Error> for Error {
+    fn from(e: crate::chunk::Error) -> Self {
         Self::PassThrough {
-            source_module: "Partition",
+            source_module: "Chunk",
             source: Box::new(e),
         }
     }
@@ -241,8 +225,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Default)]
 pub struct MutableBufferDb {
     pub name: String,
-    // TODO: partitions need to be wrapped in an Arc if they're going to be used without this lock
-    partitions: RwLock<Vec<Partition>>,
+    // TODO: chunks need to be wrapped in an Arc if they're going to be used without this lock
+    chunks: RwLock<Vec<Chunk>>,
     wal_details: Option<WalDetails>,
 }
 
@@ -310,8 +294,8 @@ impl MutableBufferDb {
             .entries()
             .context(LoadingWal { database: &name })?;
 
-        let (partitions, stats) =
-            restore_partitions_from_wal(entries).context(WalRecoverError { database: &name })?;
+        let (chunks, stats) =
+            restore_chunks_from_wal(entries).context(WalRecoverError { database: &name })?;
 
         let elapsed = now.elapsed();
         info!(
@@ -322,30 +306,31 @@ impl MutableBufferDb {
             stats.tables.len(),
         );
 
-        info!("{} database partition count: {}", &name, partitions.len(),);
+        info!("{} database chunk count: {}", &name, chunks.len(),);
 
         Ok(Self {
             name,
-            partitions: RwLock::new(partitions),
+            chunks: RwLock::new(chunks),
             wal_details: Some(wal_details),
         })
     }
 
     async fn write_entries_to_partitions(&self, batch: &wb::WriteBufferBatch<'_>) -> Result<()> {
+        // TODO handle partitions
         if let Some(entries) = batch.entries() {
-            let mut partitions = self.partitions.write().await;
+            let mut chunks = self.chunks.write().await;
 
             for entry in entries {
                 let key = entry
                     .partition_key()
                     .expect("partition key should have been inserted");
 
-                match partitions.iter_mut().find(|p| p.should_write(key)) {
+                match chunks.iter_mut().find(|p| p.should_write(key)) {
                     Some(p) => p.write_entry(&entry)?,
                     None => {
-                        let mut p = Partition::new(key);
+                        let mut p = Chunk::new(key);
                         p.write_entry(&entry)?;
-                        partitions.push(p)
+                        chunks.push(p)
                     }
                 }
             }
@@ -355,37 +340,37 @@ impl MutableBufferDb {
     }
 
     async fn table_to_arrow(&self, table_name: &str, columns: &[&str]) -> Result<Vec<RecordBatch>> {
-        let partitions = self.partitions.read().await;
+        let chunks = self.chunks.read().await;
 
-        let batches = partitions
+        let batches = chunks
             .iter()
             .map(|p| p.table_to_arrow(table_name, columns))
-            .collect::<Result<Vec<_>, crate::partition::Error>>()?;
+            .collect::<Result<Vec<_>, crate::chunk::Error>>()?;
 
         Ok(batches)
     }
 
-    pub async fn remove_partition(&self, partition_key: &str) -> Result<Partition> {
-        let mut partitions = self.partitions.write().await;
-        let pos = partitions
+    pub async fn remove_chunk(&self, partition_key: &str) -> Result<Chunk> {
+        let mut chunks = self.chunks.write().await;
+        let pos = chunks
             .iter()
             .position(|p| p.key == partition_key)
-            .context(PartitionNotFound { partition_key })?;
+            .context(ChunkNotFound { partition_key })?;
 
-        Ok(partitions.remove(pos))
+        Ok(chunks.remove(pos))
     }
 }
 
 #[async_trait]
 impl TSDatabase for MutableBufferDb {
-    type Partition = crate::partition::Partition;
+    type Chunk = crate::chunk::Chunk;
     type Error = Error;
 
     // TODO: writes lines creates a column named "time" for the timestamp data. If
     //       we keep this we need to validate that no tag or field has the same
     // name.
     async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), Self::Error> {
-        let data = split_lines_into_write_entry_partitions(partition_key, lines);
+        let data = split_lines_into_write_entry_partitions(compute_partition_key, lines);
         let batch = flatbuffers::get_root::<wb::WriteBufferBatch<'_>>(&data);
 
         self.write_entries_to_partitions(&batch).await?;
@@ -426,14 +411,14 @@ impl TSDatabase for MutableBufferDb {
 
     async fn table_names(&self, predicate: Predicate) -> Result<StringSetPlan, Self::Error> {
         // TODO: Cache this information to avoid creating this each time
-        let partitions = self.partitions.read().await;
+        let chunks = self.chunks.read().await;
 
         let mut table_names: BTreeSet<String> = BTreeSet::new();
-        for partition in partitions.iter() {
-            let partition_predicate = partition.compile_predicate(&predicate)?;
+        for chunk in chunks.iter() {
+            let chunk_predicate = chunk.compile_predicate(&predicate)?;
             // this doesn't seem to make any sense
             assert!(
-                partition_predicate.field_name_predicate.is_none(),
+                chunk_predicate.field_name_predicate.is_none(),
                 "Column selection for table names not supported"
             );
 
@@ -441,13 +426,13 @@ impl TSDatabase for MutableBufferDb {
             // have rows that pass a general purpose predicate. I am
             // not sure if it is needed now, so panic
             assert!(
-                partition_predicate.partition_exprs.is_empty(),
-                "General partition exprs on table name list are not supported"
+                chunk_predicate.chunk_exprs.is_empty(),
+                "General chunk exprs on table name list are not supported"
             );
 
-            for (table_name_symbol, table) in &partition.tables {
-                if table.could_match_predicate(&partition_predicate)? {
-                    let table_name = partition.dictionary.lookup_id(*table_name_symbol).unwrap();
+            for (table_name_symbol, table) in &chunk.tables {
+                if table.could_match_predicate(&chunk_predicate)? {
+                    let table_name = chunk.dictionary.lookup_id(*table_name_symbol).unwrap();
 
                     if !table_names.contains(table_name) {
                         table_names.insert(table_name.to_string());
@@ -461,7 +446,7 @@ impl TSDatabase for MutableBufferDb {
     // return all column names in this database, while applying optional predicates
     async fn tag_column_names(&self, predicate: Predicate) -> Result<StringSetPlan, Self::Error> {
         let has_exprs = predicate.has_exprs();
-        let mut filter = PartitionTableFilter::new(predicate);
+        let mut filter = ChunkTableFilter::new(predicate);
 
         if has_exprs {
             let mut visitor = NamePredVisitor::new();
@@ -477,7 +462,7 @@ impl TSDatabase for MutableBufferDb {
     /// return all field names in this database, while applying optional
     /// predicates
     async fn field_column_names(&self, predicate: Predicate) -> Result<FieldListPlan, Self::Error> {
-        let mut filter = PartitionTableFilter::new(predicate);
+        let mut filter = ChunkTableFilter::new(predicate);
         let mut visitor = TableFieldPredVisitor::new();
         self.visit_tables(&mut filter, &mut visitor).await?;
         Ok(visitor.into_fieldlist_plan())
@@ -491,7 +476,7 @@ impl TSDatabase for MutableBufferDb {
         predicate: Predicate,
     ) -> Result<StringSetPlan, Self::Error> {
         let has_exprs = predicate.has_exprs();
-        let mut filter = PartitionTableFilter::new(predicate);
+        let mut filter = ChunkTableFilter::new(predicate);
 
         if has_exprs {
             let mut visitor = ValuePredVisitor::new(column_name);
@@ -505,7 +490,7 @@ impl TSDatabase for MutableBufferDb {
     }
 
     async fn query_series(&self, predicate: Predicate) -> Result<SeriesSetPlans, Self::Error> {
-        let mut filter = PartitionTableFilter::new(predicate);
+        let mut filter = ChunkTableFilter::new(predicate);
         let mut visitor = SeriesVisitor::new();
         self.visit_tables(&mut filter, &mut visitor).await?;
         Ok(visitor.plans.into())
@@ -516,7 +501,7 @@ impl TSDatabase for MutableBufferDb {
         predicate: Predicate,
         gby_agg: GroupByAndAggregate,
     ) -> Result<SeriesSetPlans, Self::Error> {
-        let mut filter = PartitionTableFilter::new(predicate);
+        let mut filter = ChunkTableFilter::new(predicate);
 
         match gby_agg {
             GroupByAndAggregate::Columns { agg, group_columns } => {
@@ -538,7 +523,7 @@ impl TSDatabase for MutableBufferDb {
 
 #[async_trait]
 impl SQLDatabase for MutableBufferDb {
-    type Partition = Partition;
+    type Chunk = Chunk;
     type Error = Error;
 
     async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, Self::Error> {
@@ -606,8 +591,8 @@ impl SQLDatabase for MutableBufferDb {
 
     /// Return the partition keys for data in this DB
     async fn partition_keys(&self) -> Result<Vec<String>, Self::Error> {
-        let partitions = self.partitions.read().await;
-        let keys = partitions.iter().map(|p| p.key.clone()).collect();
+        let chunks = self.chunks.read().await;
+        let keys = chunks.iter().map(|p| p.key.clone()).collect();
 
         Ok(keys)
     }
@@ -617,23 +602,23 @@ impl SQLDatabase for MutableBufferDb {
         &self,
         partition_key: &str,
     ) -> Result<Vec<String>, Self::Error> {
-        let partitions = self.partitions.read().await;
-        let partition = partitions
+        // TODO iterate over partitions
+        let chunks = self.chunks.read().await;
+        let chunk = chunks
             .iter()
             .find(|p| p.key == partition_key)
-            .context(PartitionNotFound { partition_key })?;
+            .context(ChunkNotFound { partition_key })?;
 
-        let mut tables = Vec::with_capacity(partition.tables.len());
+        let mut tables = Vec::with_capacity(chunk.tables.len());
 
-        for id in partition.tables.keys() {
-            let name =
-                partition
-                    .dictionary
-                    .lookup_id(*id)
-                    .context(TableIdNotFoundInDictionary {
-                        table: *id,
-                        partition: &partition.key,
-                    })?;
+        for id in chunk.tables.keys() {
+            let name = chunk
+                .dictionary
+                .lookup_id(*id)
+                .context(TableIdNotFoundInDictionary {
+                    table: *id,
+                    chunk: &chunk.key,
+                })?;
 
             tables.push(name.to_string());
         }
@@ -641,46 +626,47 @@ impl SQLDatabase for MutableBufferDb {
         Ok(tables)
     }
 
-    async fn remove_partition(&self, partition_key: &str) -> Result<Arc<Partition>> {
-        let mut partitions = self.partitions.write().await;
-        let pos = partitions
+    async fn remove_chunk(&self, partition_key: &str) -> Result<Arc<Chunk>> {
+        // TODO handle partitions
+        let mut chunks = self.chunks.write().await;
+        let pos = chunks
             .iter()
             .position(|p| p.key == partition_key)
-            .context(PartitionNotFound { partition_key })?;
+            .context(ChunkNotFound { partition_key })?;
 
-        Ok(Arc::new(partitions.remove(pos)))
+        Ok(Arc::new(chunks.remove(pos)))
     }
 }
 
 /// This trait is used to implement a "Visitor" pattern for Database
 /// which can be used to define logic that shares a common Depth First
-/// Search (DFS) traversal of the Database --> Partition --> Table -->
+/// Search (DFS) traversal of the Database --> Chunk --> Table -->
 /// Column datastructure heirarchy.
 ///
 /// Specifically, if we had a database like the following:
 ///
-/// YesterdayPartition
+/// YesterdayChunk
 ///   CPU Table1
 ///    Col1
-/// TodayPartition
+/// TodayChunk
 ///   CPU Table2
 ///    Col2
 ///
 /// Then the methods would be invoked in the following order
 ///
-///  visitor.pre_visit_partition(YesterdayPartition)
+///  visitor.pre_visit_chunk(YesterdayChunk)
 ///  visitor.pre_visit_table(CPU Table1)
 ///  visitor.visit_column(Col1)
 ///  visitor.post_visit_table(CPU Table1)
-///  visitor.post_visit_partition(YesterdayPartition)
-///  visitor.pre_visit_partition(TodayPartition)
+///  visitor.post_visit_chunk(YesterdayChunk)
+///  visitor.pre_visit_chunk(TodayChunk)
 ///  visitor.pre_visit_table(CPU Table2)
 ///  visitor.visit_column(Col2)
 ///  visitor.post_visit_table(CPU Table2)
-///  visitor.post_visit_partition(TodayPartition)
+///  visitor.post_visit_chunk(TodayChunk)
 trait Visitor {
-    // called once before any column in a partition is visisted
-    fn pre_visit_partition(&mut self, _partition: &Partition) -> Result<()> {
+    // called once before any column in a chunk is visisted
+    fn pre_visit_chunk(&mut self, _chunk: &Chunk) -> Result<()> {
         Ok(())
     }
 
@@ -688,8 +674,8 @@ trait Visitor {
     fn pre_visit_table(
         &mut self,
         _table: &Table,
-        _partition: &Partition,
-        _filter: &mut PartitionTableFilter,
+        _chunk: &Chunk,
+        _filter: &mut ChunkTableFilter,
     ) -> Result<()> {
         Ok(())
     }
@@ -700,31 +686,31 @@ trait Visitor {
         _table: &Table,
         _column_id: u32,
         _column: &Column,
-        _filter: &mut PartitionTableFilter,
+        _filter: &mut ChunkTableFilter,
     ) -> Result<()> {
         Ok(())
     }
 
     // called once after all columns in a Table are visited
-    fn post_visit_table(&mut self, _table: &Table, _partition: &Partition) -> Result<()> {
+    fn post_visit_table(&mut self, _table: &Table, _chunk: &Chunk) -> Result<()> {
         Ok(())
     }
 
-    // called once after all columns in a partition is visited
-    fn post_visit_partition(&mut self, _partition: &Partition) -> Result<()> {
+    // called once after all columns in a chunk is visited
+    fn post_visit_chunk(&mut self, _chunk: &Chunk) -> Result<()> {
         Ok(())
     }
 }
 
 impl MutableBufferDb {
-    /// returns the number of partitions in this database
+    /// returns the number of chunks in this database
     pub async fn len(&self) -> usize {
-        self.partitions.read().await.len()
+        self.chunks.read().await.len()
     }
 
     /// returns true if the database has no partititons
     pub async fn is_empty(&self) -> bool {
-        self.partitions.read().await.is_empty()
+        self.chunks.read().await.is_empty()
     }
 
     /// Traverse this database's tables, calling the relevant
@@ -735,18 +721,18 @@ impl MutableBufferDb {
     /// returns false
     async fn visit_tables<V: Visitor>(
         &self,
-        filter: &mut PartitionTableFilter,
+        filter: &mut ChunkTableFilter,
         visitor: &mut V,
     ) -> Result<()> {
-        let partitions = self.partitions.read().await;
+        let chunks = self.chunks.read().await;
 
-        for partition in partitions.iter() {
-            visitor.pre_visit_partition(partition)?;
-            filter.pre_visit_partition(partition)?;
+        for chunk in chunks.iter() {
+            visitor.pre_visit_chunk(chunk)?;
+            filter.pre_visit_chunk(chunk)?;
 
-            for table in partition.tables.values() {
+            for table in chunk.tables.values() {
                 if filter.should_visit_table(table)? {
-                    visitor.pre_visit_table(table, partition, filter)?;
+                    visitor.pre_visit_table(table, chunk, filter)?;
 
                     for (column_id, column_index) in &table.column_id_to_index {
                         visitor.visit_column(
@@ -757,11 +743,11 @@ impl MutableBufferDb {
                         )?
                     }
 
-                    visitor.post_visit_table(table, partition)?;
+                    visitor.post_visit_table(table, chunk)?;
                 }
             }
-            visitor.post_visit_partition(partition)?;
-        } // next partition
+            visitor.post_visit_chunk(chunk)?;
+        } // next chunk
 
         Ok(())
     }
@@ -769,14 +755,14 @@ impl MutableBufferDb {
 
 /// Common logic for processing and filtering tables in the write buffer
 ///
-/// Note that since each partition has its own dictionary, mappings
-/// between Strings --> we cache the String->id mappings per partition
+/// Note that since each chunk has its own dictionary, mappings
+/// between Strings --> we cache the String->id mappings per chunk
 ///
 /// b) the table doesn't have a column range that overlaps the
 /// predicate values, e.g., if you have env = "us-west" and a
 /// table's env column has the range ["eu-south", "us-north"].
 #[derive(Debug)]
-struct PartitionTableFilter {
+struct ChunkTableFilter {
     predicate: Predicate,
 
     /// If specififed, only tables with all specified columns will be
@@ -786,16 +772,16 @@ struct PartitionTableFilter {
     additional_required_columns: Option<HashSet<String>>,
 
     /// A 'compiled' version of the predicate to evaluate on tables /
-    /// columns in a particular partition during the walk
-    partition_predicate: Option<PartitionPredicate>,
+    /// columns in a particular chunk during the walk
+    chunk_predicate: Option<ChunkPredicate>,
 }
 
-impl PartitionTableFilter {
+impl ChunkTableFilter {
     fn new(predicate: Predicate) -> Self {
         Self {
             predicate,
             additional_required_columns: None,
-            partition_predicate: None,
+            chunk_predicate: None,
         }
     }
 
@@ -817,34 +803,34 @@ impl PartitionTableFilter {
         self
     }
 
-    /// Called when each partition gets visited. Since ids are
+    /// Called when each chunk gets visited. Since ids are
     /// specific to each partitition, the predicates much get
     /// translated each time.
-    fn pre_visit_partition(&mut self, partition: &Partition) -> Result<()> {
-        let mut partition_predicate = partition.compile_predicate(&self.predicate)?;
+    fn pre_visit_chunk(&mut self, chunk: &Chunk) -> Result<()> {
+        let mut chunk_predicate = chunk.compile_predicate(&self.predicate)?;
 
         // add any additional column needs
         if let Some(additional_required_columns) = &self.additional_required_columns {
-            partition.add_required_columns_to_predicate(
+            chunk.add_required_columns_to_predicate(
                 additional_required_columns,
-                &mut partition_predicate,
+                &mut chunk_predicate,
             );
         }
 
-        self.partition_predicate = Some(partition_predicate);
+        self.chunk_predicate = Some(chunk_predicate);
 
         Ok(())
     }
 
     /// If returns false, skips visiting _table and all its columns
     fn should_visit_table(&mut self, table: &Table) -> Result<bool> {
-        Ok(table.could_match_predicate(self.partition_predicate())?)
+        Ok(table.could_match_predicate(self.chunk_predicate())?)
     }
 
-    pub fn partition_predicate(&self) -> &PartitionPredicate {
-        self.partition_predicate
+    pub fn chunk_predicate(&self) -> &ChunkPredicate {
+        self.chunk_predicate
             .as_ref()
-            .expect("Visited partition to compile predicate")
+            .expect("Visited chunk to compile predicate")
     }
 }
 
@@ -852,14 +838,14 @@ impl PartitionTableFilter {
 /// timestamp range (has no general purpose predicates)
 struct NameVisitor {
     column_names: StringSet,
-    partition_column_ids: BTreeSet<u32>,
+    chunk_column_ids: BTreeSet<u32>,
 }
 
 impl NameVisitor {
     fn new() -> Self {
         Self {
             column_names: StringSet::new(),
-            partition_column_ids: BTreeSet::new(),
+            chunk_column_ids: BTreeSet::new(),
         }
     }
 }
@@ -870,30 +856,32 @@ impl Visitor for NameVisitor {
         table: &Table,
         column_id: u32,
         column: &Column,
-        filter: &mut PartitionTableFilter,
+        filter: &mut ChunkTableFilter,
     ) -> Result<()> {
         if let Column::Tag(column, _) = column {
-            if table.column_matches_predicate(column, filter.partition_predicate())? {
-                self.partition_column_ids.insert(column_id);
+            if table.column_matches_predicate(column, filter.chunk_predicate())? {
+                self.chunk_column_ids.insert(column_id);
             }
         }
         Ok(())
     }
 
-    fn pre_visit_partition(&mut self, _partition: &Partition) -> Result<()> {
-        self.partition_column_ids.clear();
+    fn pre_visit_chunk(&mut self, _chunk: &Chunk) -> Result<()> {
+        self.chunk_column_ids.clear();
         Ok(())
     }
 
-    fn post_visit_partition(&mut self, partition: &Partition) -> Result<()> {
-        // convert all the partition's column_ids to Strings
-        for &column_id in &self.partition_column_ids {
-            let column_name = partition.dictionary.lookup_id(column_id).context(
-                ColumnIdNotFoundInDictionary {
-                    column_id,
-                    partition: &partition.key,
-                },
-            )?;
+    fn post_visit_chunk(&mut self, chunk: &Chunk) -> Result<()> {
+        // convert all the chunk's column_ids to Strings
+        for &column_id in &self.chunk_column_ids {
+            let column_name =
+                chunk
+                    .dictionary
+                    .lookup_id(column_id)
+                    .context(ColumnIdNotFoundInDictionary {
+                        column_id,
+                        chunk: &chunk.key,
+                    })?;
 
             if !self.column_names.contains(column_name) {
                 self.column_names.insert(column_name.to_string());
@@ -919,11 +907,11 @@ impl Visitor for NamePredVisitor {
     fn pre_visit_table(
         &mut self,
         table: &Table,
-        partition: &Partition,
-        filter: &mut PartitionTableFilter,
+        chunk: &Chunk,
+        filter: &mut ChunkTableFilter,
     ) -> Result<()> {
         self.plans
-            .push(table.tag_column_names_plan(filter.partition_predicate(), partition)?);
+            .push(table.tag_column_names_plan(filter.chunk_predicate(), chunk)?);
         Ok(())
     }
 }
@@ -932,7 +920,7 @@ impl Visitor for NamePredVisitor {
 /// applying timestamp and other predicates
 #[derive(Debug)]
 struct TableFieldPredVisitor {
-    // As Each table can be spread across multiple Partitions, we
+    // As Each table can be spread across multiple Chunks, we
     // collect all the relevant plans and Union them together.
     plans: Vec<LogicalPlan>,
 }
@@ -941,11 +929,11 @@ impl Visitor for TableFieldPredVisitor {
     fn pre_visit_table(
         &mut self,
         table: &Table,
-        partition: &Partition,
-        filter: &mut PartitionTableFilter,
+        chunk: &Chunk,
+        filter: &mut ChunkTableFilter,
     ) -> Result<()> {
         self.plans
-            .push(table.field_names_plan(filter.partition_predicate(), partition)?);
+            .push(table.field_names_plan(filter.chunk_predicate(), chunk)?);
         Ok(())
     }
 }
@@ -965,13 +953,13 @@ impl TableFieldPredVisitor {
 /// in this database, while applying the timestamp range
 ///
 /// Potential optimizations: Run this in parallel (in different
-/// futures) for each partition / table, rather than a single one
+/// futures) for each chunk / table, rather than a single one
 /// -- but that will require building up parallel hash tables.
 struct ValueVisitor<'a> {
     column_name: &'a str,
     // what column id we are looking for
     column_id: Option<u32>,
-    partition_value_ids: BTreeSet<u32>,
+    chunk_value_ids: BTreeSet<u32>,
     column_values: StringSet,
 }
 
@@ -981,24 +969,21 @@ impl<'a> ValueVisitor<'a> {
             column_name,
             column_id: None,
             column_values: StringSet::new(),
-            partition_value_ids: BTreeSet::new(),
+            chunk_value_ids: BTreeSet::new(),
         }
     }
 }
 
 impl<'a> Visitor for ValueVisitor<'a> {
-    fn pre_visit_partition(&mut self, partition: &Partition) -> Result<()> {
-        self.partition_value_ids.clear();
+    fn pre_visit_chunk(&mut self, chunk: &Chunk) -> Result<()> {
+        self.chunk_value_ids.clear();
 
-        self.column_id = Some(
-            partition
-                .dictionary
-                .lookup_value(self.column_name)
-                .context(ColumnNameNotFoundInDictionary {
-                    column_name: self.column_name,
-                    partition: &partition.key,
-                })?,
-        );
+        self.column_id = Some(chunk.dictionary.lookup_value(self.column_name).context(
+            ColumnNameNotFoundInDictionary {
+                column_name: self.column_name,
+                chunk: &chunk.key,
+            },
+        )?);
 
         Ok(())
     }
@@ -1008,7 +993,7 @@ impl<'a> Visitor for ValueVisitor<'a> {
         table: &Table,
         column_id: u32,
         column: &Column,
-        filter: &mut PartitionTableFilter,
+        filter: &mut ChunkTableFilter,
     ) -> Result<()> {
         if Some(column_id) != self.column_id {
             return Ok(());
@@ -1019,17 +1004,17 @@ impl<'a> Visitor for ValueVisitor<'a> {
                 // if we have a timestamp prediate, find all values
                 // where the timestamp is within range. Otherwise take
                 // all values.
-                let partition_predicate = filter.partition_predicate();
-                match partition_predicate.range {
+                let chunk_predicate = filter.chunk_predicate();
+                match chunk_predicate.range {
                     None => {
                         // take all non-null values
                         column.iter().filter_map(|&s| s).for_each(|value_id| {
-                            self.partition_value_ids.insert(value_id);
+                            self.chunk_value_ids.insert(value_id);
                         });
                     }
                     Some(range) => {
                         // filter out all values that don't match the timestmap
-                        let time_column = table.column_i64(partition_predicate.time_column_id)?;
+                        let time_column = table.column_i64(chunk_predicate.time_column_id)?;
 
                         column
                             .iter()
@@ -1042,7 +1027,7 @@ impl<'a> Visitor for ValueVisitor<'a> {
                                 }
                             })
                             .for_each(|value_id| {
-                                self.partition_value_ids.insert(value_id);
+                                self.chunk_value_ids.insert(value_id);
                             });
                     }
                 }
@@ -1055,13 +1040,13 @@ impl<'a> Visitor for ValueVisitor<'a> {
         }
     }
 
-    fn post_visit_partition(&mut self, partition: &Partition) -> Result<()> {
-        // convert all the partition's column_ids to Strings
-        for &value_id in &self.partition_value_ids {
-            let value = partition.dictionary.lookup_id(value_id).context(
+    fn post_visit_chunk(&mut self, chunk: &Chunk) -> Result<()> {
+        // convert all the chunk's column_ids to Strings
+        for &value_id in &self.chunk_value_ids {
+            let value = chunk.dictionary.lookup_id(value_id).context(
                 ColumnValueIdNotFoundInDictionary {
                     value_id,
-                    partition: &partition.key,
+                    chunk: &chunk.key,
                 },
             )?;
 
@@ -1095,15 +1080,15 @@ impl<'a> Visitor for ValuePredVisitor<'a> {
     fn pre_visit_table(
         &mut self,
         table: &Table,
-        partition: &Partition,
-        filter: &mut PartitionTableFilter,
+        chunk: &Chunk,
+        filter: &mut ChunkTableFilter,
     ) -> Result<()> {
         // skip table entirely if there are no rows that fall in the timestamp
-        if table.could_match_predicate(filter.partition_predicate())? {
+        if table.could_match_predicate(filter.chunk_predicate())? {
             self.plans.push(table.tag_values_plan(
                 self.column_name,
-                filter.partition_predicate(),
-                partition,
+                filter.chunk_predicate(),
+                chunk,
             )?);
         }
         Ok(())
@@ -1126,11 +1111,11 @@ impl Visitor for SeriesVisitor {
     fn pre_visit_table(
         &mut self,
         table: &Table,
-        partition: &Partition,
-        filter: &mut PartitionTableFilter,
+        chunk: &Chunk,
+        filter: &mut ChunkTableFilter,
     ) -> Result<()> {
         self.plans
-            .push(table.series_set_plan(filter.partition_predicate(), partition)?);
+            .push(table.series_set_plan(filter.chunk_predicate(), chunk)?);
 
         Ok(())
     }
@@ -1158,14 +1143,14 @@ impl Visitor for GroupsVisitor {
     fn pre_visit_table(
         &mut self,
         table: &Table,
-        partition: &Partition,
-        filter: &mut PartitionTableFilter,
+        chunk: &Chunk,
+        filter: &mut ChunkTableFilter,
     ) -> Result<()> {
         self.plans.push(table.grouped_series_set_plan(
-            filter.partition_predicate(),
+            filter.chunk_predicate(),
             self.agg,
             &self.group_columns,
-            partition,
+            chunk,
         )?);
 
         Ok(())
@@ -1197,26 +1182,27 @@ impl Visitor for WindowGroupsVisitor {
     fn pre_visit_table(
         &mut self,
         table: &Table,
-        partition: &Partition,
-        filter: &mut PartitionTableFilter,
+        chunk: &Chunk,
+        filter: &mut ChunkTableFilter,
     ) -> Result<()> {
         self.plans.push(table.window_grouped_series_set_plan(
-            filter.partition_predicate(),
+            filter.chunk_predicate(),
             self.agg,
             &self.every,
             &self.offset,
-            partition,
+            chunk,
         )?);
 
         Ok(())
     }
 }
 
-// partition_key returns the partition key for the given line. The key will be
-// the prefix of a partition name (multiple partitions can exist for each key).
-// It uses the user defined partitioning rules to construct this key
-pub fn partition_key(line: &ParsedLine<'_>) -> String {
-    // TODO - wire this up to use partitioning rules, for now just partition by day
+// compute_partition_key returns the partititon key for the given
+// line. The key will be the prefix of a chunk name (multiple chunks
+// can exist for each key).  It uses the user defined chunking rules
+// to construct this key
+pub fn compute_partition_key(line: &ParsedLine<'_>) -> String {
+    // TODO - wire this up to use chunking rules, for now just chunk by day
     let ts = line.timestamp.unwrap();
     let dt = Utc.timestamp_nanos(ts);
     dt.format("%Y-%m-%dT%H").to_string()
@@ -1264,8 +1250,8 @@ mod tests {
     // output. The default failure message uses Debug formatting, which prints
     // newlines as `\n`. This prints the pretty_format_batches using Display so
     // it's easier to read the tables.
-    fn assert_table_eq(table: &str, partitions: &[arrow::record_batch::RecordBatch]) {
-        let res = pretty_format_batches(partitions).unwrap();
+    fn assert_table_eq(table: &str, chunks: &[arrow::record_batch::RecordBatch]) {
+        let res = pretty_format_batches(chunks).unwrap();
         assert_eq!(table, res, "\n\nleft:\n\n{}\nright:\n\n{}", table, res);
     }
 
@@ -1363,8 +1349,8 @@ mod tests {
         .collect();
         db.write_lines(&lines).await?;
 
-        let partitions = db.table_to_arrow("cpu", &["region", "core"]).await?;
-        let columns = partitions[0].columns();
+        let chunks = db.table_to_arrow("cpu", &["region", "core"]).await?;
+        let columns = chunks[0].columns();
 
         assert_eq!(
             2,
@@ -1454,28 +1440,28 @@ mod tests {
                 .collect();
             db.write_lines(&lines).await?;
 
-            let partitions = db.table_to_arrow("cpu", cpu_columns).await?;
-            assert_table_eq(expected_cpu_table, &partitions);
+            let chunks = db.table_to_arrow("cpu", cpu_columns).await?;
+            assert_table_eq(expected_cpu_table, &chunks);
 
-            let partitions = db.table_to_arrow("mem", mem_columns).await?;
-            assert_table_eq(expected_mem_table, &partitions);
+            let chunks = db.table_to_arrow("mem", mem_columns).await?;
+            assert_table_eq(expected_mem_table, &chunks);
 
-            let partitions = db.table_to_arrow("disk", disk_columns).await?;
-            assert_table_eq(expected_disk_table, &partitions);
+            let chunks = db.table_to_arrow("disk", disk_columns).await?;
+            assert_table_eq(expected_disk_table, &chunks);
         }
 
         // check that it recovers from the wal
         {
             let db = MutableBufferDb::restore_from_wal(&dir).await?;
 
-            let partitions = db.table_to_arrow("cpu", cpu_columns).await?;
-            assert_table_eq(expected_cpu_table, &partitions);
+            let chunks = db.table_to_arrow("cpu", cpu_columns).await?;
+            assert_table_eq(expected_cpu_table, &chunks);
 
-            let partitions = db.table_to_arrow("mem", mem_columns).await?;
-            assert_table_eq(expected_mem_table, &partitions);
+            let chunks = db.table_to_arrow("mem", mem_columns).await?;
+            assert_table_eq(expected_mem_table, &chunks);
 
-            let partitions = db.table_to_arrow("disk", disk_columns).await?;
-            assert_table_eq(expected_disk_table, &partitions);
+            let chunks = db.table_to_arrow("disk", disk_columns).await?;
+            assert_table_eq(expected_disk_table, &chunks);
         }
 
         Ok(())
@@ -1560,14 +1546,14 @@ mod tests {
                 .collect();
             db.write_lines(&lines).await?;
 
-            let partitions = db.table_to_arrow("cpu", cpu_columns).await?;
-            assert_table_eq(expected_cpu_table, &partitions);
+            let chunks = db.table_to_arrow("cpu", cpu_columns).await?;
+            assert_table_eq(expected_cpu_table, &chunks);
 
-            let partitions = db.table_to_arrow("mem", mem_columns).await?;
-            assert_table_eq(expected_mem_table, &partitions);
+            let chunks = db.table_to_arrow("mem", mem_columns).await?;
+            assert_table_eq(expected_mem_table, &chunks);
 
-            let partitions = db.table_to_arrow("disk", disk_columns).await?;
-            assert_table_eq(expected_disk_table, &partitions);
+            let chunks = db.table_to_arrow("disk", disk_columns).await?;
+            assert_table_eq(expected_disk_table, &chunks);
         }
 
         // check that it can recover from the last 2 self-describing entries of the wal
@@ -1583,11 +1569,11 @@ mod tests {
             // Skip the first 2 entries in the wal; only restore from the last 2
             let wal_entries = wal_entries.skip(2);
 
-            let (partitions, _stats) = restore_partitions_from_wal(wal_entries)?;
+            let (chunks, _stats) = restore_chunks_from_wal(wal_entries)?;
 
             let db = MutableBufferDb {
                 name,
-                partitions: RwLock::new(partitions),
+                chunks: RwLock::new(chunks),
                 wal_details: None,
             };
 
@@ -1599,12 +1585,12 @@ mod tests {
 +------+---------+-----------+------+
 "#;
             let smaller_cpu_columns = &["host", "new_tag", "new_field", "time"];
-            let partitions = db.table_to_arrow("cpu", smaller_cpu_columns).await?;
-            assert_table_eq(smaller_cpu_table, &partitions);
+            let chunks = db.table_to_arrow("cpu", smaller_cpu_columns).await?;
+            assert_table_eq(smaller_cpu_table, &chunks);
 
             // all of mem
-            let partitions = db.table_to_arrow("mem", mem_columns).await?;
-            assert_table_eq(expected_mem_table, &partitions);
+            let chunks = db.table_to_arrow("mem", mem_columns).await?;
+            assert_table_eq(expected_mem_table, &chunks);
 
             // no disk
             let nonexistent_table = db.table_to_arrow("disk", disk_columns).await;
@@ -1629,7 +1615,7 @@ mod tests {
 cpu user=23.2 1600107710000000000
 disk bytes=23432323i 1600136510000000000",
         )
-        .map(|line| partition_key(&line.unwrap()))
+        .map(|line| compute_partition_key(&line.unwrap()))
         .collect();
 
         assert_eq!(partition_keys, vec!["2020-09-14T18", "2020-09-15T02"]);
@@ -2185,7 +2171,7 @@ disk bytes=23432323i 1600136510000000000",
         let lines: Vec<_> = parse_lines(&lp_data).map(|l| l.unwrap()).collect();
         db.write_lines(&lines).await?;
 
-        // write a new lp_line that is in a new day and thus a new partition
+        // write a new lp_line that is in a new day and thus a new chunk
         let nanoseconds_per_day: i64 = 1_000_000_000 * 60 * 60 * 24;
 
         let lp_data = vec![format!(
@@ -2196,7 +2182,7 @@ disk bytes=23432323i 1600136510000000000",
         let lines: Vec<_> = parse_lines(&lp_data).map(|l| l.unwrap()).collect();
         db.write_lines(&lines).await?;
 
-        // ensure there are 2 partitions
+        // ensure there are 2 chunks
         assert_eq!(db.len().await, 2);
 
         // setup to run the execution plan (
@@ -2219,7 +2205,7 @@ disk bytes=23432323i 1600136510000000000",
             .expect("Running fieldlist plan");
         assert!(fieldlists.fields.is_empty());
 
-        // get only fields from h20 (but both partitions)
+        // get only fields from h20 (but both chunks)
         let predicate = PredicateBuilder::default()
             .table("h2o")
             .add_expr(col("state").eq(lit("MA"))) // state=MA
