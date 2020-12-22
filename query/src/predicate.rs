@@ -162,11 +162,13 @@ impl PredicateBuilder {
 
     /// Set the partition key restriction
     pub fn partition_key(mut self, partition_key: impl Into<String>) -> Self {
-        assert!(self.inner.partition_key.is_none(), "multiple partition key predicates not suported");
+        assert!(
+            self.inner.partition_key.is_none(),
+            "multiple partition key predicates not suported"
+        );
         self.inner.partition_key = Some(partition_key.into());
         self
     }
-
 
     /// Create a predicate, consuming this builder
     pub fn build(self) -> Predicate {

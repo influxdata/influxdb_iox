@@ -144,7 +144,6 @@ where
 
     async fn run(&self, notify: Option<oneshot::Sender<()>>) -> Result<()> {
         while let Some((pos, table_name)) = self.next_table() {
-
             let mut batches = Vec::new();
             self.partition
                 .table_to_arrow(&mut batches, table_name, &[])

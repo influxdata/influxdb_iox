@@ -421,7 +421,7 @@ impl SQLDatabase for MutableBufferDb {
     /// Return the partition keys for data in this DB
     async fn partition_keys(&self) -> Result<Vec<String>, Self::Error> {
         let partitions = self.partitions.read().await;
-        let keys = partitions.keys().map(|key| key.clone()).collect();
+        let keys = partitions.keys().cloned().collect();
         Ok(keys)
     }
 
@@ -559,7 +559,7 @@ impl MutableBufferDb {
     /// database
     async fn partition_snapshot(&self) -> Vec<Arc<RwLock<Partition>>> {
         let partitions = self.partitions.read().await;
-        partitions.values().map(|v| v.clone()).collect()
+        partitions.values().cloned().collect()
     }
 
     /// Traverse this database's tables, calling the relevant

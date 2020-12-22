@@ -26,17 +26,12 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MutableBufferDatabases {
     databases: RwLock<BTreeMap<String, Arc<MutableBufferDb>>>,
 }
 
 impl MutableBufferDatabases {
-    pub fn new() -> Self {
-        Self {
-            databases: RwLock::new(BTreeMap::new()),
-        }
-    }
     pub async fn add_db(&self, db: MutableBufferDb) {
         let mut databases = self.databases.write().await;
         databases.insert(db.name.clone(), Arc::new(db));
