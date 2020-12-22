@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use influxdb_line_protocol as line_parser;
-use mutable_buffer::{restore_partitions_from_wal, Db};
+use mutable_buffer::{restore_partitions_from_wal, MutableBufferDb};
 use query::TSDatabase;
 use wal::{Entry, WalBuilder};
 
@@ -73,7 +73,7 @@ async fn common_create_entries(
 ) -> Result<(Vec<Entry>, usize)> {
     let tmp_dir = test_helpers::tmp_dir()?;
     let mut wal_dir = tmp_dir.as_ref().to_owned();
-    let db = Db::try_with_wal("mydb", &mut wal_dir).await?;
+    let db = MutableBufferDb::try_with_wal("mydb", &mut wal_dir).await?;
 
     let mut lp_entries = Vec::new();
     f(&mut |entry| lp_entries.push(entry));
