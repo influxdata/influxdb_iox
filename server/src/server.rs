@@ -16,9 +16,9 @@ use data_types::{
     {DatabaseName, DatabaseNameError},
 };
 use influxdb_line_protocol::ParsedLine;
+use mutable_buffer::Db as WriteBufferDb;
 use object_store::ObjectStore;
 use query::{DatabaseStore, SQLDatabase, TSDatabase};
-use write_buffer::Db as WriteBufferDb;
 
 use async_trait::async_trait;
 use bytes::Bytes;

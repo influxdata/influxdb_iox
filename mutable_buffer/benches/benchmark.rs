@@ -1,8 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use influxdb_line_protocol as line_parser;
+use mutable_buffer::{restore_partitions_from_wal, Db};
 use query::TSDatabase;
 use wal::{Entry, WalBuilder};
-use write_buffer::{restore_partitions_from_wal, Db};
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 type Result<T, E = Error> = std::result::Result<T, E>;
