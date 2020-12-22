@@ -1,6 +1,5 @@
 use generated_types::wal as wb;
 use influxdb_line_protocol::ParsedLine;
-use query::{group_by::Aggregate, predicate::PredicateBuilder};
 use query::group_by::GroupByAndAggregate;
 use query::group_by::WindowDuration;
 use query::{
@@ -8,25 +7,18 @@ use query::{
     predicate::Predicate,
     SQLDatabase, TSDatabase,
 };
-use wal::{
-    writer::{start_wal_sync_task, Error as WalWriterError, WalDetails},
-    WalBuilder,
-};
+use query::{group_by::Aggregate, predicate::PredicateBuilder};
 
 use crate::column::Column;
 use crate::table::Table;
 use crate::{
-    chunk::{restore_chunks_from_wal, Chunk, ChunkPredicate},
+    chunk::{Chunk, ChunkPredicate},
     partition::Partition,
 };
 
-use std::io::ErrorKind;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::{
-    collections::{BTreeSet, HashMap, HashSet},
-    path::Path,
-};
 
 use arrow_deps::{
     arrow,
@@ -49,48 +41,11 @@ use sqlparser::{
     parser::Parser,
 };
 use tokio::sync::RwLock;
-use tracing::info;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Dir {:?} invalid for DB", dir))]
     OpenDb { dir: PathBuf },
-
-    #[snafu(display("Error opening WAL for database {}: {}", database, source))]
-    OpeningWal {
-        database: String,
-        source: WalWriterError,
-    },
-
-    #[snafu(display("Error writing to WAL for database {}: {}", database, source))]
-    WritingWal {
-        database: String,
-        source: WalWriterError,
-    },
-
-    #[snafu(display("Error opening WAL for database {}: {}", database, source))]
-    LoadingWal {
-        database: String,
-        source: wal::Error,
-    },
-
-    #[snafu(display("Error recovering WAL for database {}: {}", database, source))]
-    WalRecoverError {
-        database: String,
-        source: crate::chunk::Error,
-    },
-
-    #[snafu(display("Error recovering WAL for chunk {} on table {}", chunk, table))]
-    WalChunkError { chunk: String, table: String },
-
-    #[snafu(display("Error recovering write from WAL, column id {} not found", column_id))]
-    WalColumnError { column_id: u16 },
-
-    #[snafu(display("Error creating db dir for {}: {}", database, err))]
-    CreatingWalDir {
-        database: String,
-        err: std::io::Error,
-    },
 
     #[snafu(display("Database {} doesn't exist", database))]
     DatabaseNotFound { database: String },
@@ -235,9 +190,6 @@ pub struct MutableBufferDb {
 
     // TODO: REMOVE THIS field
     chunks: RwLock<Vec<Chunk>>,
-
-    /// a local file system based WAL, if present
-    wal_details: Option<WalDetails>,
 }
 
 impl MutableBufferDb {
@@ -257,83 +209,6 @@ impl MutableBufferDb {
             chunks: RwLock::new(chunks),
             ..Default::default()
         }
-    }
-
-    /// Create a new DB that will create and use a local Write Ahead
-    /// Log (WAL) directory `wal_dir`
-    pub async fn try_with_wal(name: impl Into<String>, wal_dir: &mut PathBuf) -> Result<Self> {
-        let name = name.into();
-        wal_dir.push(&name);
-        if let Err(e) = std::fs::create_dir(wal_dir.clone()) {
-            match e.kind() {
-                ErrorKind::AlreadyExists => (),
-                _ => {
-                    return CreatingWalDir {
-                        database: name,
-                        err: e,
-                    }
-                    .fail()
-                }
-            }
-        }
-        let wal_builder = WalBuilder::new(wal_dir.clone());
-        let wal_details = start_wal_sync_task(wal_builder)
-            .await
-            .context(OpeningWal { database: &name })?;
-        wal_details
-            .write_metadata()
-            .await
-            .context(OpeningWal { database: &name })?;
-
-        Ok(Self {
-            name,
-            wal_details: Some(wal_details),
-            ..Default::default()
-        })
-    }
-
-    /// Create a new DB and initially restore pre-existing data in the
-    /// Write Ahead Log (WAL) directory `wal_dir`
-    pub async fn restore_from_wal(wal_dir: &Path) -> Result<Self> {
-        let now = std::time::Instant::now();
-        let name = wal_dir
-            .iter()
-            .last()
-            .with_context(|| OpenDb { dir: &wal_dir })?
-            .to_str()
-            .with_context(|| OpenDb { dir: &wal_dir })?
-            .to_string();
-
-        let wal_builder = WalBuilder::new(wal_dir);
-        let wal_details = start_wal_sync_task(wal_builder.clone())
-            .await
-            .context(OpeningWal { database: &name })?;
-
-        // TODO: check wal metadata format
-        let entries = wal_builder
-            .entries()
-            .context(LoadingWal { database: &name })?;
-
-        let (chunks, stats) =
-            restore_chunks_from_wal(entries).context(WalRecoverError { database: &name })?;
-
-        let elapsed = now.elapsed();
-        info!(
-            "{} database loaded {} rows in {:?} in {} tables",
-            &name,
-            stats.row_count,
-            elapsed,
-            stats.tables.len(),
-        );
-
-        info!("{} database chunk count: {}", &name, chunks.len(),);
-
-        Ok(Self {
-            name,
-            chunks: RwLock::new(chunks),
-            wal_details: Some(wal_details),
-            ..Default::default()
-        })
     }
 
     /// Directs the writes from batch into the appropriate partitions
@@ -389,12 +264,6 @@ impl TSDatabase for MutableBufferDb {
 
         self.write_entries_to_partitions(&batch).await?;
 
-        if let Some(wal) = &self.wal_details {
-            wal.write_and_sync(data).await.context(WritingWal {
-                database: &self.name,
-            })?;
-        }
-
         Ok(())
     }
 
@@ -408,17 +277,6 @@ impl TSDatabase for MutableBufferDb {
                 .fail()
             }
         };
-
-        if let Some(wal) = &self.wal_details {
-            // TODO(paul): refactor this so we're not cloning. Although replicated writes
-            // shouldn't  be using a WAL and how the WAL is used at all is
-            // likely to have a larger refactor soon.
-            wal.write_and_sync(write.data.clone())
-                .await
-                .context(WritingWal {
-                    database: &self.name,
-                })?;
-        }
 
         Ok(())
     }
@@ -594,10 +452,7 @@ impl SQLDatabase for MutableBufferDb {
         let mut filter = ChunkTableFilter::new(predicate);
         let mut visitor = TableNameVisitor::new();
         self.accept(&mut filter, &mut visitor).await?;
-        let names  = visitor
-            .into_inner()
-            .into_iter()
-            .collect();
+        let names = visitor.into_inner().into_iter().collect();
         Ok(names)
     }
 
@@ -850,7 +705,7 @@ impl ChunkTableFilter {
     fn should_visit_partition(&mut self, partition: &Partition) -> Result<bool> {
         match &self.predicate.partition_key {
             Some(partition_key) => Ok(partition.key() == partition_key),
-            None => Ok(true)
+            None => Ok(true),
         }
     }
 
@@ -1332,9 +1187,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_table_names() -> Result {
-        let mut dir = test_helpers::tmp_dir()?.into_path();
-
-        let db = MutableBufferDb::try_with_wal("mydb", &mut dir).await?;
+        let db = MutableBufferDb::new("mydb");
 
         // no tables initially
         assert_eq!(
@@ -1360,9 +1213,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_table_names_timestamps() -> Result {
-        let mut dir = test_helpers::tmp_dir()?.into_path();
-
-        let db = MutableBufferDb::try_with_wal("mydb", &mut dir).await?;
+        let db = MutableBufferDb::new("mydb");
 
         // write two different tables at the following times:
         // cpu: 100 and 150
@@ -1396,9 +1247,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_tags_are_null() -> Result {
-        let mut dir = test_helpers::tmp_dir()?.into_path();
-
-        let db = MutableBufferDb::try_with_wal("mydb", &mut dir).await?;
+        let db = MutableBufferDb::new("mydb");
 
         // Note the `region` tag is introduced in the second line, so
         // the values in prior rows for the region column are
@@ -1448,88 +1297,95 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn write_data_and_recover() -> Result {
-        let mut dir = test_helpers::tmp_dir()?.into_path();
+    //     #[tokio::test]
+    //     async fn write_data_and_recover() -> Result {
+    //         let mut dir = test_helpers::tmp_dir()?.into_path();
 
-        let expected_cpu_table = r#"+--------+------+------+-------+-------------+------+------+---------+-----------+
-| region | host | user | other | str         | b    | time | new_tag | new_field |
-+--------+------+------+-------+-------------+------+------+---------+-----------+
-| west   | A    | 23.2 | 1     | some string | true | 10   |         |           |
-| west   | B    | 23.1 |       |             |      | 15   |         |           |
-|        | A    |      |       |             |      | 20   | foo     | 15.1      |
-+--------+------+------+-------+-------------+------+------+---------+-----------+
-"#;
-        let expected_mem_table = r#"+--------+------+-------+------+
-| region | host | val   | time |
-+--------+------+-------+------+
-| east   | C    | 23432 | 10   |
-+--------+------+-------+------+
-"#;
-        let expected_disk_table = r#"+--------+------+----------+--------------+------+
-| region | host | bytes    | used_percent | time |
-+--------+------+----------+--------------+------+
-| west   | A    | 23432323 | 76.2         | 10   |
-+--------+------+----------+--------------+------+
-"#;
+    //         let expected_cpu_table =
+    // r#"+--------+------+------+-------+-------------+------+------+---------+-----------+
+    // | region | host | user | other | str         | b    | time | new_tag |
+    // new_field |
+    // +--------+------+------+-------+-------------+------+------+---------+-----------+
+    // | west   | A    | 23.2 | 1     | some string | true | 10   |         |
+    // | | west   | B    | 23.1 |       |             |      | 15   |         |
+    // | |        | A    |      |       |             |      | 20   | foo     |
+    // 15.1      |
+    // +--------+------+------+-------+-------------+------+------+---------+-----------+
+    // "#;
+    //         let expected_mem_table = r#"+--------+------+-------+------+
+    // | region | host | val   | time |
+    // +--------+------+-------+------+
+    // | east   | C    | 23432 | 10   |
+    // +--------+------+-------+------+
+    // "#;
+    //         let expected_disk_table =
+    // r#"+--------+------+----------+--------------+------+ | region | host |
+    // bytes    | used_percent | time |
+    // +--------+------+----------+--------------+------+
+    // | west   | A    | 23432323 | 76.2         | 10   |
+    // +--------+------+----------+--------------+------+
+    // "#;
 
-        let cpu_columns = &[
-            "region",
-            "host",
-            "user",
-            "other",
-            "str",
-            "b",
-            "time",
-            "new_tag",
-            "new_field",
-        ];
-        let mem_columns = &["region", "host", "val", "time"];
-        let disk_columns = &["region", "host", "bytes", "used_percent", "time"];
+    //         let cpu_columns = &[
+    //             "region",
+    //             "host",
+    //             "user",
+    //             "other",
+    //             "str",
+    //             "b",
+    //             "time",
+    //             "new_tag",
+    //             "new_field",
+    //         ];
+    //         let mem_columns = &["region", "host", "val", "time"];
+    //         let disk_columns = &["region", "host", "bytes", "used_percent",
+    // "time"];
 
-        {
-            let db = MutableBufferDb::try_with_wal("mydb", &mut dir).await?;
-            let lines: Vec<_> = parse_lines("cpu,region=west,host=A user=23.2,other=1i,str=\"some string\",b=true 10\ndisk,region=west,host=A bytes=23432323i,used_percent=76.2 10").map(|l| l.unwrap()).collect();
-            db.write_lines(&lines).await?;
-            let lines: Vec<_> = parse_lines("cpu,region=west,host=B user=23.1 15")
-                .map(|l| l.unwrap())
-                .collect();
-            db.write_lines(&lines).await?;
-            let lines: Vec<_> = parse_lines("cpu,host=A,new_tag=foo new_field=15.1 20")
-                .map(|l| l.unwrap())
-                .collect();
-            db.write_lines(&lines).await?;
-            let lines: Vec<_> = parse_lines("mem,region=east,host=C val=23432 10")
-                .map(|l| l.unwrap())
-                .collect();
-            db.write_lines(&lines).await?;
+    //         {
+    //             let db = MutableBufferDb::new("mydb");
+    //             let lines: Vec<_> = parse_lines("cpu,region=west,host=A
+    // user=23.2,other=1i,str=\"some string\",b=true 10\ndisk,region=west,host=A
+    // bytes=23432323i,used_percent=76.2 10").map(|l| l.unwrap()).collect();
+    //             db.write_lines(&lines).await?;
+    //             let lines: Vec<_> = parse_lines("cpu,region=west,host=B user=23.1
+    // 15")                 .map(|l| l.unwrap())
+    //                 .collect();
+    //             db.write_lines(&lines).await?;
+    //             let lines: Vec<_> = parse_lines("cpu,host=A,new_tag=foo
+    // new_field=15.1 20")                 .map(|l| l.unwrap())
+    //                 .collect();
+    //             db.write_lines(&lines).await?;
+    //             let lines: Vec<_> = parse_lines("mem,region=east,host=C val=23432
+    // 10")                 .map(|l| l.unwrap())
+    //                 .collect();
+    //             db.write_lines(&lines).await?;
 
-            let chunks = db.table_to_arrow("cpu", cpu_columns).await?;
-            assert_table_eq(expected_cpu_table, &chunks);
+    //             let chunks = db.table_to_arrow("cpu", cpu_columns).await?;
+    //             assert_table_eq(expected_cpu_table, &chunks);
 
-            let chunks = db.table_to_arrow("mem", mem_columns).await?;
-            assert_table_eq(expected_mem_table, &chunks);
+    //             let chunks = db.table_to_arrow("mem", mem_columns).await?;
+    //             assert_table_eq(expected_mem_table, &chunks);
 
-            let chunks = db.table_to_arrow("disk", disk_columns).await?;
-            assert_table_eq(expected_disk_table, &chunks);
-        }
+    //             let chunks = db.table_to_arrow("disk", disk_columns).await?;
+    //             assert_table_eq(expected_disk_table, &chunks);
+    //         }
 
-        // check that it recovers from the wal
-        {
-            let db = MutableBufferDb::restore_from_wal(&dir).await?;
+    // // check that it recovers from the wal
+    // {
+    //     let db = MutableBufferDb::restore_from_wal(&dir).await?;
 
-            let chunks = db.table_to_arrow("cpu", cpu_columns).await?;
-            assert_table_eq(expected_cpu_table, &chunks);
+    //     let chunks = db.table_to_arrow("cpu", cpu_columns).await?;
+    //     assert_table_eq(expected_cpu_table, &chunks);
 
-            let chunks = db.table_to_arrow("mem", mem_columns).await?;
-            assert_table_eq(expected_mem_table, &chunks);
+    //     let chunks = db.table_to_arrow("mem", mem_columns).await?;
+    //     assert_table_eq(expected_mem_table, &chunks);
 
-            let chunks = db.table_to_arrow("disk", disk_columns).await?;
-            assert_table_eq(expected_disk_table, &chunks);
-        }
+    //     let chunks = db.table_to_arrow("disk", disk_columns).await?;
+    //     assert_table_eq(expected_disk_table, &chunks);
+    // }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     #[tokio::test]
     async fn write_and_query() -> Result {
@@ -1554,119 +1410,127 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn recover_partial_entries() -> Result {
-        let mut dir = test_helpers::tmp_dir()?.into_path();
+    //     #[tokio::test]
+    //     async fn recover_partial_entries() -> Result {
+    //         let mut dir = test_helpers::tmp_dir()?.into_path();
 
-        let expected_cpu_table = r#"+--------+------+------+-------+-------------+------+------+---------+-----------+
-| region | host | user | other | str         | b    | time | new_tag | new_field |
-+--------+------+------+-------+-------------+------+------+---------+-----------+
-| west   | A    | 23.2 | 1     | some string | true | 10   |         |           |
-| west   | B    | 23.1 |       |             |      | 15   |         |           |
-|        | A    |      |       |             |      | 20   | foo     | 15.1      |
-+--------+------+------+-------+-------------+------+------+---------+-----------+
-"#;
+    //         let expected_cpu_table =
+    // r#"+--------+------+------+-------+-------------+------+------+---------+-----------+
+    // | region | host | user | other | str         | b    | time | new_tag |
+    // new_field |
+    // +--------+------+------+-------+-------------+------+------+---------+-----------+
+    // | west   | A    | 23.2 | 1     | some string | true | 10   |         |
+    // | | west   | B    | 23.1 |       |             |      | 15   |         |
+    // | |        | A    |      |       |             |      | 20   | foo     |
+    // 15.1      |
+    // +--------+------+------+-------+-------------+------+------+---------+-----------+
+    // "#;
 
-        let expected_mem_table = r#"+--------+------+-------+------+
-| region | host | val   | time |
-+--------+------+-------+------+
-| east   | C    | 23432 | 10   |
-+--------+------+-------+------+
-"#;
-        let expected_disk_table = r#"+--------+------+----------+--------------+------+
-| region | host | bytes    | used_percent | time |
-+--------+------+----------+--------------+------+
-| west   | A    | 23432323 | 76.2         | 10   |
-+--------+------+----------+--------------+------+
-"#;
+    //         let expected_mem_table = r#"+--------+------+-------+------+
+    // | region | host | val   | time |
+    // +--------+------+-------+------+
+    // | east   | C    | 23432 | 10   |
+    // +--------+------+-------+------+
+    // "#;
+    //         let expected_disk_table =
+    // r#"+--------+------+----------+--------------+------+ | region | host |
+    // bytes    | used_percent | time |
+    // +--------+------+----------+--------------+------+
+    // | west   | A    | 23432323 | 76.2         | 10   |
+    // +--------+------+----------+--------------+------+
+    // "#;
 
-        let cpu_columns = &[
-            "region",
-            "host",
-            "user",
-            "other",
-            "str",
-            "b",
-            "time",
-            "new_tag",
-            "new_field",
-        ];
-        let mem_columns = &["region", "host", "val", "time"];
-        let disk_columns = &["region", "host", "bytes", "used_percent", "time"];
-        {
-            let db = MutableBufferDb::try_with_wal("mydb", &mut dir).await?;
-            let lines: Vec<_> = parse_lines("cpu,region=west,host=A user=23.2,other=1i,str=\"some string\",b=true 10\ndisk,region=west,host=A bytes=23432323i,used_percent=76.2 10").map(|l| l.unwrap()).collect();
-            db.write_lines(&lines).await?;
-            let lines: Vec<_> = parse_lines("cpu,region=west,host=B user=23.1 15")
-                .map(|l| l.unwrap())
-                .collect();
-            db.write_lines(&lines).await?;
-            let lines: Vec<_> = parse_lines("cpu,host=A,new_tag=foo new_field=15.1 20")
-                .map(|l| l.unwrap())
-                .collect();
-            db.write_lines(&lines).await?;
-            let lines: Vec<_> = parse_lines("mem,region=east,host=C val=23432 10")
-                .map(|l| l.unwrap())
-                .collect();
-            db.write_lines(&lines).await?;
+    //         let cpu_columns = &[
+    //             "region",
+    //             "host",
+    //             "user",
+    //             "other",
+    //             "str",
+    //             "b",
+    //             "time",
+    //             "new_tag",
+    //             "new_field",
+    //         ];
+    //         let mem_columns = &["region", "host", "val", "time"];
+    //         let disk_columns = &["region", "host", "bytes", "used_percent",
+    // "time"];         {
+    //             let db = MutableBufferDb::try_with_wal("mydb", &mut dir).await?;
+    //             let lines: Vec<_> = parse_lines("cpu,region=west,host=A
+    // user=23.2,other=1i,str=\"some string\",b=true 10\ndisk,region=west,host=A
+    // bytes=23432323i,used_percent=76.2 10").map(|l| l.unwrap()).collect();
+    //             db.write_lines(&lines).await?;
+    //             let lines: Vec<_> = parse_lines("cpu,region=west,host=B user=23.1
+    // 15")                 .map(|l| l.unwrap())
+    //                 .collect();
+    //             db.write_lines(&lines).await?;
+    //             let lines: Vec<_> = parse_lines("cpu,host=A,new_tag=foo
+    // new_field=15.1 20")                 .map(|l| l.unwrap())
+    //                 .collect();
+    //             db.write_lines(&lines).await?;
+    //             let lines: Vec<_> = parse_lines("mem,region=east,host=C val=23432
+    // 10")                 .map(|l| l.unwrap())
+    //                 .collect();
+    //             db.write_lines(&lines).await?;
 
-            let chunks = db.table_to_arrow("cpu", cpu_columns).await?;
-            assert_table_eq(expected_cpu_table, &chunks);
+    //             let chunks = db.table_to_arrow("cpu", cpu_columns).await?;
+    //             assert_table_eq(expected_cpu_table, &chunks);
 
-            let chunks = db.table_to_arrow("mem", mem_columns).await?;
-            assert_table_eq(expected_mem_table, &chunks);
+    //             let chunks = db.table_to_arrow("mem", mem_columns).await?;
+    //             assert_table_eq(expected_mem_table, &chunks);
 
-            let chunks = db.table_to_arrow("disk", disk_columns).await?;
-            assert_table_eq(expected_disk_table, &chunks);
-        }
+    //             let chunks = db.table_to_arrow("disk", disk_columns).await?;
+    //             assert_table_eq(expected_disk_table, &chunks);
+    //         }
 
-        // check that it can recover from the last 2 self-describing entries of the wal
-        {
-            let name = dir.iter().last().unwrap().to_str().unwrap().to_string();
+    //         // check that it can recover from the last 2 self-describing entries
+    // of the wal         {
+    //             let name =
+    // dir.iter().last().unwrap().to_str().unwrap().to_string();
 
-            let wal_builder = WalBuilder::new(&dir);
+    //             let wal_builder = WalBuilder::new(&dir);
 
-            let wal_entries = wal_builder
-                .entries()
-                .context(LoadingWal { database: &name })?;
+    //             let wal_entries = wal_builder
+    //                 .entries()
+    //                 .context(LoadingWal { database: &name })?;
 
-            // Skip the first 2 entries in the wal; only restore from the last 2
-            let wal_entries = wal_entries.skip(2);
+    //             // Skip the first 2 entries in the wal; only restore from the
+    // last 2             let wal_entries = wal_entries.skip(2);
 
-            let (chunks, _stats) = restore_chunks_from_wal(wal_entries)?;
+    //             let (chunks, _stats) = restore_chunks_from_wal(wal_entries)?;
 
-            let db = MutableBufferDb::new_from_chunks(name, chunks);
+    //             let db = MutableBufferDb::new_from_chunks(name, chunks);
 
-            // some cpu
-            let smaller_cpu_table = r#"+------+---------+-----------+------+
-| host | new_tag | new_field | time |
-+------+---------+-----------+------+
-| A    | foo     | 15.1      | 20   |
-+------+---------+-----------+------+
-"#;
-            let smaller_cpu_columns = &["host", "new_tag", "new_field", "time"];
-            let chunks = db.table_to_arrow("cpu", smaller_cpu_columns).await?;
-            assert_table_eq(smaller_cpu_table, &chunks);
+    //             // some cpu
+    //             let smaller_cpu_table = r#"+------+---------+-----------+------+
+    // | host | new_tag | new_field | time |
+    // +------+---------+-----------+------+
+    // | A    | foo     | 15.1      | 20   |
+    // +------+---------+-----------+------+
+    // "#;
+    //             let smaller_cpu_columns = &["host", "new_tag", "new_field",
+    // "time"];             let chunks = db.table_to_arrow("cpu",
+    // smaller_cpu_columns).await?;             
+    // assert_table_eq(smaller_cpu_table, &chunks);
 
-            // all of mem
-            let chunks = db.table_to_arrow("mem", mem_columns).await?;
-            assert_table_eq(expected_mem_table, &chunks);
+    //             // all of mem
+    //             let chunks = db.table_to_arrow("mem", mem_columns).await?;
+    //             assert_table_eq(expected_mem_table, &chunks);
 
-            // no disk
-            let nonexistent_table = db.table_to_arrow("disk", disk_columns).await;
-            assert!(nonexistent_table.is_err());
-            let actual_message = format!("{:?}", nonexistent_table);
-            let expected_message = "TableNameNotFoundInDictionary";
-            assert!(
-                actual_message.contains(expected_message),
-                "Did not find '{}' in '{}'",
-                expected_message,
-                actual_message
-            );
-        }
+    //             // no disk
+    //             let nonexistent_table = db.table_to_arrow("disk",
+    // disk_columns).await;             assert!(nonexistent_table.is_err());
+    //             let actual_message = format!("{:?}", nonexistent_table);
+    //             let expected_message = "TableNameNotFoundInDictionary";
+    //             assert!(
+    //                 actual_message.contains(expected_message),
+    //                 "Did not find '{}' in '{}'",
+    //                 expected_message,
+    //                 actual_message
+    //             );
+    //         }
 
-        Ok(())
-    }
+    //         Ok(())
+    //     }
 
     #[tokio::test]
     async fn db_partition_key() -> Result {
@@ -1685,8 +1549,7 @@ disk bytes=23432323i 1600136510000000000",
 
     #[tokio::test]
     async fn list_column_names() -> Result {
-        let mut dir = test_helpers::tmp_dir()?.into_path();
-        let db = MutableBufferDb::try_with_wal("column_namedb", &mut dir).await?;
+        let db = MutableBufferDb::new("column_namedb");
 
         let lp_data = "h2o,state=CA,city=LA,county=LA temp=70.4 100\n\
                        h2o,state=MA,city=Boston,county=Suffolk temp=72.4 250\n\
@@ -1813,8 +1676,7 @@ disk bytes=23432323i 1600136510000000000",
     async fn list_column_names_predicate() -> Result {
         // Demonstration test to show column names with predicate working
 
-        let mut dir = test_helpers::tmp_dir()?.into_path();
-        let db = MutableBufferDb::try_with_wal("column_namedb", &mut dir).await?;
+        let db = MutableBufferDb::new("column_namedb");
 
         let lp_data = "h2o,state=CA,city=LA,county=LA temp=70.4 100\n\
                        h2o,state=MA,city=Boston,county=Suffolk temp=72.4 250\n\
@@ -1847,8 +1709,7 @@ disk bytes=23432323i 1600136510000000000",
 
     #[tokio::test]
     async fn list_column_values() -> Result {
-        let mut dir = test_helpers::tmp_dir()?.into_path();
-        let db = MutableBufferDb::try_with_wal("column_namedb", &mut dir).await?;
+        let db = MutableBufferDb::new("column_namedb");
 
         let lp_data = "h2o,state=CA,city=LA temp=70.4 100\n\
                        h2o,state=MA,city=Boston temp=72.4 250\n\
@@ -2003,8 +1864,7 @@ disk bytes=23432323i 1600136510000000000",
         // This test checks that everything is wired together
         // correctly.  There are more detailed tests in table.rs that
         // test the generated queries.
-        let mut dir = test_helpers::tmp_dir()?.into_path();
-        let db = MutableBufferDb::try_with_wal("column_namedb", &mut dir).await?;
+        let db = MutableBufferDb::new("column_namedb");
 
         let mut lp_lines = vec![
             "h2o,state=MA,city=Boston temp=70.4 100", // to row 2
@@ -2080,8 +1940,7 @@ disk bytes=23432323i 1600136510000000000",
     #[tokio::test]
     async fn test_query_series_filter() -> Result {
         // check the appropriate filters are applied in the datafusion plans
-        let mut dir = test_helpers::tmp_dir()?.into_path();
-        let db = MutableBufferDb::try_with_wal("column_namedb", &mut dir).await?;
+        let db = MutableBufferDb::new("column_namedb");
 
         let lp_lines = vec![
             "h2o,state=MA,city=Boston temp=70.4 100",
@@ -2130,8 +1989,7 @@ disk bytes=23432323i 1600136510000000000",
 
     #[tokio::test]
     async fn test_query_series_pred_refers_to_column_not_in_table() -> Result {
-        let mut dir = test_helpers::tmp_dir()?.into_path();
-        let db = MutableBufferDb::try_with_wal("column_namedb", &mut dir).await?;
+        let db = MutableBufferDb::new("column_namedb");
 
         let lp_lines = vec![
             "h2o,state=MA,city=Boston temp=70.4 100",
@@ -2190,10 +2048,7 @@ disk bytes=23432323i 1600136510000000000",
         expected = "Unsupported binary operator in expression: #state NotEq Utf8(\"MA\")"
     )]
     async fn test_query_series_pred_neq() {
-        let mut dir = test_helpers::tmp_dir().unwrap().into_path();
-        let db = MutableBufferDb::try_with_wal("column_namedb", &mut dir)
-            .await
-            .unwrap();
+        let db = MutableBufferDb::new("column_namedb");
 
         let lp_lines = vec![
             "h2o,state=MA,city=Boston temp=70.4 100",
@@ -2217,8 +2072,7 @@ disk bytes=23432323i 1600136510000000000",
     async fn test_field_columns() -> Result {
         // Ensure that the database queries are hooked up correctly
 
-        let mut dir = test_helpers::tmp_dir()?.into_path();
-        let db = MutableBufferDb::try_with_wal("column_namedb", &mut dir).await?;
+        let db = MutableBufferDb::new("column_namedb");
 
         let lp_data = vec![
             "h2o,state=MA,city=Boston temp=70.4 50",
@@ -2313,8 +2167,7 @@ disk bytes=23432323i 1600136510000000000",
     #[tokio::test]
     async fn test_field_columns_timestamp_predicate() -> Result {
         // check the appropriate filters are applied in the datafusion plans
-        let mut dir = test_helpers::tmp_dir()?.into_path();
-        let db = MutableBufferDb::try_with_wal("column_namedb", &mut dir).await?;
+        let db = MutableBufferDb::new("column_namedb");
 
         let lp_data = vec![
             "h2o,state=MA,city=Boston temp=70.4 50",

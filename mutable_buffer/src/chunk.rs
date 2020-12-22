@@ -8,8 +8,7 @@ use arrow_deps::{
     },
 };
 use generated_types::wal as wb;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use wal::{Entry as WalEntry, Result as WalResult};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use data_types::{partition_metadata::Table as TableStats, TIME_COLUMN_NAME};
 use query::{
@@ -24,9 +23,6 @@ use snafu::{OptionExt, ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Could not read WAL entry: {}", source))]
-    WalEntryRead { source: wal::Error },
-
     #[snafu(display("Chunk {} not found", chunk))]
     ChunkNotFound { chunk: String },
 
@@ -68,9 +64,6 @@ pub enum Error {
 
     #[snafu(display("Attempt to write table batch without a name"))]
     TableWriteWithoutName,
-
-    #[snafu(display("Error restoring WAL entry, missing partition key"))]
-    MissingPartitionKey,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -457,59 +450,6 @@ impl ExpressionVisitor for SupportVisitor {
 pub struct RestorationStats {
     pub row_count: usize,
     pub tables: BTreeSet<String>,
-}
-
-/// Given a set of WAL entries, restore them into a set of Chunks.
-pub fn restore_chunks_from_wal(
-    wal_entries: impl Iterator<Item = WalResult<WalEntry>>,
-) -> Result<(Vec<Chunk>, RestorationStats)> {
-    let mut stats = RestorationStats::default();
-
-    let mut chunks = BTreeMap::new();
-
-    for wal_entry in wal_entries {
-        let wal_entry = wal_entry.context(WalEntryRead)?;
-        let bytes = wal_entry.as_data();
-
-        let batch = flatbuffers::get_root::<wb::WriteBufferBatch<'_>>(&bytes);
-
-        if let Some(entries) = batch.entries() {
-            for entry in entries {
-                let partition_key = entry.partition_key().context(MissingPartitionKey)?;
-
-                if !chunks.contains_key(partition_key) {
-                    chunks.insert(
-                        partition_key.to_string(),
-                        Chunk::new(partition_key.to_string()),
-                    );
-                }
-
-                let chunk = chunks.get_mut(partition_key).context(ChunkNotFound {
-                    chunk: partition_key,
-                })?;
-
-                chunk.write_entry(&entry)?;
-            }
-        }
-    }
-    let chunks = chunks.into_iter().map(|(_, p)| p).collect::<Vec<Chunk>>();
-
-    // compute the stats
-    for p in &chunks {
-        for (id, table) in &p.tables {
-            let name = p
-                .dictionary
-                .lookup_id(*id)
-                .expect("table id wasn't inserted into dictionary on restore");
-            if !stats.tables.contains(name) {
-                stats.tables.insert(name.to_string());
-            }
-
-            stats.row_count += table.row_count();
-        }
-    }
-
-    Ok((chunks, stats))
 }
 
 #[cfg(test)]
