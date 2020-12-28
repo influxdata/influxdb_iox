@@ -35,33 +35,11 @@ use arrow_deps::{
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Table {} not found", table))]
-    TableNotFound { table: String },
-
-    #[snafu(display(
-        "Column {} said it was type {} but extracting a value of that type failed",
-        column,
-        expected
-    ))]
-    WalValueTypeMismatch { column: String, expected: String },
-
     #[snafu(display("Tag value ID {} not found in dictionary of chunk {}", value, chunk))]
     TagValueIdNotFoundInDictionary {
         value: u32,
         chunk: String,
         source: DictionaryError,
-    },
-
-    #[snafu(display(
-        "Column type mismatch for column {}: can't insert {} into column with type {}",
-        column,
-        inserted_value_type,
-        existing_column_type
-    ))]
-    ColumnTypeMismatch {
-        column: String,
-        existing_column_type: String,
-        inserted_value_type: String,
     },
 
     #[snafu(display("Column error on column {}: {}", column, source))]
@@ -110,18 +88,6 @@ pub enum Error {
         source: DictionaryError,
     },
 
-    #[snafu(display(
-        "Schema mismatch: for column {}: can't insert {} into column with type {}",
-        column,
-        inserted_value_type,
-        existing_column_type
-    ))]
-    SchemaMismatch {
-        column: u32,
-        existing_column_type: String,
-        inserted_value_type: String,
-    },
-
     #[snafu(display("Error building plan: {}", source))]
     BuildingPlan {
         source: datafusion::error::DataFusionError,
@@ -129,12 +95,6 @@ pub enum Error {
 
     #[snafu(display("arrow conversion error: {}", source))]
     ArrowError { source: arrow::error::ArrowError },
-
-    #[snafu(display("Schema mismatch: for column {}: {}", column, source))]
-    InternalSchemaMismatch {
-        column: u32,
-        source: crate::column::Error,
-    },
 
     #[snafu(display(
         "No index entry found for column {} with id {}",
@@ -173,11 +133,6 @@ pub enum Error {
 
     #[snafu(display("Duplicate group column '{}'", column_name))]
     DuplicateGroupColumn { column_name: String },
-
-    #[snafu(display("Internal error converting schema to DFSchema: {}", source))]
-    InternalConvertingSchema {
-        source: datafusion::error::DataFusionError,
-    },
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 

@@ -17,11 +17,9 @@ use crate::{
 };
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use arrow_deps::{
-    arrow,
     arrow::{datatypes::Schema as ArrowSchema, record_batch::RecordBatch},
     datafusion::{
         datasource::MemTable, error::DataFusionError, execution::context::ExecutionContext,
@@ -44,15 +42,6 @@ use tokio::sync::RwLock;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Dir {:?} invalid for DB", dir))]
-    OpenDb { dir: PathBuf },
-
-    #[snafu(display("Database {} doesn't exist", database))]
-    DatabaseNotFound { database: String },
-
-    #[snafu(display("Chunk {} is full", chunk))]
-    ChunkFull { chunk: String },
-
     #[snafu(display("Error in {}: {}", source_module, source))]
     PassThrough {
         source_module: &'static str,
@@ -97,18 +86,6 @@ pub enum Error {
     ))]
     UnsupportedColumnTypeForListingValues { column_name: String },
 
-    #[snafu(display("Table {} not found in chunk {}", table, chunk))]
-    TableNotFoundInChunk { table: u32, chunk: String },
-
-    #[snafu(display("Internal Error: Column {} not found", column))]
-    InternalColumnNotFound { column: u32 },
-
-    #[snafu(display("Unexpected insert error"))]
-    InsertError,
-
-    #[snafu(display("arrow conversion error: {}", source))]
-    ArrowError { source: arrow::error::ArrowError },
-
     #[snafu(display("id conversion error"))]
     IdConversionError { source: std::num::TryFromIntError },
 
@@ -130,26 +107,8 @@ pub enum Error {
         statement: Box<Statement>,
     },
 
-    #[snafu(display("query error {} on query {}", message, query))]
-    GenericQueryError { message: String, query: String },
-
     #[snafu(display("replicated write from writer {} missing payload", writer))]
     MissingPayload { writer: u32 },
-
-    #[snafu(display("chunk {} not found", partition_key))]
-    ChunkNotFound { partition_key: String },
-
-    #[snafu(display(
-        "error converting chunk table to arrow on chunk {} with table {}: {}",
-        partition_key,
-        table_name,
-        source
-    ))]
-    ChunkTableToArrowError {
-        partition_key: String,
-        table_name: String,
-        source: crate::chunk::Error,
-    },
 }
 
 impl From<crate::table::Error> for Error {
@@ -1116,21 +1075,21 @@ struct ArrowTable {
 mod tests {
     use super::*;
     use arrow_deps::datafusion::prelude::*;
-    use query::exec::{field::FieldIndexes, seriesset::SeriesSetItem};
-
     use query::{
         exec::fieldlist::{Field, FieldList},
         exec::{
-            seriesset::{Error as SeriesSetError, SeriesSet},
+            field::FieldIndexes,
+            seriesset::{Error as SeriesSetError, SeriesSet, SeriesSetItem},
             Executor,
         },
         predicate::PredicateBuilder,
         TSDatabase,
     };
 
-    use arrow::{
+    use arrow_deps::arrow::{
         array::{Array, StringArray},
         datatypes::DataType,
+        record_batch::RecordBatch,
         util::pretty::pretty_format_batches,
     };
     use influxdb_line_protocol::parse_lines;
@@ -1148,7 +1107,7 @@ mod tests {
     // output. The default failure message uses Debug formatting, which prints
     // newlines as `\n`. This prints the pretty_format_batches using Display so
     // it's easier to read the tables.
-    fn assert_table_eq(table: &str, chunks: &[arrow::record_batch::RecordBatch]) {
+    fn assert_table_eq(table: &str, chunks: &[RecordBatch]) {
         let res = pretty_format_batches(chunks).unwrap();
         assert_eq!(table, res, "\n\nleft:\n\n{}\nright:\n\n{}", table, res);
     }

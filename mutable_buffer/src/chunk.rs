@@ -23,16 +23,6 @@ use snafu::{OptionExt, ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Chunk {} not found", chunk))]
-    ChunkNotFound { chunk: String },
-
-    #[snafu(display("Column name {} not found in dictionary of chunk {}", column, chunk))]
-    ColumnNameNotFoundInDictionary {
-        column: String,
-        chunk: String,
-        source: crate::dictionary::Error,
-    },
-
     #[snafu(display("Error writing table '{}': {}", table_name, source))]
     TableWrite {
         table_name: String,

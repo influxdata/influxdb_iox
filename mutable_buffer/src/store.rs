@@ -16,12 +16,6 @@ pub enum Error {
         dir: PathBuf,
         source: std::io::Error,
     },
-
-    #[snafu(display("Error from database: {}", source))]
-    DatabaseError { source: crate::database::Error },
-
-    #[snafu(display("Error reading metadata: {}", source))]
-    ReadMetadataError { source: std::io::Error },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
