@@ -62,6 +62,6 @@ rm -rf target/criterion # remove any old results
 #cargo bench -- float_encode_sequential/100000 || (echo "Error running benchmarks. Aborting." && exit 3)
 cargo bench -- float_encode_sequential/100000 || (echo "Error running benchmarks. Aborting." && exit 3)
 # now, run the scraper and append results
-$SCRIPT_DIR/bench_scraper.sh $SOURCE_DIR | tee -a $RESULTS_FILE
+$SCRIPT_DIR/scrape_benches.sh $SOURCE_DIR | tee -a $RESULTS_FILE
 set +x
 popd
