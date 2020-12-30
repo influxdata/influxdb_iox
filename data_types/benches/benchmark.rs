@@ -4,7 +4,7 @@ use data_types::data::{lines_to_replicated_write as lines_to_rw, ReplicatedWrite
 use data_types::database_rules::{DatabaseRules, PartitionTemplate, TemplatePart};
 use generated_types::wal as wb;
 use influxdb_line_protocol::{parse_lines, ParsedLine};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::time::Duration;
 
@@ -14,7 +14,7 @@ const STARTING_TIMESTAMP_NS: i64 = 0;
 #[derive(Debug)]
 struct Config {
     // total number of rows written in, regardless of the number of partitions
-    line_count: i64,
+    line_count: usize,
     // this will be the number of write buffer entries per replicated write
     partition_count: usize,
     // the number of tables (measurements) in each replicated write
@@ -24,8 +24,8 @@ struct Config {
 }
 
 impl Config {
-    fn lines_per_partition(&self) -> i64 {
-        self.line_count / self.partition_count as i64
+    fn lines_per_partition(&self) -> usize {
+        self.line_count / self.partition_count
     }
 }
 
@@ -35,7 +35,7 @@ impl fmt::Display for Config {
             f,
             "lines: {} ({} per partition) | partitions: {} | tables per: {} | unique tag values per: {}",
             self.line_count,
-            self.line_count / self.partition_count as i64,
+            self.lines_per_partition(),
             self.partition_count,
             self.table_count,
             self.tag_cardinality
@@ -79,7 +79,7 @@ fn bytes_into_struct(c: &mut Criterion) {
             let mut db = Db::default();
             db.deserialize_write(data);
             assert_eq!(db.partition_count(), config.partition_count);
-            assert_eq!(db.row_count() as i64, config.line_count);
+            assert_eq!(db.row_count(), config.line_count);
             assert_eq!(db.measurement_count(), config.table_count);
             assert_eq!(db.tag_cardinality(), config.tag_cardinality);
         });
@@ -92,10 +92,11 @@ fn run_group(
     bench: impl Fn(&[ParsedLine], &DatabaseRules, &Config, &mut Bencher<WallTime>),
 ) {
     let mut group = c.benchmark_group(group_name);
+    group.sample_size(50);
     group.measurement_time(Duration::from_secs(10));
     let rules = rules_with_time_partition();
 
-    for partition_count in [1, 10, 100, 1000].iter() {
+    for partition_count in [1, 100].iter() {
         let config = Config {
             line_count: 1_000,
             partition_count: *partition_count,
@@ -113,7 +114,7 @@ fn run_group(
         });
     }
 
-    for table_count in [1, 10, 100, 1000].iter() {
+    for table_count in [1, 100].iter() {
         let config = Config {
             line_count: 1_000,
             partition_count: 1,
@@ -131,7 +132,7 @@ fn run_group(
         });
     }
 
-    for tag_cardinality in [1, 10, 100, 1000].iter() {
+    for tag_cardinality in [1, 100].iter() {
         let config = Config {
             line_count: 1_000,
             partition_count: 1,
@@ -292,11 +293,11 @@ impl Db {
     }
 
     fn measurement_count(&self) -> usize {
-        let mut measurements = BTreeMap::new();
+        let mut measurements = BTreeSet::new();
 
         for p in self.partitions.values() {
             for t in p.tables.values() {
-                measurements.insert(t.name.to_string(), ());
+                measurements.insert(t.name.to_string());
             }
         }
 
@@ -340,14 +341,14 @@ fn create_lp(config: &Config) -> String {
 
     let lines_per_partition = config.lines_per_partition();
     assert!(
-        lines_per_partition >= config.table_count as i64,
+        lines_per_partition >= config.table_count,
         format!(
             "can't fit {} unique tables (measurements) into partition with {} rows",
             config.table_count, lines_per_partition
         )
     );
     assert!(
-        lines_per_partition >= config.tag_cardinality as i64,
+        lines_per_partition >= config.tag_cardinality,
         format!(
             "can't fit {} unique tags into partition with {} rows",
             config.tag_cardinality, lines_per_partition
@@ -355,10 +356,10 @@ fn create_lp(config: &Config) -> String {
     );
 
     for line in 0..config.line_count {
-        let partition_number = line / lines_per_partition % config.partition_count as i64;
-        let timestamp = STARTING_TIMESTAMP_NS + (partition_number * NEXT_ENTRY_NS);
-        let mn = line % config.table_count as i64;
-        let tn = line % config.tag_cardinality as i64;
+        let partition_number = line / lines_per_partition % config.partition_count;
+        let timestamp = STARTING_TIMESTAMP_NS + (partition_number as i64 * NEXT_ENTRY_NS);
+        let mn = line % config.table_count;
+        let tn = line % config.tag_cardinality;
         writeln!(
             s,
             "processes-{mn},host=my.awesome.computer.example.com-{tn} blocked=0i,zombies=0i,stopped=0i,running=42i,sleeping=999i,total=1041i,unknown=0i,idle=0i {timestamp}",
