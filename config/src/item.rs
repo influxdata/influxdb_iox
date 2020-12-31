@@ -186,8 +186,8 @@ impl ConfigItem<Option<u32>> for WriterID {
     fn long_description(&self) -> Option<String> {
         Some(
             "The identifier for the server. Used for writing to object storage and as\
-             an identifier that is added to replicated writes, WAL segments and Chunks.\
-             Must be unique in a group of connected or semi-connected IOx servers.\
+             an identifier that is added to replicated writes, WAL segments and Chunks. \
+             Must be unique in a group of connected or semi-connected IOx servers. \
               Must be a number that can be represented by a 32-bit unsigned integer."
                 .into(),
         )

@@ -124,8 +124,8 @@ You can see a list of the current configuration values by running `influxdb_iox 
 You can see a list of all available configuration items using the `influxdb_iox config help` 
 command.
 
-Should you desire specifying config via a file, you can do using a `.env` formatted file in `$HOME/.influxdb_iox/config`. 
-Note that you can save the current config values by saving the otuput of 
+Should you desire specifying config via a file, you can do so using a `.env` formatted file in `$HOME/.influxdb_iox/config`. 
+Note that you can save the current config values by saving the output of 
 `influxdb_iox config show` into `$HOME/.influxdb_iox/config`
 
 
