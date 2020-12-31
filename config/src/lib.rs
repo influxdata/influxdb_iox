@@ -429,14 +429,28 @@ The address on which IOx will serve HTTP API requests
     #[test]
     fn test_var_substitution_in_file() {
         let config_file = make_temp_file(
-            "HOSTNAME=127.0.0.1\n\
-             INFLUXDB_IOX_BIND_ADDR=${HOSTNAME}:3030\n\
-             INFLUXDB_IOX_GRPC_BIND_ADDR=${HOSTNAME}:4040",
+            "THE_HOSTNAME=127.0.0.1\n\
+             INFLUXDB_IOX_BIND_ADDR=${THE_HOSTNAME}:3030\n\
+             INFLUXDB_IOX_GRPC_BIND_ADDR=${THE_HOSTNAME}:4040",
         );
 
         let config = Config::try_from_path_then_map(config_file.path(), HashMap::new()).unwrap();
         assert_eq!(&config.http_bind_address.to_string(), "127.0.0.1:3030");
         assert_eq!(&config.grpc_bind_address.to_string(), "127.0.0.1:4040");
+    }
+
+    /// test for using variable substitution in config file with
+    /// existing environment.  Again, this is really a test for .env
+    /// but I use this test to document the expected behavior of iox
+    /// config files.
+    #[test]
+    fn test_var_substitution_in_file_from_env() {
+        std::env::set_var("MY_AWESOME_HOST", "192.100.100.42");
+        let config_file = make_temp_file("INFLUXDB_IOX_BIND_ADDR=${MY_AWESOME_HOST}:3030\n");
+
+        let config = Config::try_from_path_then_map(config_file.path(), HashMap::new()).unwrap();
+        assert_eq!(&config.http_bind_address.to_string(), "192.100.100.42:3030");
+        std::env::remove_var("MY_AWESOME_HOST");
     }
 
     /// test for using comments in config file (.env style)
