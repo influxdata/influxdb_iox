@@ -63,7 +63,7 @@ function main {
 #    "std_dev": .. (same structure )
 #  }
 #
-# Output: (line protofol)
+# Output: (line protocol)
 #
 # bench,gitsha=<gitsha>,hostname=trogdor,group_name=float_encode_sequential,bench_name=10000 mean=93193.31282952648,mean_standard_error=444.9439871182596,median=91426.08165568294,median_standard_error=505.4331525578268
 function process_file {

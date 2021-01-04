@@ -60,7 +60,7 @@ git checkout $GITSHA || (echo "Error checking out code. Aborting." && exit 2)
 rm -rf target/criterion # remove any old results
 # Debugging tip: use a command like this to run a subset of the benchmarks:
 #cargo bench -- float_encode_sequential/100000 || (echo "Error running benchmarks. Aborting." && exit 3)
-cargo bench -- float_encode_sequential/100000 || (echo "Error running benchmarks. Aborting." && exit 3)
+cargo bench || (echo "Error running benchmarks. Aborting." && exit 3)
 # now, run the scraper and append results
 $SCRIPT_DIR/scrape_benches.sh $SOURCE_DIR | tee -a $RESULTS_FILE
 set +x
