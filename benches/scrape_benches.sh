@@ -96,11 +96,7 @@ function process_file {
     hostname=`hostname`
     echo -n "bench,gitsha=$GITSHA,hostname=${hostname},group_name=$group_name,bench_name=$bench_name "
 
-    # if this was done in a single jq command it would definitely be faster...
-    echo -n "mean="`jq '.mean.point_estimate' "$estimates_file"`
-    echo -n ",mean_standard_error="`jq '.mean.standard_error' "$estimates_file"`
-    echo -n ",median="`jq '.median.point_estimate' "$estimates_file"`
-    echo -n ",median_standard_error="`jq '.median.standard_error' "$estimates_file"`
+    echo -n `jq  -j '"mean=" + (.mean.point_estimate | tostring), ",mean_standard_error=" + (.mean.standard_error | tostring), ",median=" + (.median.point_estimate | tostring), ",median_standard_error=" + (.median.standard_error | tostring)' "$estimates_file"`
 
     echo -n " $TIMESTAMP"
     echo
