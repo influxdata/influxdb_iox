@@ -15,7 +15,7 @@
 //! │    │   Partition    │                         │
 //! │    └────────────────┘                         │
 //! │             │  one open Chunk                 │
-//! │             │  0 or more closed               │
+//! │             │  zero or more closed            │
 //! │             ▼  Chunks                         │
 //! │    ┌────────────────┐                         │
 //! │    │     Chunk      │                         │
@@ -35,13 +35,13 @@
 //! └───────────────────────────────────────────────┘
 //!
 //! Each row of data is routed into a particular partitions based on
-//! column values in that row. The partition's active (mutable) chunk
+//! column values in that row. The partition's open chunk
 //! is updated with the new data.
 //!
-//! The currently active open chunk in a partition can be rolled
+//! The currently open chunk in a partition can be rolled
 //! over. When this happens, the chunk is closed (becomes read-only)
 //! and stops taking writes. Any new writes to the same partition will
-//! create a a new active open chunk.
+//! create a new active open chunk.
 //!
 //! Note: Strings in the mutable buffer are dictionary encoded (via
 //! string interning) to reduce memory usage. This dictionary encoding

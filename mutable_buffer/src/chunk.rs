@@ -64,7 +64,7 @@ pub struct Chunk {
     /// this is not the same as the timestamps on the data itself
     pub time_of_first_write: Option<DateTime<Utc>>,
 
-    /// Most recent time at which da ata write was initiated into this
+    /// Most recent time at which data write was initiated into this
     /// chunk. Note this is not the same as the timestamps on the data
     /// itself
     pub time_of_last_write: Option<DateTime<Utc>>,
@@ -226,7 +226,7 @@ impl Chunk {
         Ok(())
     }
 
-    /// Tell this chunk that it has been marked as closed
+    /// Mark the chunk as closed
     pub fn mark_closed(&mut self) {
         assert!(self.time_closed.is_none());
         self.time_closed = Some(Utc::now())

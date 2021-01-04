@@ -11,7 +11,7 @@ use snafu::{ResultExt, Snafu};
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display(
-        "Error writing to active chunk of partition with key '{}': {}",
+        "Error writing to open chunk of partition with key '{}': {}",
         partition_key,
         source
     ))]
@@ -50,15 +50,16 @@ pub struct Partition {
     /// The partition key that is shared by all Chunks in this Partition
     key: String,
 
-    /// The active open Chunk; All new writes go to this chunk
+    /// The currently active, open Chunk; All new writes go to this chunk
     open_chunk: Chunk,
 
     /// Closed chunks which can no longer be written
     /// key: chunk_id, value: Chunk
     ///
-    /// List of chunks, ordered by chunk id in a BTreeMap. The
-    /// ordering is used when `iter()` is used to iterate over chunks
-    /// in their creation order
+    /// List of chunks, ordered by chunk id (and thus creation time).
+    /// The ordereing is achieved with a BTreeMap. The ordering is
+    /// used when `iter()` is used to iterate over chunks in their
+    /// creation order
     closed_chunks: BTreeMap<u64, Arc<Chunk>>,
 
     /// Responsible for assigning ids to chunks. Eventually, this might
@@ -120,7 +121,7 @@ impl Partition {
         }
     }
 
-    /// Close the current currently open chunk and create a new open
+    /// Close the currently open chunk and create a new open
     /// chunk. The newly closed chunk is adding to the list of closed
     /// chunks if it had data, and is returned.
     ///
@@ -183,8 +184,8 @@ pub struct PartitionChunkInfo {
 }
 
 /// Iterates over chunks in a partition. Always iterates over chunks
-/// in their creation (id) order (closed chunks first, followed by the
-/// open chunk). This allows data to be read out in the same order it
+/// in their creation (id) order: Closed chunks first, followed by the
+/// open chunk, if any. This allows data to be read out in the same order it
 /// was written in
 pub struct ChunkIter<'a> {
     partition: &'a Partition,
