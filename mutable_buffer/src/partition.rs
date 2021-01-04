@@ -524,7 +524,7 @@ mod tests {
         let mut partition = Partition::new("a_key");
         let e = partition.drop_chunk(0).unwrap_err();
         assert_eq!(
-            "Can not drop active chunk '0' of partition with key 'a_key'",
+            "Can not drop open chunk '0' of partition with key 'a_key'",
             format!("{}", e)
         );
 
