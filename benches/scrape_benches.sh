@@ -2,11 +2,11 @@
 #
 # Scrapes the most recent run of all criterion benchmark results into lineprotocol for analysis
 #
-# Generate date:
+# Generate data:
 #  (cd ~/Codes/influxdb_iox && cargo bench)
 #
 # Scrape data:
-#  ./bench_scraper /Users/alamb/Software/influxdb_iox2
+#  ./scrape_benches.sh /Users/alamb/Software/influxdb_iox2
 #
 # To load to
 
@@ -14,8 +14,8 @@
 function main {
     SOURCE_DIR=$1
     if [ -z "$SOURCE_DIR" ] ; then
-        echo "Error: target directory not specified"
-        echo "Usage: $0 <influxdb_ioxdir>"
+        echo "Error: influxdb_iox source directory not specified"
+        echo "Usage: $0 <influxdb_iox_dir>"
         exit 1
     fi
 
