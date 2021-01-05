@@ -24,13 +24,19 @@ Log is written to stdout
 Performance results are appended to iox_bench.lp
 EOF
 
-# Location of this script (assumes that
+# Location of this script
 # https://stackoverflow.com/questions/59895/how-to-get-the-source-directory-of-a-bash-script-from-within-the-script-itself
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 SOURCE_DIR=$1
 if [ -z "$SOURCE_DIR" ] ; then
     echo "Error: no source directory specified"
+    echo "$USAGE"
+    exit 1
+fi
+
+if [ ! -d "$SOURCE_DIR" ] ; then
+    echo "Error: Not a directory: $SOURCE_DIR"
     echo "$USAGE"
     exit 1
 fi
