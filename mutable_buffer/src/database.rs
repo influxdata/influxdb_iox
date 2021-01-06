@@ -1943,7 +1943,7 @@ mod tests {
 
     /// write lines into this database
     async fn write_lines(database: &MutableBufferDb, lines: &[ParsedLine<'_>]) {
-        let mut planner = query::test::TestLPWritePlanner::default();
-        planner.write_lines(database, lines).await.unwrap()
+        let mut writer = query::test::TestLPWriter::default();
+        writer.write_lines(database, lines).await.unwrap()
     }
 }

@@ -144,8 +144,8 @@ impl TestDatabase {
             .collect::<Result<Vec<_>, _>>()
             .unwrap_or_else(|_| panic!("parsing line protocol: {}", lp_data));
 
-        let mut planner = TestLPWritePlanner::default();
-        planner.write_lines(self, &parsed_lines).await.unwrap();
+        let mut writer = TestLPWriter::default();
+        writer.write_lines(self, &parsed_lines).await.unwrap();
 
         // Writes parsed lines into this database
         let mut saved_lines = self.saved_lines.lock().await;
@@ -528,15 +528,15 @@ impl DatabaseStore for TestDatabaseStore {
     }
 }
 
-/// Planner to write data into test databases (handles creating sequence numbers
-/// and writer ids
+/// Helper for writing line protocol data directly into test databases
+/// (handles creating sequence numbers and writer ids
 #[derive(Debug, Default)]
-pub struct TestLPWritePlanner {
+pub struct TestLPWriter {
     writer_id: u32,
     sequence_number: u64,
 }
 
-impl TestLPWritePlanner {
+impl TestLPWriter {
     // writes data in LineProtocol format into a database
     pub async fn write_lines<D: Database>(
         &mut self,

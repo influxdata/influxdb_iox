@@ -1,8 +1,10 @@
 //! The main query planners of InfluxDB IOx
 
-/// Plans queries agains the InfluxDB Line Protocol data model (`ParsedLine`
-/// structures) and provides an interface to query that data. The query methods
-/// on this trait such as `tag_columns` are specific to this data model.
+/// Plans queries that originate from the InfluxDB Storage gRPC
+/// interface, which are in terms of the InfluxDB Line Protocol data
+/// model (the `ParsedLine` structures) and provides an interface to query
+/// that data. The query methods on this trait such as `tag_columns`
+/// are specific to this data model.
 ///
 /// The IOx storage engine implements this trait to provide Timeseries
 /// specific queries, but also provides more generic access to the
@@ -20,7 +22,7 @@
 /// categories with the same data type, columns of different
 /// categories are treated differently in the different query types.
 #[derive(Debug)]
-pub struct TSQueryPlanner {
+pub struct InfluxRPCPlanner {
     // Example methods:
 //
 // async fn table_names(&self, database: impl Database, predicate: Predicate) ->
