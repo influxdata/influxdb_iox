@@ -2,7 +2,7 @@
 
 /// Plans queries agains the InfluxDB Line Protocol data model (`ParsedLine`
 /// structures) and provides an interface to query that data. The query methods
-/// on this trait such as `tag_columns are specific to this data model.
+/// on this trait such as `tag_columns` are specific to this data model.
 ///
 /// The IOx storage engine implements this trait to provide Timeseries
 /// specific queries, but also provides more generic access to the

@@ -22,10 +22,10 @@ pub enum Error {
         source: mutable_buffer::chunk::Error,
     },
 
-    #[snafu(display("Can not write to this database: no mutable buffer configured"))]
+    #[snafu(display("Cannot write to this database: no mutable buffer configured"))]
     DatatbaseNotWriteable {},
 
-    #[snafu(display("Can not read to this database: no mutable buffer configured"))]
+    #[snafu(display("Cannot read to this database: no mutable buffer configured"))]
     DatabaseNotReadable {},
 
     #[snafu(display("Error rolling partition: {}", source))]
