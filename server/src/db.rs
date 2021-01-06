@@ -154,7 +154,6 @@ impl PartitionChunk for DBChunk {
 
 #[async_trait]
 impl Database for Db {
-    type Chunk = DBChunk;
     type Error = Error;
 
     // Note that most of these traits will eventually be removed from
@@ -246,8 +245,6 @@ impl Database for Db {
 
 #[async_trait]
 impl SQLDatabase for Db {
-    type Chunk = DBChunk;
-
     type Error = Error;
 
     async fn query(

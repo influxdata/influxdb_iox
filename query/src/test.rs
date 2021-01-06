@@ -268,7 +268,6 @@ fn predicate_to_test_string(predicate: &Predicate) -> String {
 
 #[async_trait]
 impl Database for TestDatabase {
-    type Chunk = TestChunk;
     type Error = TestError;
 
     /// Adds the replicated write to this database
@@ -413,7 +412,6 @@ impl Database for TestDatabase {
 
 #[async_trait]
 impl SQLDatabase for TestDatabase {
-    type Chunk = TestChunk;
     type Error = TestError;
 
     /// Execute the specified query and return arrow record batches with the

@@ -33,8 +33,6 @@ use self::predicate::{Predicate, TimestampRange};
 /// trait and into the various query planners.
 #[async_trait]
 pub trait Database: Debug + Send + Sync {
-    /// the type of partition that is stored by this database
-    type Chunk: Send + Sync + 'static + PartitionChunk;
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Stores the replicated write in the write buffer and, if enabled, the
@@ -93,8 +91,6 @@ pub trait Database: Debug + Send + Sync {
 
 #[async_trait]
 pub trait SQLDatabase: Debug + Send + Sync {
-    /// the type of partition that is stored by this database
-    type Chunk: Send + Sync + 'static + PartitionChunk;
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Execute the specified query and return arrow record batches with the

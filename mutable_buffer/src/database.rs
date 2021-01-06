@@ -194,7 +194,6 @@ impl MutableBufferDb {
 
 #[async_trait]
 impl Database for MutableBufferDb {
-    type Chunk = crate::chunk::Chunk;
     type Error = Error;
 
     async fn store_replicated_write(&self, write: &ReplicatedWrite) -> Result<(), Self::Error> {
@@ -298,7 +297,6 @@ impl Database for MutableBufferDb {
 
 #[async_trait]
 impl SQLDatabase for MutableBufferDb {
-    type Chunk = Chunk;
     type Error = Error;
 
     async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, Self::Error> {
