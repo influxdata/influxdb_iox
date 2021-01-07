@@ -102,6 +102,11 @@ impl Db {
             DatatbaseNotWriteable {}.fail()
         }
     }
+
+    /// Returns the next write sequence number
+    pub fn next_sequence(&self) -> u64 {
+        self.sequence.fetch_add(1, Ordering::SeqCst)
+    }
 }
 
 impl PartialEq for Db {
@@ -110,12 +115,6 @@ impl PartialEq for Db {
     }
 }
 impl Eq for Db {}
-
-impl Db {
-    pub fn next_sequence(&self) -> u64 {
-        self.sequence.fetch_add(1, Ordering::SeqCst)
-    }
-}
 
 #[async_trait]
 impl Database for Db {
