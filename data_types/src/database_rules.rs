@@ -21,10 +21,12 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub struct DatabaseRules {
     /// Template that generates a partition key for each row inserted into the
     /// db
+    #[serde(default)]
     pub partition_template: PartitionTemplate,
     /// If `store_locally` is set to `true`, this server will store writes and
     /// replicated writes in a local write buffer database. This is step #4
     /// from the diagram.
+    #[serde(default)]
     pub store_locally: bool,
     /// The set of host groups that data should be replicated to. Which host a
     /// write goes to within a host group is determined by consistent hashing of
@@ -36,16 +38,19 @@ pub struct DatabaseRules {
     /// before returning success. Its purpose is to ensure write durability,
     /// rather than write availability for query (this is covered by
     /// subscriptions).
+    #[serde(default)]
     pub replication: Vec<HostGroupId>,
     /// The minimum number of host groups to replicate a write to before success
     /// is returned. This can be overridden on a per request basis.
     /// Replication will continue to write to the other host groups in the
     /// background.
+    #[serde(default)]
     pub replication_count: u8,
     /// How long the replication queue can get before either rejecting writes or
     /// dropping missed writes. The queue is kept in memory on a
     /// per-database basis. A queue size of zero means it will only try to
     /// replicate synchronously and drop any failures.
+    #[serde(default)]
     pub replication_queue_max_size: usize,
     /// `subscriptions` are used for query servers to get data via either push
     /// or pull as it arrives. They are separate from replication as they
@@ -53,12 +58,14 @@ pub struct DatabaseRules {
     /// that want to subscribe to some subset of data being written in. This
     /// could either be specific partitions, ranges of partitions, tables, or
     /// rows matching some predicate. This is step #3 from the diagram.
+    #[serde(default)]
     pub subscriptions: Vec<Subscription>,
 
     /// If set to `true`, this server should answer queries from one or more of
     /// of its local write buffer and any read-only partitions that it knows
     /// about. In this case, results will be merged with any others from the
     /// remote goups or read only partitions.
+    #[serde(default)]
     pub query_local: bool,
     /// Set `primary_query_group` to a host group if remote servers should be
     /// issued queries for this database. All hosts in the group should be
@@ -71,7 +78,9 @@ pub struct DatabaseRules {
     /// partition. We'd set the primary group to be the 4 hosts in the same
     /// AZ as this one, and the secondary groups as the hosts in the other 2
     /// AZs.
+    #[serde(default)]
     pub primary_query_group: Option<HostGroupId>,
+    #[serde(default)]
     pub secondary_query_groups: Vec<HostGroupId>,
 
     /// Use `read_only_partitions` when a server should answer queries for
@@ -80,10 +89,12 @@ pub struct DatabaseRules {
     /// collection of partitions and then telling it to also pull
     /// data from the replication servers (writes that haven't been snapshotted
     /// into a partition).
+    #[serde(default)]
     pub read_only_partitions: Vec<PartitionId>,
 
     /// When set this will buffer WAL writes in memory based on the
     /// configuration.
+    #[serde(default)]
     pub wal_buffer_config: Option<WalBufferConfig>,
 }
 

@@ -458,7 +458,9 @@ async fn create_database<M: ConnectionManager + Send + Sync + Debug + 'static>(
         .clone();
     let body = parse_body(req).await?;
 
-    let rules: DatabaseRules = serde_json::from_slice(body.as_ref()).context(InvalidRequestBody)?;
+    let rules: DatabaseRules = serde_json::from_slice(body.as_ref())
+        .context(InvalidRequestBody)
+        .unwrap();
     server
         .create_database(db_name, rules)
         .await
@@ -826,11 +828,7 @@ mod tests {
         server.set_id(1).await;
         let server_url = test_server(server.clone());
 
-        let rules = DatabaseRules {
-            store_locally: true,
-            ..Default::default()
-        };
-        let data = serde_json::to_vec(&rules).unwrap();
+        let data = r#"{"store_locally": true}"#;
 
         let database_name = DatabaseName::new("foo_bar").unwrap();
 
@@ -848,6 +846,8 @@ mod tests {
 
         let db = server.db(&database_name).await.unwrap();
         assert_eq!(db.name, database_name.to_string());
+        let db_rules = server.db_rules(&database_name).await.unwrap();
+        assert_eq!(db_rules.store_locally, true);
     }
 
     #[tokio::test]
