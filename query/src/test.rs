@@ -20,7 +20,7 @@ use data_types::{
 use influxdb_line_protocol::{parse_lines, ParsedLine};
 
 use async_trait::async_trait;
-use snafu::{OptionExt, Snafu};
+use snafu::{OptionExt, ResultExt, Snafu};
 use std::{collections::BTreeMap, collections::BTreeSet, sync::Arc};
 
 use std::fmt::Write;
@@ -551,8 +551,21 @@ impl TestLPWriter {
         database
             .store_replicated_write(&write)
             .await
-            .map_err(|e| TestError::DatabaseWrite {
-                source: Box::new(e),
-            })
+            .map_err(|e| Box::new(e) as _)
+            .context(DatabaseWrite)
+    }
+
+    /// Writes line protocol formatted data in lp_data to `database`
+    pub async fn write_lp_string<D: Database>(
+        &mut self,
+        database: &D,
+        lp_data: &str,
+    ) -> Result<()> {
+        let lines = parse_lines(lp_data)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Box::new(e) as _)
+            .context(DatabaseWrite)?;
+
+        self.write_lines(database, &lines).await
     }
 }
