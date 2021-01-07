@@ -13,10 +13,7 @@ use super::{org_and_bucket_to_database, OrgBucketMappingError};
 
 // Influx crates
 use arrow_deps::arrow;
-use data_types::{
-    DatabaseName,
-    database_rules::DatabaseRules
-};
+use data_types::{database_rules::DatabaseRules, DatabaseName};
 use influxdb_line_protocol::parse_lines;
 use object_store::path::ObjectStorePath;
 use query::SQLDatabase;
@@ -844,8 +841,7 @@ mod tests {
 
         check_response("create_database", response, StatusCode::OK, "").await;
 
-        let db = server.db(&database_name).await.unwrap();
-        assert_eq!(db.name, database_name.to_string());
+        server.db(&database_name).await.unwrap();
         let db_rules = server.db_rules(&database_name).await.unwrap();
         assert_eq!(db_rules.store_locally, true);
     }
