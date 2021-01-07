@@ -17,7 +17,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// DatabaseRules contains the rules for replicating data, sending data to
 /// subscribers, and querying data for a single database.
-#[derive(Debug, Serialize, Deserialize, Default, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Default, Eq, PartialEq, Clone)]
 pub struct DatabaseRules {
     /// Template that generates a partition key for each row inserted into the
     /// db
@@ -100,7 +100,7 @@ impl DatabaseRules {
 /// WalBufferConfig defines the configuration for buffering data from the WAL in
 /// memory. This buffer is used for asynchronous replication and to collect
 /// segments before sending them to object storage.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct WalBufferConfig {
     /// The size the WAL buffer should be limited to. Once the buffer gets to
     /// this size it will drop old segments to remain below this size, but
@@ -145,7 +145,7 @@ pub enum WalBufferRollover {
 ///
 /// The key is constructed in order of the template parts; thus ordering changes
 /// what partition key is generated.
-#[derive(Debug, Serialize, Deserialize, Default, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Default, Eq, PartialEq, Clone)]
 pub struct PartitionTemplate {
     pub parts: Vec<TemplatePart>,
 }
@@ -182,7 +182,7 @@ impl PartitionTemplate {
 
 /// `TemplatePart` specifies what part of a row should be used to compute this
 /// part of a partition key.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub enum TemplatePart {
     Table,
     Column(String),
@@ -193,7 +193,7 @@ pub enum TemplatePart {
 
 /// `RegexCapture` is for pulling parts of a string column into the partition
 /// key.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct RegexCapture {
     column: String,
     regex: String,
@@ -201,7 +201,7 @@ pub struct RegexCapture {
 
 /// `StrftimeColumn` can be used to create a time based partition key off some
 /// column other than the builtin `time` column.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct StrftimeColumn {
     column: String,
     format: String,
@@ -223,7 +223,7 @@ pub type WriterId = u32;
 ///
 /// For pull based subscriptions, the requester will send a matcher, which the
 /// receiver will execute against its in-memory WAL.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Subscription {
     pub name: String,
     pub host_group_id: HostGroupId,
@@ -232,7 +232,7 @@ pub struct Subscription {
 
 /// `Matcher` specifies the rule against the table name and/or a predicate
 /// against the row to determine if it matches the write rule.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Matcher {
     #[serde(flatten)]
     pub tables: MatchTables,
@@ -243,7 +243,7 @@ pub struct Matcher {
 
 /// `MatchTables` looks at the table name of a row to determine if it should
 /// match the rule.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub enum MatchTables {
     #[serde(rename = "*")]
@@ -254,7 +254,7 @@ pub enum MatchTables {
 
 pub type HostGroupId = String;
 
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct HostGroup {
     pub id: HostGroupId,
     /// `hosts` is a vector of connection strings for remote hosts.
