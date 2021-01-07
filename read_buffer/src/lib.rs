@@ -7,7 +7,7 @@ pub mod column;
 pub mod row_group;
 pub(crate) mod table;
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use arrow_deps::arrow::record_batch::RecordBatch;
 
@@ -239,6 +239,17 @@ pub struct Database {
 
     // The current total size of the database.
     size: u64,
+}
+
+impl fmt::Debug for Database {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let chunk_ids: Vec<_> = self.chunks.iter().map(|(id, _chunk)| id).collect();
+
+        f.debug_struct("Database")
+            .field("chunks", &chunk_ids)
+            .field("size", &self.size)
+            .finish()
+    }
 }
 
 impl Database {
