@@ -1,6 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::slice::Iter;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
+
+use arrow_deps::arrow::{datatypes::Schema, record_batch::RecordBatch};
 
 use crate::row_group::{ColumnName, GroupKey, Predicate, RowGroup};
 use crate::{
@@ -24,6 +29,7 @@ use crate::{
 ///
 /// The total size of a table is tracked and can be increased or reduced by
 /// adding or removing row groups for that table.
+#[derive(Debug)]
 pub struct Table {
     name: String,
 
@@ -102,6 +108,60 @@ impl Table {
             }
         }
         true
+    }
+
+    /// Scan all the rows of this read buffer table, returning the results as
+    /// arrow record batches
+    ///
+    /// Eventually this call would also have pushed down predicates. A
+    /// separate call would do a pushed down aggregate.
+    pub(crate) fn scan(
+        &self,
+        dst: &mut Vec<arrow_deps::arrow::record_batch::RecordBatch>,
+        // empty columns means *all* columns
+        // TODO make this a proper enum to avoid bugs in the future
+        columns: &[&str],
+    ) {
+        // this code is a mess -- it is because the interface of "empty column list"
+        // sucks
+        println!("AAL scanning table {} for columns {:?}", self.name, columns);
+        let selection_columns: Vec<&str> = if columns.is_empty() && !self.row_groups.is_empty() {
+            // assume each row group has the same columns
+            self.row_groups[0]
+                .all_columns_by_name
+                .iter()
+                .map(|(name, _)| name as &str)
+                .collect()
+        } else {
+            columns.iter().map(|s| *s).collect()
+        };
+
+        println!(" Updated scan for columns {:?}", selection_columns);
+        for rg in self.row_groups.iter() {
+            // fake this out with no predicates for now, but
+            // eventually this would acutally call read_filter with
+            // the appropriate predicates
+            let mut cols = Vec::new();
+            let mut fields = Vec::new();
+            let filter_result = rg.read_filter(&selection_columns, &[]);
+            println!("AAL Read filter results: {:?}", &filter_result);
+            for (col_name, values) in filter_result.0.iter() {
+                println!("Materializing col {}", col_name);
+                let arr: arrow_deps::arrow::array::ArrayRef = values.into();
+                cols.push(arr);
+                fields.push(values.arrow_field(col_name));
+            }
+            if !fields.is_empty() {
+                let schema = Arc::new(Schema::new(fields));
+                let batch = RecordBatch::try_new(schema, cols).unwrap();
+                dst.push(batch);
+            } else {
+                println!(
+                    "WARNING empty fields, no data returned when querying {:?}",
+                    columns
+                );
+            }
+        }
     }
 
     // Identify set of row groups that may satisfy the predicates.
@@ -436,6 +496,7 @@ impl Table {
     }
 }
 
+#[derive(Debug)]
 struct MetaData {
     // The total size of the table in bytes.
     size: u64,

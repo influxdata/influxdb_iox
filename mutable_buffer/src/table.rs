@@ -136,7 +136,7 @@ pub enum Error {
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Table {
     /// Name of the table as a u32 in the chunk dictionary
     pub id: u32,
@@ -865,10 +865,13 @@ impl Table {
         let mut fields = Vec::with_capacity(requested_columns_with_index.len());
         let mut columns: Vec<ArrayRef> = Vec::with_capacity(requested_columns_with_index.len());
 
+        let mut metadata: HashMap<String, String> = HashMap::new();
+
         for &(column_name, column_index) in requested_columns_with_index.iter() {
             let arrow_col: ArrayRef = match &self.columns[column_index] {
                 Column::String(vals, _) => {
                     fields.push(ArrowField::new(column_name, ArrowDataType::Utf8, true));
+                    metadata.insert(column_name.into(), "field".to_string()); // TODO use constants
                     let mut builder = StringBuilder::with_capacity(vals.len(), vals.len() * 10);
 
                     for v in vals {
@@ -883,6 +886,7 @@ impl Table {
                 }
                 Column::Tag(vals, _) => {
                     fields.push(ArrowField::new(column_name, ArrowDataType::Utf8, true));
+                    metadata.insert(column_name.into(), "tag".to_string()); // TODO use constants
                     let mut builder = StringBuilder::with_capacity(vals.len(), vals.len() * 10);
 
                     for v in vals {
@@ -905,6 +909,7 @@ impl Table {
                 }
                 Column::F64(vals, _) => {
                     fields.push(ArrowField::new(column_name, ArrowDataType::Float64, true));
+                    metadata.insert(column_name.into(), "field".to_string()); // TODO use constants
                     let mut builder = Float64Builder::new(vals.len());
 
                     for v in vals {
@@ -915,6 +920,13 @@ impl Table {
                 }
                 Column::I64(vals, _) => {
                     fields.push(ArrowField::new(column_name, ArrowDataType::Int64, true));
+                    if column_name == TIME_COLUMN_NAME {
+                        metadata.insert(column_name.into(), "timestamp".to_string());
+                    // TODO use constants
+                    } else {
+                        metadata.insert(column_name.into(), "field".to_string());
+                        // TODO use constants
+                    }
                     let mut builder = Int64Builder::new(vals.len());
 
                     for v in vals {
@@ -925,6 +937,7 @@ impl Table {
                 }
                 Column::Bool(vals, _) => {
                     fields.push(ArrowField::new(column_name, ArrowDataType::Boolean, true));
+                    metadata.insert(column_name.into(), "field".to_string()); // TODO use constants
                     let mut builder = BooleanBuilder::new(vals.len());
 
                     for v in vals {
@@ -938,7 +951,7 @@ impl Table {
             columns.push(arrow_col);
         }
 
-        let schema = ArrowSchema::new(fields);
+        let schema = ArrowSchema::new_with_metadata(fields, metadata);
 
         RecordBatch::try_new(Arc::new(schema), columns).context(ArrowError {})
     }

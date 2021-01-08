@@ -34,18 +34,19 @@ use self::predicate::{Predicate, TimestampRange};
 #[async_trait]
 pub trait Database: Debug + Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
+    type Chunk: PartitionChunk;
 
     /// Stores the replicated write in the write buffer and, if enabled, the
     /// write ahead log.
     async fn store_replicated_write(&self, write: &ReplicatedWrite) -> Result<(), Self::Error>;
 
-    /// Fetch the specified table names and columns as Arrow
-    /// RecordBatches. Columns are returned in the order specified.
-    async fn table_to_arrow(
-        &self,
-        table_name: &str,
-        columns: &[&str],
-    ) -> Result<Vec<RecordBatch>, Self::Error>;
+    // /// Fetch the specified table names and columns as Arrow
+    // /// RecordBatches. Columns are returned in the order specified.
+    // async fn table_to_arrow(
+    //     &self,
+    //     table_name: &str,
+    //     columns: &[&str],
+    // ) -> Result<Vec<RecordBatch>, Self::Error>;
 
     /// Return the partition keys for data in this DB
     async fn partition_keys(&self) -> Result<Vec<String>, Self::Error>;
@@ -55,6 +56,11 @@ pub trait Database: Debug + Send + Sync {
         &self,
         partition_key: &str,
     ) -> Result<Vec<String>, Self::Error>;
+
+    /// Returns a covering set of chunks to use for planning queries in this
+    /// database
+    async fn query_chunks(&self, partition_key: &str)
+        -> Result<Vec<Arc<Self::Chunk>>, Self::Error>;
 
     // ----------
     // The functions below are slated for removal

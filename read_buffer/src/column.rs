@@ -3,12 +3,21 @@ pub mod dictionary;
 pub mod fixed;
 pub mod fixed_null;
 
-use std::collections::BTreeSet;
 use std::convert::TryFrom;
+use std::{collections::BTreeSet, sync::Arc};
 
 use croaring::Bitmap;
 
-use arrow_deps::{arrow, arrow::array::Array};
+use arrow_deps::{
+    arrow,
+    arrow::{
+        array::{
+            Array, ArrayData, ArrayRef, Float64Array, Int64Array, PrimitiveArray, UInt64Array,
+        },
+        buffer::Buffer,
+        datatypes::{DataType, Field, ToByteSlice},
+    },
+};
 use either::Either;
 
 // Edd's totally made up magic constant. This determines whether we would use
@@ -2599,6 +2608,79 @@ impl<'a> From<&'a str> for Value<'a> {
     }
 }
 
+/// Create Arrow arrays from this value
+impl From<&Values<'_>> for arrow::array::ArrayRef {
+    fn from(v: &Values<'_>) -> Self {
+        match v {
+            Values::String(v) => {
+                todo!("String column conversion");
+            }
+            Values::I64(v) => {
+                // Copied from array_primitive.rs `def_numeric_from_vec` -- should be able to
+                // use that implementation directly from arrow.
+                let array_data = ArrayData::builder(DataType::Int64)
+                    .len(v.len())
+                    .add_buffer(Buffer::from(v.to_byte_slice()))
+                    .build();
+                let arr: Int64Array = PrimitiveArray::from(array_data);
+                Arc::new(arr) as ArrayRef
+            }
+            Values::U64(v) => {
+                // Copied from array_primitive.rs `def_numeric_from_vec` -- should be able to
+                // use that implementation directly from arrow.
+                let array_data = ArrayData::builder(DataType::UInt64)
+                    .len(v.len())
+                    .add_buffer(Buffer::from(v.to_byte_slice()))
+                    .build();
+                let arr: UInt64Array = PrimitiveArray::from(array_data);
+                Arc::new(arr) as ArrayRef
+            }
+            Values::F64(v) => {
+                // Copied from array_primitive.rs `def_numeric_from_vec` -- should be able to
+                // use that implementation directly from arrow.
+                let array_data = ArrayData::builder(DataType::Float64)
+                    .len(v.len())
+                    .add_buffer(Buffer::from(v.to_byte_slice()))
+                    .build();
+                let arr: Float64Array = PrimitiveArray::from(array_data);
+                Arc::new(arr) as ArrayRef
+            }
+            Values::I64N(v) => {
+                todo!("I64N column conversion");
+            }
+            Values::U64N(v) => {
+                todo!("U64N column conversion");
+            }
+            Values::F64N(v) => {
+                todo!("F64N column conversion");
+            }
+            Values::Bool(v) => {
+                todo!("Bool column conversion");
+            }
+            Values::ByteArray(v) => {
+                todo!("Byte array column conversion");
+            }
+        }
+    }
+}
+
+/// Create the appropriate arrow field defintiion for these values and type
+impl Values<'_> {
+    pub fn arrow_field(&self, name: &str) -> Field {
+        match self {
+            Self::String(v) => Field::new(name, DataType::Utf8, false),
+            Self::I64(v) => Field::new(name, DataType::Int64, false),
+            Self::U64(v) => Field::new(name, DataType::UInt64, false),
+            Self::F64(v) => Field::new(name, DataType::Float64, false),
+            Self::I64N(v) => Field::new(name, DataType::Int64, true),
+            Self::U64N(v) => Field::new(name, DataType::UInt64, true),
+            Self::F64N(v) => Field::new(name, DataType::Float64, true),
+            Self::Bool(v) => Field::new(name, DataType::Boolean, false),
+            Self::ByteArray(v) => Field::new(name, DataType::Binary, false),
+        }
+    }
+}
+
 // Implementations of From trait for various concrete types.
 macro_rules! scalar_from_impls {
     ($(($variant:ident, $type:ident),)*) => {
@@ -2687,6 +2769,20 @@ impl<'a> Values<'a> {
                 Some(v) => Value::Scalar(Scalar::F64(v)),
                 None => Value::Null,
             },
+        }
+    }
+
+    pub fn nullable(&self) -> bool {
+        match &self {
+            Values::String(c) => false,
+            Values::I64(c) => false,
+            Values::U64(c) => false,
+            Values::F64(c) => false,
+            Values::Bool(c) => false,
+            Values::ByteArray(c) => false,
+            Values::I64N(c) => true,
+            Values::U64N(c) => true,
+            Values::F64N(c) => true,
         }
     }
 }

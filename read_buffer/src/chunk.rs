@@ -1,10 +1,19 @@
-use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
+use std::{
+    collections::{btree_map::Entry, BTreeMap, BTreeSet},
+    fmt,
+};
 
 use crate::row_group::{ColumnName, Predicate};
 use crate::table::{ReadFilterResults, ReadGroupResults, Table};
 use crate::{column::AggregateType, row_group::RowGroup};
 
 type TableName = String;
+
+use query::PartitionChunk;
+use snafu::Snafu;
+
+#[derive(Debug, Snafu)]
+pub enum Error {}
 
 /// A `Chunk` comprises a collection of `Tables` where every table must have a
 /// unique identifier (name).
@@ -62,17 +71,17 @@ impl Chunk {
     }
 
     /// Add a row_group to a table in the chunk, updating all Chunk meta data.
-    pub fn upsert_table(&mut self, table_name: String, row_group: RowGroup) {
+    pub fn upsert_table(&mut self, table_name: &str, row_group: RowGroup) {
         // update meta data
         self.meta.update(&row_group);
 
-        match self.tables.entry(table_name.to_owned()) {
+        match self.tables.entry(table_name.into()) {
             Entry::Occupied(mut e) => {
                 let table = e.get_mut();
                 table.add_row_group(row_group);
             }
             Entry::Vacant(e) => {
-                e.insert(Table::new(table_name, row_group));
+                e.insert(Table::new(table_name.into(), row_group));
             }
         };
     }
@@ -165,9 +174,58 @@ impl Chunk {
         todo!();
     }
 }
+impl fmt::Debug for Chunk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Chunk")
+            .field("meta", &self.meta)
+            .field("tables", &self.tables.keys())
+            .finish()
+    }
+}
+
+impl PartitionChunk for Chunk {
+    type Error = Error;
+
+    fn id(&self) -> u64 {
+        // TODO make these ids consistent (u32 everywhere or u64 everywhere)
+        self.id as u64
+    }
+
+    fn table_stats(&self) -> Result<Vec<data_types::partition_metadata::Table>, Self::Error> {
+        use data_types::partition_metadata::Table as TableMetadata;
+
+        Ok(self
+            .tables
+            .iter()
+            .map(|(name, table)| {
+                // todo create the actual statistics
+                let columns = vec![];
+
+                TableMetadata {
+                    name: name.clone(),
+                    columns,
+                }
+            })
+            .collect::<Vec<_>>())
+    }
+
+    fn table_to_arrow(
+        &self,
+        dst: &mut Vec<arrow_deps::arrow::record_batch::RecordBatch>,
+        table_name: &str,
+        columns: &[&str],
+    ) -> Result<(), Self::Error> {
+        Ok(self
+            .tables
+            .get(table_name)
+            .unwrap() // TODO proper error handling
+            .scan(dst, columns))
+    }
+}
 
 // `Chunk` metadata that is used to track statistics about the chunk and
 // whether it could contain data necessary to execute a query.
+#[derive(Debug)]
 struct MetaData {
     size: u64, // size in bytes of the chunk
     rows: u64, // Total number of rows across all tables

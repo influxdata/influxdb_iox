@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 #![allow(clippy::too_many_arguments)]
 #![allow(unused_variables)]
-pub(crate) mod chunk;
+pub mod chunk;
 pub mod column;
 pub mod row_group;
 pub(crate) mod table;
@@ -18,7 +18,7 @@ use arrow_deps::arrow::{
     datatypes::{DataType::Utf8, Field, Schema},
     record_batch::RecordBatch,
 };
-use snafu::{ResultExt, Snafu};
+use snafu::{OptionExt, ResultExt, Snafu};
 
 use chunk::Chunk;
 use column::AggregateType;
@@ -62,6 +62,14 @@ impl Database {
         Self::default()
     }
 
+    /// Lists all chunks available in the specified partition
+    pub fn chunks(&self, partition_key: &str) -> Vec<Arc<Chunk>> {
+        self.partitions
+            .get(partition_key)
+            .map(|p| p.chunks())
+            .unwrap_or_else(|| Vec::new())
+    }
+
     /// Adds new data for a chunk.
     ///
     /// Data should be provided as a single row group for a table within the
@@ -71,7 +79,7 @@ impl Database {
         &mut self,
         partition_key: &str,
         chunk_id: u32,
-        table_name: String,
+        table_name: &str,
         table_data: RecordBatch,
     ) {
         // validate table data contains appropriate meta data.
@@ -101,10 +109,8 @@ impl Database {
                 partition.upsert_chunk(chunk_id, table_name, row_group);
             }
             Entry::Vacant(e) => {
-                e.insert(Partition::new(
-                    partition_key,
-                    Chunk::new(chunk_id, Table::new(table_name, row_group)),
-                ));
+                let table = Table::new(table_name.into(), row_group);
+                e.insert(Partition::new(partition_key, Chunk::new(chunk_id, table)));
             }
         };
     }
@@ -122,7 +128,7 @@ impl Database {
     }
 
     /// Remove all row groups and tables for the specified chunks and partition.
-    pub fn drop_chunk(&mut self, partition_key: &str, chunk_id: u32) -> Result<()> {
+    pub fn drop_chunk(&mut self, partition_key: &str, chunk_id: u32) -> Result<Arc<Chunk>> {
         let partition = self
             .partitions
             .get_mut(partition_key)
@@ -130,11 +136,20 @@ impl Database {
                 key: partition_key.to_owned(),
             })?;
 
-        if partition.chunks.remove(&chunk_id).is_some() {
-            return Ok(());
-        }
+        partition
+            .chunks
+            .remove(&chunk_id)
+            .context(ChunkNotFound { id: chunk_id })
+    }
 
-        Err(Error::ChunkNotFound { id: chunk_id })
+    /// Get a chunk by id
+    pub fn get_chunk(&self, partition_key: &str, chunk_id: u32) -> Result<Arc<Chunk>> {
+        self.partitions
+            .get(partition_key)
+            .ok_or(Error::PartitionNotFound {
+                key: partition_key.to_owned(),
+            })
+            .and_then(|p| p.get_chunk(chunk_id))
     }
 
     // Lists all partition keys with data for this database.
@@ -371,7 +386,7 @@ pub struct Partition {
 
     // The collection of chunks in the partition. Each chunk is uniquely
     // identified by a chunk id.
-    chunks: BTreeMap<u32, Chunk>,
+    chunks: BTreeMap<u32, Arc<Chunk>>,
 
     // The current total size of the partition.
     size: u64,
@@ -388,8 +403,23 @@ impl Partition {
             rows: chunk.rows(),
             chunks: BTreeMap::new(),
         };
-        p.chunks.insert(chunk.id(), chunk);
+        p.chunks.insert(chunk.id(), Arc::new(chunk));
         p
+    }
+
+    /// Lists all chunks available in this partition
+    pub fn chunks(&self) -> Vec<Arc<Chunk>> {
+        self.chunks
+            .iter()
+            .map(|(_, chunk)| chunk.clone())
+            .collect::<Vec<_>>()
+    }
+
+    pub fn get_chunk(&self, chunk_id: u32) -> Result<Arc<Chunk>> {
+        self.chunks
+            .get(&chunk_id)
+            .map(|c| c.clone())
+            .context(ChunkNotFound { id: chunk_id })
     }
 
     /// Adds new data for a chunk.
@@ -397,7 +427,7 @@ impl Partition {
     /// Data should be provided as a single row group for a table within the
     /// chunk. If the `Table` or `Chunk` does not exist they will be created,
     /// otherwise relevant structures will be updated.
-    fn upsert_chunk(&mut self, chunk_id: u32, table_name: String, row_group: RowGroup) {
+    fn upsert_chunk(&mut self, chunk_id: u32, table_name: &str, row_group: RowGroup) {
         self.size += row_group.size();
         self.rows += row_group.rows() as u64;
 
@@ -405,11 +435,18 @@ impl Partition {
         // the existing chunk.
         match self.chunks.entry(chunk_id) {
             Entry::Occupied(mut e) => {
-                let chunk = e.get_mut();
+                let mut chunk = e.get_mut();
+                // TODO this needs to get fixed so we don't have to
+                // mutate the chunk but rather can create it in one
+                // shot perhaps by allowing callers to create the
+                // chunk and pass it in rather than passing in row
+                // groups..
+                let chunk = Arc::get_mut(&mut chunk).unwrap();
                 chunk.upsert_table(table_name, row_group);
             }
             Entry::Vacant(e) => {
-                e.insert(Chunk::new(chunk_id, Table::new(table_name, row_group)));
+                let chunk = Chunk::new(chunk_id, Table::new(table_name.into(), row_group));
+                e.insert(Arc::new(chunk));
             }
         };
     }
@@ -503,7 +540,7 @@ mod test {
     #[test]
     fn database_update_partition() {
         let mut db = Database::new();
-        db.upsert_partition("hour_1", 22, "a_table".to_owned(), gen_recordbatch());
+        db.upsert_partition("hour_1", 22, "a_table", gen_recordbatch());
 
         assert_eq!(db.rows(), 3);
         assert_eq!(db.tables(), 1);
@@ -516,7 +553,7 @@ mod test {
 
         // Updating the chunk with another row group for the table just adds
         // that row group to the existing table.
-        db.upsert_partition("hour_1", 22, "a_table".to_owned(), gen_recordbatch());
+        db.upsert_partition("hour_1", 22, "a_table", gen_recordbatch());
         assert_eq!(db.rows(), 6);
         assert_eq!(db.tables(), 1); // still one table
         assert_eq!(db.row_groups(), 2);
@@ -528,7 +565,7 @@ mod test {
 
         // Adding the same data under another table would increase the table
         // count.
-        db.upsert_partition("hour_1", 22, "b_table".to_owned(), gen_recordbatch());
+        db.upsert_partition("hour_1", 22, "b_table", gen_recordbatch());
         assert_eq!(db.rows(), 9);
         assert_eq!(db.tables(), 2);
         assert_eq!(db.row_groups(), 3);
@@ -539,7 +576,7 @@ mod test {
         assert_eq!(partition.row_groups(), 3);
 
         // Adding the data under another chunk adds a new chunk.
-        db.upsert_partition("hour_1", 29, "a_table".to_owned(), gen_recordbatch());
+        db.upsert_partition("hour_1", 29, "a_table", gen_recordbatch());
         assert_eq!(db.rows(), 12);
         assert_eq!(db.tables(), 3); // two distinct tables but across two chunks.
         assert_eq!(db.row_groups(), 4);
@@ -601,7 +638,7 @@ mod test {
     fn table_names() {
         let mut db = Database::new();
 
-        db.upsert_partition("hour_1", 22, "Coolverine".to_owned(), gen_recordbatch());
+        db.upsert_partition("hour_1", 22, "Coolverine", gen_recordbatch());
         let data = db.table_names("hour_1", &[22], &[]).unwrap().unwrap();
         assert_rb_column_equals(
             &data,
@@ -609,7 +646,7 @@ mod test {
             &column::Values::String(vec![Some("Coolverine")]),
         );
 
-        db.upsert_partition("hour_1", 22, "Coolverine".to_owned(), gen_recordbatch());
+        db.upsert_partition("hour_1", 22, "Coolverine", gen_recordbatch());
         let data = db.table_names("hour_1", &[22], &[]).unwrap().unwrap();
         assert_rb_column_equals(
             &data,
@@ -617,7 +654,7 @@ mod test {
             &column::Values::String(vec![Some("Coolverine")]),
         );
 
-        db.upsert_partition("hour_1", 2, "Coolverine".to_owned(), gen_recordbatch());
+        db.upsert_partition("hour_1", 2, "Coolverine", gen_recordbatch());
         let data = db.table_names("hour_1", &[22], &[]).unwrap().unwrap();
         assert_rb_column_equals(
             &data,
@@ -625,7 +662,7 @@ mod test {
             &column::Values::String(vec![Some("Coolverine")]),
         );
 
-        db.upsert_partition("hour_1", 2, "20 Size".to_owned(), gen_recordbatch());
+        db.upsert_partition("hour_1", 2, "20 Size", gen_recordbatch());
         let data = db.table_names("hour_1", &[22], &[]).unwrap().unwrap();
         assert_rb_column_equals(
             &data,

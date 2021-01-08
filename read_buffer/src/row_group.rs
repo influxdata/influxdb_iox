@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, collections::BTreeMap, fmt};
 
 use hashbrown::{hash_map, HashMap};
 use itertools::Itertools;
@@ -23,10 +23,25 @@ pub struct RowGroup {
     meta: MetaData,
 
     columns: Vec<Column>,
-    all_columns_by_name: BTreeMap<String, usize>,
+    pub all_columns_by_name: BTreeMap<String, usize>,
     tag_columns_by_name: BTreeMap<String, usize>,
     field_columns_by_name: BTreeMap<String, usize>,
     time_column: usize,
+}
+
+impl fmt::Debug for RowGroup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let column_names = self
+            .all_columns_by_name
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .collect::<Vec<_>>();
+
+        f.debug_struct("RowGroup")
+            .field("meta", &self.meta)
+            .field("columns", &column_names)
+            .finish()
+    }
 }
 
 impl RowGroup {
@@ -286,6 +301,7 @@ impl RowGroup {
             }
         }
 
+        println!("AAL result row ids: {:?}", result_row_ids);
         if result_row_ids.is_empty() {
             // All rows matched all predicates because any predicates not
             // matching any rows would have resulted in an early return.

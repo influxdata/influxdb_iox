@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use snafu::{ResultExt, Snafu};
 
-use crate::{exec::Executor, Database};
+use crate::{exec::Executor, Database, PartitionChunk};
 use arrow_deps::datafusion::{
     datasource::MemTable, error::DataFusionError, physical_plan::ExecutionPlan,
 };
@@ -23,6 +23,9 @@ pub enum Error {
         query: String,
         statement: Box<Statement>,
     },
+
+    #[snafu(display("No rows found in table {} while executing '{}'", table, query))]
+    NoRowsInTable { table: String, query: String },
 
     #[snafu(display("Internal Error creating memtable for table {}: {}", table, source))]
     InternalMemTableCreation {
@@ -58,28 +61,46 @@ impl SQLQueryPlanner {
         // figure out the table names that appear in the sql
         let table_names = table_names(query)?;
 
+        let partition_keys = database.partition_keys().await.unwrap();
+
         // Register a table provider for each table so DataFusion
         // knows what the schema of that table is and how to obtain
         // its data when needed.
-        for table in table_names {
+        for table in &table_names {
             // TODO: make our own struct that implements
             // TableProvider, type so we can take advantage of
             // datafusion predicate and selection pushdown. For now,
             // use a Memtable provider (which requires materializing
             // the entire table here)
-            let data = database.table_to_arrow(&table, &[]).await.map_err(|e| {
-                Error::InternalTableConversion {
-                    table: table.clone(),
-                    source: Box::new(e),
+            //println!("Planning query with database: {:#?}", database);
+            let mut data = Vec::new();
+            // TODO do this conversion in multiple tokio tasks to get parallelism??
+
+            for partition_key in partition_keys.iter() {
+                //println!("  including partition: {} in query", partition_key);
+                for chunk in database.query_chunks(partition_key).await.unwrap() {
+                    //println!("  Including chunk: {:#?} in query", chunk);
+
+                    chunk
+                        .table_to_arrow(&mut data, &table, &[])
+                        .map_err(|e| Box::new(e) as _)
+                        .context(InternalTableConversion { table })?
                 }
-            })?;
+            }
+
+            // if the table was reported to exist, it should not be empty (eventually we
+            // should get the schema and table data separtely)
+            println!("planning sql query agaist {} batches", data.len());
+
+            if data.is_empty() {
+                return NoRowsInTable { table, query }.fail();
+            }
             let schema = data[0].schema().clone();
             let provider = Box::new(
                 MemTable::try_new(schema, vec![data])
-                    .context(InternalMemTableCreation { table: &table })?,
+                    .context(InternalMemTableCreation { table })?,
             );
-
-            ctx.inner_mut().register_table(&table, provider);
+            ctx.inner_mut().register_table(table, provider);
         }
 
         ctx.prepare_sql(query).await.context(Preparing)

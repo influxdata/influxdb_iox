@@ -12,6 +12,7 @@ snafu = "0.6"
 arrow_deps = { path = "../arrow_deps" }
 data_types = { path = "../data_types" }
 packers = { path = "../packers" }
+query = { path = "../query" }
 croaring = "0.4.5"
 itertools = "0.9.0"
 either = "1.6.1"

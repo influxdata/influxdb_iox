@@ -1,6 +1,5 @@
 //! Holds one or more Chunks.
 
-use arrow_deps::arrow::record_batch::RecordBatch;
 use generated_types::wal as wb;
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -99,26 +98,47 @@ impl Partition {
             })
     }
 
-    /// Convert the table specified in this chunk into some number of
-    /// record batches, appended to dst
-    pub fn table_to_arrow(
-        &self,
-        dst: &mut Vec<RecordBatch>,
-        table_name: &str,
-        columns: &[&str],
-    ) -> crate::chunk::Result<()> {
-        for chunk in self.iter() {
-            chunk.table_to_arrow(dst, table_name, columns)?
-        }
-        Ok(())
-    }
-
     /// Return information about the chunks held in this partition
     #[allow(dead_code)]
     pub fn chunk_info(&self) -> PartitionChunkInfo {
         PartitionChunkInfo {
             num_closed_chunks: self.closed_chunks.len(),
         }
+    }
+
+    /// Return the list of chunks, in order of id, in this
+    /// partition). A Snapshot of the currently active chunk is
+    /// returned. The snapshot will not be affected by future inserts
+    pub fn chunks(&self) -> Vec<Arc<Chunk>> {
+        let mut chunks: Vec<_> = self
+            .closed_chunks
+            .iter()
+            .map(|(_, chunk)| chunk.clone())
+            .collect::<Vec<_>>();
+
+        chunks.push(self.open_chunk_snapshot());
+        chunks
+    }
+
+    /// return the chunk by id (if it is closed). Returns an error if the chunk
+    /// is still open
+    pub fn get_chunk(&self, chunk_id: u64) -> Result<Arc<Chunk>> {
+        if let Some(chunk) = self.closed_chunks.get(&chunk_id) {
+            Ok(chunk.clone())
+        } else {
+            if chunk_id == self.open_chunk.id {
+                Ok(self.open_chunk_snapshot())
+            } else {
+                // TODO real errors here
+                panic!("Chunk {} not found in {:#?}", chunk_id, self);
+            }
+        }
+    }
+
+    fn open_chunk_snapshot(&self) -> Arc<Chunk> {
+        // TODO cache the snapshot of the open chunk and other optimizations
+        let open_chunk_snapshot = self.open_chunk.clone();
+        Arc::new(open_chunk_snapshot)
     }
 
     /// Close the currently open chunk and create a new open
@@ -654,9 +674,11 @@ mod tests {
     fn dump_table(partition: &Partition, table_name: &str) -> Vec<RecordBatch> {
         let mut dst = vec![];
         let requested_columns = []; // empty ==> request all columns
-        partition
-            .table_to_arrow(&mut dst, table_name, &requested_columns)
-            .unwrap();
+        for chunk in partition.chunks() {
+            chunk
+                .table_to_arrow(&mut dst, table_name, &requested_columns)
+                .unwrap();
+        }
 
         // Now, sort dest
         dst.into_iter().map(sort_record_batch).collect()

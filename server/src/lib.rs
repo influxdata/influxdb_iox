@@ -197,12 +197,12 @@ impl<M: ConnectionManager> Server<M> {
         let db_name = DatabaseName::new(db_name.into()).context(InvalidDatabaseName)?;
 
         let mutable_buffer = if rules.store_locally {
-            Some(Arc::new(MutableBufferDb::new(db_name.to_string())))
+            Some(MutableBufferDb::new(db_name.to_string()))
         } else {
             None
         };
 
-        let read_buffer = Arc::new(ReadBufferDb::new());
+        let read_buffer = ReadBufferDb::new();
 
         let sequence = AtomicU64::new(STARTING_SEQUENCE);
         let wal_buffer = None;
@@ -583,7 +583,7 @@ mod tests {
         let planner = SQLQueryPlanner::default();
         let executor = server.executor();
         let physical_plan = planner
-            .query(buff.as_ref(), "select * from cpu", executor.as_ref())
+            .query(buff, "select * from cpu", executor.as_ref())
             .await
             .unwrap();
 
