@@ -76,7 +76,7 @@ impl SQLQueryPlanner {
             let mut data = Vec::new();
             // TODO do this conversion in multiple tokio tasks to get parallelism??
 
-            for partition_key in partition_keys.iter() {
+            for partition_key in &partition_keys {
                 //println!("  including partition: {} in query", partition_key);
                 for chunk in database.query_chunks(partition_key).await.unwrap() {
                     //println!("  Including chunk: {:#?} in query", chunk);
