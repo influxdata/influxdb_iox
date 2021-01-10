@@ -241,11 +241,12 @@ impl Database for Db {
     ) -> Result<Vec<Arc<Self::Chunk>>, Self::Error> {
         // returns a coverting set of chunks -- aka take chunks from read buffer
         // preferentially
-        let chunks: BTreeMap<_, _> = self
-            .mutable_buffer_chunks(partition_key)
-            .await
-            .into_iter()
-            .chain(self.read_buffer_chunks(partition_key).await.into_iter())
+        let mutable_chunk_iter = self.mutable_buffer_chunks(partition_key).await.into_iter();
+
+        let read_buffer_chunk_iter = self.read_buffer_chunks(partition_key).await.into_iter();
+
+        let chunks: BTreeMap<_, _> = mutable_chunk_iter
+            .chain(read_buffer_chunk_iter)
             .map(|chunk| (chunk.id(), chunk))
             .collect();
 
@@ -573,7 +574,7 @@ mod tests {
             .iter()
             .map(|chunk| chunk.id())
             .collect();
-        chunk_ids.sort();
+        chunk_ids.sort_unstable();
         chunk_ids
     }
 
@@ -584,7 +585,7 @@ mod tests {
             .iter()
             .map(|chunk| chunk.id())
             .collect();
-        chunk_ids.sort();
+        chunk_ids.sort_unstable();
         chunk_ids
     }
 }

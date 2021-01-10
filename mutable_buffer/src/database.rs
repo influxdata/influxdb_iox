@@ -1102,7 +1102,7 @@ mod tests {
         write_lines(&db, &lines).await;
 
         let mut chunks = Vec::new();
-        for partition_key in db.partition_keys().await.unwrap().iter() {
+        for partition_key in &db.partition_keys().await.unwrap() {
             for chunk in db.chunks(partition_key).await {
                 chunk
                     .table_to_arrow(&mut chunks, "cpu", &["region", "core"])

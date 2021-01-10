@@ -133,7 +133,7 @@ impl Table {
                 .map(|(name, _)| name as &str)
                 .collect()
         } else {
-            columns.iter().map(|s| *s).collect()
+            columns.iter().copied().collect()
         };
 
         println!(" Updated scan for columns {:?}", selection_columns);

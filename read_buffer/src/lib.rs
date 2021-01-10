@@ -67,7 +67,7 @@ impl Database {
         self.partitions
             .get(partition_key)
             .map(|p| p.chunks())
-            .unwrap_or_else(|| Vec::new())
+            .unwrap_or_else(Vec::new)
     }
 
     /// Adds new data for a chunk.
@@ -418,7 +418,7 @@ impl Partition {
     pub fn get_chunk(&self, chunk_id: u32) -> Result<Arc<Chunk>> {
         self.chunks
             .get(&chunk_id)
-            .map(|c| c.clone())
+            .cloned()
             .context(ChunkNotFound { id: chunk_id })
     }
 

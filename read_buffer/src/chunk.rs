@@ -215,11 +215,11 @@ impl PartitionChunk for Chunk {
         table_name: &str,
         columns: &[&str],
     ) -> Result<(), Self::Error> {
-        Ok(self
-            .tables
+        self.tables
             .get(table_name)
             .unwrap() // TODO proper error handling
-            .scan(dst, columns))
+            .scan(dst, columns);
+        Ok(())
     }
 }
 

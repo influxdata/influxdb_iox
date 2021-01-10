@@ -125,13 +125,11 @@ impl Partition {
     pub fn get_chunk(&self, chunk_id: u64) -> Result<Arc<Chunk>> {
         if let Some(chunk) = self.closed_chunks.get(&chunk_id) {
             Ok(chunk.clone())
+        } else if chunk_id == self.open_chunk.id {
+            Ok(self.open_chunk_snapshot())
         } else {
-            if chunk_id == self.open_chunk.id {
-                Ok(self.open_chunk_snapshot())
-            } else {
-                // TODO real errors here
-                panic!("Chunk {} not found in {:#?}", chunk_id, self);
-            }
+            // TODO real errors here
+            panic!("Chunk {} not found in {:#?}", chunk_id, self);
         }
     }
 

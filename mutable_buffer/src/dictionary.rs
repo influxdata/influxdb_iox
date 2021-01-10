@@ -43,7 +43,7 @@ impl Clone for Dictionary {
         // upstream and use default clone methods. For now, re-hash
         // everything to make a new dictionary
         let mut new_self = Self::default();
-        for (symbol, s) in self.0.clone().into_iter() {
+        for (symbol, s) in &self.0.clone() {
             let new_symbol = new_self.lookup_value_or_insert(s);
             // The symbol mappings need to be consistent
             assert_eq!(
