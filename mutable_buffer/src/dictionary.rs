@@ -27,6 +27,35 @@ impl Default for Dictionary {
     }
 }
 
+impl Clone for Dictionary {
+    fn clone(&self) -> Self {
+        // Note the default clone() from string_interner doesn't seem
+        // to do the right thing as the cloned dictionary couldn't
+        // resolve symbols correctly.
+        //
+        // I believe the problem is that if the hasher contains any
+        // state, but  the implementation of StringInterner::clone() in calls
+        // `Default` rather than `clone` so the state of the hasher is
+        // lost.
+        // https://github.com/Robbepop/string-interner/blob/master/src/interner.rs#L90
+        //
+        // TODO: write a test showing this bug and sumit a fix
+        // upstream and use default clone methods. For now, re-hash
+        // everything to make a new dictionary
+        let mut new_self = Self::default();
+        for (symbol, s) in &self.0.clone() {
+            let new_symbol = new_self.lookup_value_or_insert(s);
+            // The symbol mappings need to be consistent
+            assert_eq!(
+                symbol_to_u32(symbol),
+                new_symbol,
+                "Expected new dictionary to be same symbols"
+            );
+        }
+        new_self
+    }
+}
+
 impl Dictionary {
     pub fn new() -> Self {
         Self(StringInterner::new())
