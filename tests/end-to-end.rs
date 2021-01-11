@@ -18,6 +18,7 @@
 // - Stopping the server after all relevant tests are run
 
 use assert_cmd::prelude::*;
+use data_types::database_rules::DatabaseRules;
 use futures::prelude::*;
 use generated_types::{
     aggregate::AggregateType,
@@ -98,6 +99,24 @@ async fn read_and_write_data() -> Result<()> {
 
     let client = reqwest::Client::new();
     let client2 = influxdb2_client::Client::new(HTTP_BASE, TOKEN);
+
+    let rules = DatabaseRules {
+        store_locally: true,
+        ..Default::default()
+    };
+    let data = serde_json::to_vec(&rules).unwrap();
+
+    let database_name = format!("{}_{}", org_id_str, bucket_id_str);
+
+    client
+        .put(&format!(
+            "{}/iox/api/v1/databases/{}",
+            HTTP_BASE, &database_name
+        ))
+        .body(data)
+        .send()
+        .await
+        .unwrap();
 
     let start_time = SystemTime::now();
     let ns_since_epoch: i64 = start_time
@@ -203,7 +222,7 @@ async fn read_and_write_data() -> Result<()> {
     let capabilities_response = capabilities_response.into_inner();
     assert_eq!(
         capabilities_response.caps.len(),
-        1,
+        2,
         "Response: {:?}",
         capabilities_response
     );
@@ -308,6 +327,7 @@ async fn read_and_write_data() -> Result<()> {
     test_read_group_none_agg(&mut storage_client, &read_source).await;
     test_read_group_none_agg_with_predicate(&mut storage_client, &read_source).await;
     test_read_group_sum_agg(&mut storage_client, &read_source).await;
+    test_read_group_last_agg(&mut storage_client, &read_source).await;
 
     let measurement_names_request = tonic::Request::new(MeasurementNamesRequest {
         source: read_source.clone(),
@@ -658,7 +678,7 @@ async fn test_read_group_sum_agg(
     storage_client: &mut StorageClient<tonic::transport::Channel>,
     read_source: &std::option::Option<prost_types::Any>,
 ) {
-    // read_group(group_keys: region, agg: None)
+    // read_group(group_keys: region, agg: Sum)
     let read_group_request = ReadGroupRequest {
         read_source: read_source.clone(),
         range: Some(TimestampRange {
@@ -693,6 +713,61 @@ async fn test_read_group_sum_agg(
         "FloatPointsFrame, timestamps: [3000], values: \"61\"",
         "SeriesFrame, tags: _field=usage_user,_measurement=cpu,cpu=cpu2,host=foo, type: 0",
         "FloatPointsFrame, timestamps: [3000], values: \"123\"",
+    ];
+
+    let actual_group_frames = do_read_group_request(storage_client, read_group_request).await;
+
+    assert_eq!(
+        expected_group_frames,
+        actual_group_frames,
+        "Expected:\n{}\nActual:\n{}",
+        expected_group_frames.join("\n"),
+        actual_group_frames.join("\n")
+    );
+}
+
+// Standalone test for read_group with group keys and an actual
+// "selector" function last.  assumes that
+// load_read_group_data has been previously run
+async fn test_read_group_last_agg(
+    storage_client: &mut StorageClient<tonic::transport::Channel>,
+    read_source: &std::option::Option<prost_types::Any>,
+) {
+    // read_group(group_keys: region, agg: Last)
+    let read_group_request = ReadGroupRequest {
+        read_source: read_source.clone(),
+        range: Some(TimestampRange {
+            start: 0,
+            end: 2001, // include all data
+        }),
+        predicate: None,
+        group_keys: vec![String::from("cpu")],
+        group: Group::By as i32,
+        aggregate: Some(Aggregate {
+            r#type: AggregateType::Last as i32,
+        }),
+        hints: 0,
+    };
+
+    let expected_group_frames = vec![
+        "GroupFrame, tag_keys: cpu, partition_key_vals: cpu1",
+        "SeriesFrame, tags: _field=usage_system,_measurement=cpu,cpu=cpu1,host=bar, type: 0",
+        "FloatPointsFrame, timestamps: [2000], values: \"21\"",
+        "SeriesFrame, tags: _field=usage_user,_measurement=cpu,cpu=cpu1,host=bar, type: 0",
+        "FloatPointsFrame, timestamps: [2000], values: \"82\"",
+        "SeriesFrame, tags: _field=usage_system,_measurement=cpu,cpu=cpu1,host=foo, type: 0",
+        "FloatPointsFrame, timestamps: [2000], values: \"11\"",
+        "SeriesFrame, tags: _field=usage_user,_measurement=cpu,cpu=cpu1,host=foo, type: 0",
+        "FloatPointsFrame, timestamps: [2000], values: \"72\"",
+        "GroupFrame, tag_keys: cpu, partition_key_vals: cpu2",
+        "SeriesFrame, tags: _field=usage_system,_measurement=cpu,cpu=cpu2,host=bar, type: 0",
+        "FloatPointsFrame, timestamps: [2000], values: \"41\"",
+        "SeriesFrame, tags: _field=usage_user,_measurement=cpu,cpu=cpu2,host=bar, type: 0",
+        "FloatPointsFrame, timestamps: [2000], values: \"52\"",
+        "SeriesFrame, tags: _field=usage_system,_measurement=cpu,cpu=cpu2,host=foo, type: 0",
+        "FloatPointsFrame, timestamps: [2000], values: \"31\"",
+        "SeriesFrame, tags: _field=usage_user,_measurement=cpu,cpu=cpu2,host=foo, type: 0",
+        "FloatPointsFrame, timestamps: [2000], values: \"62\"",
     ];
 
     let actual_group_frames = do_read_group_request(storage_client, read_group_request).await;
@@ -786,13 +861,13 @@ struct TestServer {
 
 impl TestServer {
     fn new() -> Result<Self> {
-        let _ = dotenv::dotenv(); // load .env file if present
-
         let dir = test_helpers::tmp_dir()?;
 
         let server_process = Command::cargo_bin("influxdb_iox")?
             // Can enable for debbugging
             //.arg("-vv")
+            // ignore any config file in the user's home directory
+            .arg("--ignore-config-file")
             .env("INFLUXDB_IOX_DB_DIR", dir.path())
             .env("INFLUXDB_IOX_ID", "1")
             .spawn()?;
@@ -810,7 +885,10 @@ impl TestServer {
         self.server_process = Command::cargo_bin("influxdb_iox")?
             // Can enable for debbugging
             //.arg("-vv")
+            // ignore any config file in the user's home directory
+            .arg("--ignore-config-file")
             .env("INFLUXDB_IOX_DB_DIR", self.dir.path())
+            .env("INFLUXDB_IOX_ID", "1")
             .spawn()?;
         Ok(())
     }

@@ -1,8 +1,5 @@
-//! This module contains a parallel implementation of the /v2 HTTP api
-//! routes for InfluxDB IOx based on the WriteBuffer storage implementation.
-//!
-//! The goal is that eventually the implementation in these routes
-//! will replace the implementation in http_routes.rs
+//! This module contains a partial implementation of the /v2 HTTP api
+//! routes for InfluxDB IOx.
 //!
 //! Note that these routes are designed to be just helpers for now,
 //! and "close enough" to the real /v2 api to be able to test InfluxDB IOx
@@ -10,25 +7,29 @@
 //! id (this is done by other services in the influx cloud)
 //!
 //! Long term, we expect to create IOx specific api in terms of
-//! database names and may remove this quasi /v2 API from the Deloren.
-
-use http::header::CONTENT_ENCODING;
-use tracing::{debug, error, info};
-
-use arrow_deps::arrow;
-use influxdb_line_protocol::parse_lines;
-use query::SQLDatabase;
-use server::server::{ConnectionManager, Server as AppServer};
+//! database names and may remove this quasi /v2 API.
 
 use super::{org_and_bucket_to_database, OrgBucketMappingError};
+
+// Influx crates
+use arrow_deps::{arrow, datafusion::physical_plan::collect};
+use data_types::{database_rules::DatabaseRules, DatabaseName};
+use influxdb_line_protocol::parse_lines;
+use object_store::path::ObjectStorePath;
+use query::{frontend::sql::SQLQueryPlanner, Database, DatabaseStore};
+use server::{ConnectionManager, Server as AppServer};
+
+// External crates
 use bytes::{Bytes, BytesMut};
-use data_types::database_rules::DatabaseRules;
 use futures::{self, StreamExt};
-use hyper::{Body, Method, StatusCode};
+use http::header::CONTENT_ENCODING;
+use hyper::{Body, Method, Request, Response, StatusCode};
+use routerify::{prelude::*, Middleware, RequestInfo, Router, RouterService};
 use serde::Deserialize;
 use snafu::{OptionExt, ResultExt, Snafu};
-use std::str;
-use std::sync::Arc;
+use tracing::{debug, error, info};
+
+use std::{fmt::Debug, str, sync::Arc};
 
 #[derive(Debug, Snafu)]
 pub enum ApplicationError {
@@ -59,13 +60,15 @@ pub enum ApplicationError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
-    #[snafu(display(
-        "Internal error reading points from database {}:  {}",
-        database,
-        source
-    ))]
+    #[snafu(display("Error planning query {}: {}", query, source))]
+    PlanningSQLQuery {
+        query: String,
+        source: query::frontend::sql::Error,
+    },
+
+    #[snafu(display("Internal error reading points from database {}:  {}", db_name, source))]
     Query {
-        database: String,
+        db_name: String,
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
@@ -90,11 +93,8 @@ pub enum ApplicationError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
-    #[snafu(display("Invalid request body '{}': {}", request_body, source))]
-    InvalidRequestBody {
-        request_body: String,
-        source: serde_json::error::Error,
-    },
+    #[snafu(display("Invalid request body: {}", source))]
+    InvalidRequestBody { source: serde_json::error::Error },
 
     #[snafu(display("Invalid content encoding: {}", content_encoding))]
     InvalidContentEncoding { content_encoding: String },
@@ -130,35 +130,120 @@ pub enum ApplicationError {
 
     #[snafu(display("Error generating json response: {}", source))]
     JsonGenerationError { source: serde_json::Error },
+
+    #[snafu(display("Error creating database: {}", source))]
+    ErrorCreatingDatabase { source: server::Error },
+
+    #[snafu(display("Invalid database name: {}", source))]
+    DatabaseNameError {
+        source: data_types::DatabaseNameError,
+    },
+
+    #[snafu(display("Database {} not found", name))]
+    DatabaseNotFound { name: String },
 }
 
 impl ApplicationError {
-    pub fn status_code(&self) -> StatusCode {
-        match self {
-            Self::BucketByName { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::BucketMappingError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::WritingPoints { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Query { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::QueryError { .. } => StatusCode::BAD_REQUEST,
-            Self::BucketNotFound { .. } => StatusCode::NOT_FOUND,
-            Self::RequestSizeExceeded { .. } => StatusCode::BAD_REQUEST,
-            Self::ExpectedQueryString { .. } => StatusCode::BAD_REQUEST,
-            Self::InvalidQueryString { .. } => StatusCode::BAD_REQUEST,
-            Self::InvalidRequestBody { .. } => StatusCode::BAD_REQUEST,
-            Self::InvalidContentEncoding { .. } => StatusCode::BAD_REQUEST,
-            Self::ReadingHeaderAsUtf8 { .. } => StatusCode::BAD_REQUEST,
-            Self::ReadingBody { .. } => StatusCode::BAD_REQUEST,
-            Self::ReadingBodyAsUtf8 { .. } => StatusCode::BAD_REQUEST,
-            Self::ParsingLineProtocol { .. } => StatusCode::BAD_REQUEST,
-            Self::ReadingBodyAsGzip { .. } => StatusCode::BAD_REQUEST,
-            Self::RouteNotFound { .. } => StatusCode::NOT_FOUND,
-            Self::DatabaseError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::JsonGenerationError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-        }
+    pub fn response(&self) -> Result<Response<Body>, Self> {
+        Ok(match self {
+            Self::BucketByName { .. } => self.internal_error(),
+            Self::BucketMappingError { .. } => self.internal_error(),
+            Self::WritingPoints { .. } => self.internal_error(),
+            Self::PlanningSQLQuery { .. } => self.bad_request(),
+            Self::Query { .. } => self.internal_error(),
+            Self::QueryError { .. } => self.bad_request(),
+            Self::BucketNotFound { .. } => self.not_found(),
+            Self::RequestSizeExceeded { .. } => self.bad_request(),
+            Self::ExpectedQueryString { .. } => self.bad_request(),
+            Self::InvalidQueryString { .. } => self.bad_request(),
+            Self::InvalidRequestBody { .. } => self.bad_request(),
+            Self::InvalidContentEncoding { .. } => self.bad_request(),
+            Self::ReadingHeaderAsUtf8 { .. } => self.bad_request(),
+            Self::ReadingBody { .. } => self.bad_request(),
+            Self::ReadingBodyAsUtf8 { .. } => self.bad_request(),
+            Self::ParsingLineProtocol { .. } => self.bad_request(),
+            Self::ReadingBodyAsGzip { .. } => self.bad_request(),
+            Self::RouteNotFound { .. } => self.not_found(),
+            Self::DatabaseError { .. } => self.internal_error(),
+            Self::JsonGenerationError { .. } => self.internal_error(),
+            Self::ErrorCreatingDatabase { .. } => self.bad_request(),
+            Self::DatabaseNameError { .. } => self.bad_request(),
+            Self::DatabaseNotFound { .. } => self.not_found(),
+        })
+    }
+
+    fn bad_request(&self) -> Response<Body> {
+        Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(self.body())
+            .unwrap()
+    }
+
+    fn internal_error(&self) -> Response<Body> {
+        Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(self.body())
+            .unwrap()
+    }
+
+    fn not_found(&self) -> Response<Body> {
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    fn body(&self) -> Body {
+        let json = serde_json::json!({"error": self.to_string()}).to_string();
+        Body::from(json)
     }
 }
 
 const MAX_SIZE: usize = 10_485_760; // max write request size of 10MB
+
+fn router<M>(server: Arc<AppServer<M>>) -> Router<Body, ApplicationError>
+where
+    M: ConnectionManager + Send + Sync + Debug + 'static,
+{
+    // Create a router and specify the the handlers.
+    Router::builder()
+        .data(server)
+        .middleware(Middleware::pre(|req| async move {
+            info!(request = ?req, "Processing request");
+            Ok(req)
+        }))
+        .middleware(Middleware::post(|res| async move {
+            info!(response = ?res, "Successfully processed request");
+            Ok(res)
+        })) // this endpoint is for API backward compatibility with InfluxDB 2.x
+        .post("/api/v2/write", write_handler::<M>)
+        .get("/ping", ping)
+        .get("/api/v2/read", read_handler::<M>)
+        .put("/iox/api/v1/databases/:name", create_database_handler::<M>)
+        .get("/iox/api/v1/databases/:name", get_database_handler::<M>)
+        .get("/api/v1/partitions", list_partitions_handler::<M>)
+        .post("/api/v1/snapshot", snapshot_partition_handler::<M>)
+        // Specify the error handler to handle any errors caused by
+        // a route or any middleware.
+        .err_handler_with_info(error_handler)
+        .build()
+        .unwrap()
+}
+
+// the Routerify error handler. This should be the handler of last resort.
+// Errors should be handled with responses built in the individual handlers for
+// specific ApplicationError(s)
+async fn error_handler(err: routerify::Error, req: RequestInfo) -> Response<Body> {
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    error!(error = ?err, error_message = ?err.to_string(), method = ?method, uri = ?uri, "Error while handling request");
+
+    let json = serde_json::json!({"error": err.to_string()}).to_string();
+    Response::builder()
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .body(Body::from(json))
+        .unwrap()
+}
 
 #[derive(Debug, Deserialize)]
 /// Body of the request to the /write endpoint
@@ -220,10 +305,29 @@ async fn parse_body(req: hyper::Request<Body>) -> Result<Bytes, ApplicationError
 }
 
 #[tracing::instrument(level = "debug")]
-async fn write<M: ConnectionManager + std::fmt::Debug>(
-    req: hyper::Request<Body>,
-    server: Arc<AppServer<M>>,
-) -> Result<Option<Body>, ApplicationError> {
+async fn write_handler<M>(req: Request<Body>) -> Result<Response<Body>, ApplicationError>
+where
+    M: ConnectionManager + Send + Sync + Debug + 'static,
+{
+    match write::<M>(req).await {
+        Err(e) => {
+            error!(error = ?e, error_message = ?e.to_string(), "Error while handling request");
+            e.response()
+        }
+        res => res,
+    }
+}
+
+#[tracing::instrument(level = "debug")]
+async fn write<M>(req: Request<Body>) -> Result<Response<Body>, ApplicationError>
+where
+    M: ConnectionManager + Send + Sync + Debug + 'static,
+{
+    let server = req
+        .data::<Arc<AppServer<M>>>()
+        .expect("server state")
+        .clone();
+
     let query = req.uri().query().context(ExpectedQueryString)?;
 
     let write_info: WriteInfo = serde_urlencoded::from_str(query).context(InvalidQueryString {
@@ -249,22 +353,6 @@ async fn write<M: ConnectionManager + std::fmt::Debug>(
         write_info.bucket
     );
 
-    // TODO: remove this once the API is in to create a database
-    if server.db(&db_name).await.is_none() {
-        let rules = DatabaseRules {
-            store_locally: true,
-            ..Default::default()
-        };
-        server
-            .create_database(db_name.to_string(), rules)
-            .await
-            .map_err(|e| Box::new(e) as _)
-            .context(WritingPoints {
-                org: write_info.org.clone(),
-                bucket_name: write_info.bucket.clone(),
-            })?;
-    }
-
     server
         .write_lines(&db_name, &lines)
         .await
@@ -274,7 +362,10 @@ async fn write<M: ConnectionManager + std::fmt::Debug>(
             bucket_name: write_info.bucket.clone(),
         })?;
 
-    Ok(None)
+    Ok(Response::builder()
+        .status(StatusCode::NO_CONTENT)
+        .body(Body::empty())
+        .unwrap())
 }
 
 #[derive(Deserialize, Debug)]
@@ -287,18 +378,39 @@ struct ReadInfo {
     sql_query: String,
 }
 
+#[tracing::instrument(level = "debug")]
+async fn read_handler<M>(req: Request<Body>) -> Result<Response<Body>, ApplicationError>
+where
+    M: ConnectionManager + Send + Sync + Debug + 'static,
+{
+    match read::<M>(req).await {
+        Err(e) => {
+            error!(error = ?e, error_message = ?e.to_string(), "Error while handling request");
+
+            e.response()
+        }
+        res => res,
+    }
+}
+
 // TODO: figure out how to stream read results out rather than rendering the
 // whole thing in mem
 #[tracing::instrument(level = "debug")]
-async fn read<M: ConnectionManager + std::fmt::Debug>(
-    req: hyper::Request<Body>,
-    server: Arc<AppServer<M>>,
-) -> Result<Option<Body>, ApplicationError> {
+async fn read<M: ConnectionManager + Send + Sync + Debug + 'static>(
+    req: Request<Body>,
+) -> Result<Response<Body>, ApplicationError> {
+    let server = req
+        .data::<Arc<AppServer<M>>>()
+        .expect("server state")
+        .clone();
     let query = req.uri().query().context(ExpectedQueryString {})?;
 
     let read_info: ReadInfo = serde_urlencoded::from_str(query).context(InvalidQueryString {
         query_string: query,
     })?;
+
+    let planner = SQLQueryPlanner::default();
+    let executor = server.executor();
 
     let db_name = org_and_bucket_to_database(&read_info.org, &read_info.bucket)
         .context(BucketMappingError)?;
@@ -308,26 +420,112 @@ async fn read<M: ConnectionManager + std::fmt::Debug>(
         bucket: read_info.bucket.clone(),
     })?;
 
-    let results = db
-        .query(&read_info.sql_query)
+    let physical_plan = planner
+        .query(db.as_ref(), &read_info.sql_query, executor.as_ref())
+        .await
+        .context(PlanningSQLQuery { query })?;
+
+    let batches = collect(physical_plan)
         .await
         .map_err(|e| Box::new(e) as _)
-        .context(QueryError {})?;
-    let results = arrow::util::pretty::pretty_format_batches(&results).unwrap();
+        .context(Query { db_name })?;
 
-    Ok(Some(results.into_bytes().into()))
+    let results = arrow::util::pretty::pretty_format_batches(&batches).unwrap();
+
+    Ok(Response::new(Body::from(results.into_bytes())))
+}
+
+#[tracing::instrument(level = "debug")]
+async fn create_database_handler<M>(req: Request<Body>) -> Result<Response<Body>, ApplicationError>
+where
+    M: ConnectionManager + Send + Sync + Debug + 'static,
+{
+    match create_database::<M>(req).await {
+        Err(e) => {
+            error!(error = ?e, error_message = ?e.to_string(), "Error while handling request");
+
+            e.response()
+        }
+        res => res,
+    }
+}
+
+#[tracing::instrument(level = "debug")]
+async fn create_database<M: ConnectionManager + Send + Sync + Debug + 'static>(
+    req: Request<Body>,
+) -> Result<Response<Body>, ApplicationError> {
+    let server = req
+        .data::<Arc<AppServer<M>>>()
+        .expect("server state")
+        .clone();
+
+    // with routerify, we shouldn't have gotten here without this being set
+    let db_name = req
+        .param("name")
+        .expect("db name must have been set")
+        .clone();
+    let body = parse_body(req).await?;
+
+    let rules: DatabaseRules = serde_json::from_slice(body.as_ref()).context(InvalidRequestBody)?;
+
+    server
+        .create_database(db_name, rules)
+        .await
+        .context(ErrorCreatingDatabase)?;
+
+    Ok(Response::new(Body::empty()))
+}
+
+#[tracing::instrument(level = "debug")]
+async fn get_database_handler<M>(req: Request<Body>) -> Result<Response<Body>, ApplicationError>
+where
+    M: ConnectionManager + Send + Sync + Debug + 'static,
+{
+    match get_database::<M>(req).await {
+        Err(e) => {
+            error!(error = ?e, error_message = ?e.to_string(), "Error while handling request");
+
+            e.response()
+        }
+        res => res,
+    }
+}
+
+#[tracing::instrument(level = "debug")]
+async fn get_database<M: ConnectionManager + Send + Sync + Debug + 'static>(
+    req: Request<Body>,
+) -> Result<Response<Body>, ApplicationError> {
+    let server = req
+        .data::<Arc<AppServer<M>>>()
+        .expect("server state")
+        .clone();
+
+    // with routerify, we shouldn't have gotten here without this being set
+    let db_name_str = req
+        .param("name")
+        .expect("db name must have been set")
+        .clone();
+    let db_name = DatabaseName::new(&db_name_str).context(DatabaseNameError)?;
+    let db = server
+        .db_rules(&db_name)
+        .await
+        .context(DatabaseNotFound { name: &db_name_str })?;
+
+    let data = serde_json::to_string(&db).context(JsonGenerationError)?;
+    let response = Response::builder()
+        .header("Content-Type", "application/json")
+        .status(StatusCode::OK)
+        .body(Body::from(data))
+        .expect("builder should be successful");
+
+    Ok(response)
 }
 
 // Route to test that the server is alive
 #[tracing::instrument(level = "debug")]
-async fn ping(req: hyper::Request<Body>) -> Result<Option<Body>, ApplicationError> {
+async fn ping(req: Request<Body>) -> Result<Response<Body>, ApplicationError> {
     let response_body = "PONG";
-    Ok(Some(response_body.into()))
-}
-
-fn no_op(name: &str) -> Result<Option<Body>, ApplicationError> {
-    info!("NOOP: {}", name);
-    Ok(None)
+    Ok(Response::new(Body::from(response_body.to_string())))
 }
 
 #[derive(Deserialize, Debug)]
@@ -338,10 +536,28 @@ struct DatabaseInfo {
 }
 
 #[tracing::instrument(level = "debug")]
-async fn list_partitions<M: ConnectionManager + std::fmt::Debug>(
-    req: hyper::Request<Body>,
-    app_server: Arc<AppServer<M>>,
-) -> Result<Option<Body>, ApplicationError> {
+async fn list_partitions_handler<M>(req: Request<Body>) -> Result<Response<Body>, ApplicationError>
+where
+    M: ConnectionManager + Send + Sync + Debug + 'static,
+{
+    match list_partitions::<M>(req).await {
+        Err(e) => {
+            error!(error = ?e, error_message = ?e.to_string(), "Error while handling request");
+
+            e.response()
+        }
+        res => res,
+    }
+}
+
+#[tracing::instrument(level = "debug")]
+async fn list_partitions<M: ConnectionManager + Send + Sync + Debug + 'static>(
+    req: Request<Body>,
+) -> Result<Response<Body>, ApplicationError> {
+    let server = req
+        .data::<Arc<AppServer<M>>>()
+        .expect("server state")
+        .clone();
     let query = req.uri().query().context(ExpectedQueryString {})?;
 
     let info: DatabaseInfo = serde_urlencoded::from_str(query).context(InvalidQueryString {
@@ -351,7 +567,7 @@ async fn list_partitions<M: ConnectionManager + std::fmt::Debug>(
     let db_name =
         org_and_bucket_to_database(&info.org, &info.bucket).context(BucketMappingError)?;
 
-    let db = app_server.db(&db_name).await.context(BucketNotFound {
+    let db = server.db(&db_name).await.context(BucketNotFound {
         org: &info.org,
         bucket: &info.bucket,
     })?;
@@ -367,7 +583,7 @@ async fn list_partitions<M: ConnectionManager + std::fmt::Debug>(
 
     let result = serde_json::to_string(&partition_keys).context(JsonGenerationError)?;
 
-    Ok(Some(result.into_bytes().into()))
+    Ok(Response::new(Body::from(result)))
 }
 
 #[derive(Deserialize, Debug)]
@@ -379,10 +595,30 @@ struct SnapshotInfo {
 }
 
 #[tracing::instrument(level = "debug")]
-async fn snapshot_partition<M: ConnectionManager + std::fmt::Debug>(
-    req: hyper::Request<Body>,
-    server: Arc<AppServer<M>>,
-) -> Result<Option<Body>, ApplicationError> {
+async fn snapshot_partition_handler<M>(
+    req: Request<Body>,
+) -> Result<Response<Body>, ApplicationError>
+where
+    M: ConnectionManager + Send + Sync + Debug + 'static,
+{
+    match snapshot_partition::<M>(req).await {
+        Err(e) => {
+            error!(error = ?e, error_message = ?e.to_string(), "Error while handling request");
+
+            e.response()
+        }
+        res => res,
+    }
+}
+
+#[tracing::instrument(level = "debug")]
+async fn snapshot_partition<M: ConnectionManager + Send + Sync + Debug + 'static>(
+    req: Request<Body>,
+) -> Result<Response<Body>, ApplicationError> {
+    let server = req
+        .data::<Arc<AppServer<M>>>()
+        .expect("server state")
+        .clone();
     let query = req.uri().query().context(ExpectedQueryString {})?;
 
     let snapshot: SnapshotInfo = serde_urlencoded::from_str(query).context(InvalidQueryString {
@@ -399,62 +635,33 @@ async fn snapshot_partition<M: ConnectionManager + std::fmt::Debug>(
         bucket: &snapshot.bucket,
     })?;
 
-    let metadata_path = format!("{}/meta", &db_name);
-    let data_path = format!("{}/data/{}", &db_name, &snapshot.partition);
-    let partition = db.remove_partition(&snapshot.partition).await.unwrap();
-    let snapshot = server::snapshot::snapshot_partition(
+    let mut metadata_path = ObjectStorePath::default();
+    metadata_path.push(&db_name.to_string());
+    let mut data_path = metadata_path.clone();
+    metadata_path.push("meta");
+    data_path.push_all(&["data", &snapshot.partition]);
+
+    let partition_key = &snapshot.partition;
+    let chunk = db.rollover_partition(partition_key).await.unwrap();
+    let snapshot = server::snapshot::snapshot_chunk(
         metadata_path,
         data_path,
         server.store.clone(),
-        Arc::new(partition),
+        partition_key,
+        chunk,
         None,
     )
     .unwrap();
 
     let ret = format!("{}", snapshot.id);
-    Ok(Some(ret.into_bytes().into()))
+    Ok(Response::new(Body::from(ret)))
 }
 
-pub async fn service<M: ConnectionManager + std::fmt::Debug>(
-    req: hyper::Request<Body>,
+pub fn router_service<M: ConnectionManager + Send + Sync + Debug + 'static>(
     server: Arc<AppServer<M>>,
-) -> http::Result<hyper::Response<Body>> {
-    let method = req.method().clone();
-    let uri = req.uri().clone();
-
-    let response = match (req.method(), req.uri().path()) {
-        (&Method::POST, "/api/v2/write") => write(req, server).await,
-        (&Method::POST, "/api/v2/buckets") => no_op("create bucket"),
-        (&Method::GET, "/ping") => ping(req).await,
-        (&Method::GET, "/api/v2/read") => read(req, server).await,
-        // TODO: implement routing to change this API
-        (&Method::GET, "/api/v1/partitions") => list_partitions(req, server).await,
-        (&Method::POST, "/api/v1/snapshot") => snapshot_partition(req, server).await,
-        _ => Err(ApplicationError::RouteNotFound {
-            method: method.clone(),
-            path: uri.to_string(),
-        }),
-    };
-
-    let result = match response {
-        Ok(Some(body)) => hyper::Response::builder()
-            .body(body)
-            .expect("Should have been able to construct a response"),
-        Ok(None) => hyper::Response::builder()
-            .status(StatusCode::NO_CONTENT)
-            .body(Body::empty())
-            .expect("Should have been able to construct a response"),
-        Err(e) => {
-            error!(error = ?e, method = ?method, uri = ?uri, "Error while handing request");
-            let json = serde_json::json!({"error": e.to_string()}).to_string();
-            hyper::Response::builder()
-                .status(e.status_code())
-                .body(json.into())
-                .expect("Should have been able to construct a response")
-        }
-    };
-    info!(method = ?method, uri = ?uri, status = ?result.status(), "Handled request");
-    Ok(result)
+) -> RouterService<Body, ApplicationError> {
+    let router = router(server);
+    RouterService::new(router).unwrap()
 }
 
 #[cfg(test)]
@@ -462,16 +669,17 @@ mod tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+    use arrow_deps::{arrow::record_batch::RecordBatch, assert_table_eq};
     use http::header;
+    use query::exec::Executor;
     use reqwest::{Client, Response};
 
-    use hyper::service::{make_service_fn, service_fn};
     use hyper::Server;
 
     use data_types::database_rules::DatabaseRules;
     use data_types::DatabaseName;
-    use object_store::{InMemory, ObjectStore};
-    use server::server::ConnectionManagerImpl;
+    use object_store::{memory::InMemory, ObjectStore};
+    use server::{db::Db, ConnectionManagerImpl};
 
     type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
     type Result<T, E = Error> = std::result::Result<T, E>;
@@ -533,22 +741,15 @@ mod tests {
             .await
             .expect("Database exists");
 
-        let results = test_db
-            .query("select * from h2o_temperature")
-            .await
-            .unwrap();
-        let results_str = arrow::util::pretty::pretty_format_batches(&results).unwrap();
-        let results: Vec<_> = results_str.split('\n').collect();
-
+        let batches = run_query(test_db.as_ref(), "select * from h2o_temperature").await;
         let expected = vec![
             "+----------------+--------------+-------+-----------------+------------+",
             "| bottom_degrees | location     | state | surface_degrees | time       |",
             "+----------------+--------------+-------+-----------------+------------+",
             "| 50.4           | santa_monica | CA    | 65.2            | 1568756160 |",
             "+----------------+--------------+-------+-----------------+------------+",
-            "",
         ];
-        assert_eq!(results, expected);
+        assert_table_eq!(expected, &batches);
 
         Ok(())
     }
@@ -602,12 +803,7 @@ mod tests {
             .await
             .expect("Database exists");
 
-        let results = test_db
-            .query("select * from h2o_temperature")
-            .await
-            .unwrap();
-        let results_str = arrow::util::pretty::pretty_format_batches(&results).unwrap();
-        let results: Vec<_> = results_str.split('\n').collect();
+        let batches = run_query(test_db.as_ref(), "select * from h2o_temperature").await;
 
         let expected = vec![
             "+----------------+--------------+-------+-----------------+------------+",
@@ -615,11 +811,70 @@ mod tests {
             "+----------------+--------------+-------+-----------------+------------+",
             "| 50.4           | santa_monica | CA    | 65.2            | 1568756160 |",
             "+----------------+--------------+-------+-----------------+------------+",
-            "",
         ];
-        assert_eq!(results, expected);
+        assert_table_eq!(expected, &batches);
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_database() {
+        let server = Arc::new(AppServer::new(
+            ConnectionManagerImpl {},
+            Arc::new(ObjectStore::new_in_memory(InMemory::new())),
+        ));
+        server.set_id(1).await;
+        let server_url = test_server(server.clone());
+
+        let data = r#"{"store_locally": true}"#;
+
+        let database_name = DatabaseName::new("foo_bar").unwrap();
+
+        let client = Client::new();
+        let response = client
+            .put(&format!(
+                "{}/iox/api/v1/databases/{}",
+                server_url, database_name
+            ))
+            .body(data)
+            .send()
+            .await;
+
+        check_response("create_database", response, StatusCode::OK, "").await;
+
+        server.db(&database_name).await.unwrap();
+        let db_rules = server.db_rules(&database_name).await.unwrap();
+        assert_eq!(db_rules.store_locally, true);
+    }
+
+    #[tokio::test]
+    async fn get_database() {
+        let server = Arc::new(AppServer::new(
+            ConnectionManagerImpl {},
+            Arc::new(ObjectStore::new_in_memory(InMemory::new())),
+        ));
+        server.set_id(1).await;
+        let server_url = test_server(server.clone());
+
+        let rules = DatabaseRules {
+            store_locally: true,
+            ..Default::default()
+        };
+        let data = serde_json::to_string(&rules).unwrap();
+
+        let database_name = "foo_bar";
+        server.create_database(database_name, rules).await.unwrap();
+
+        let client = Client::new();
+        let response = client
+            .get(&format!(
+                "{}/iox/api/v1/databases/{}",
+                server_url, database_name
+            ))
+            .send()
+            .await;
+
+        check_response("create_database", response, StatusCode::OK, &data).await;
     }
 
     /// checks a http response against expected results
@@ -650,15 +905,7 @@ mod tests {
     /// creates an instance of the http service backed by a in-memory
     /// testable database.  Returns the url of the server
     fn test_server(server: Arc<AppServer<ConnectionManagerImpl>>) -> String {
-        let make_svc = make_service_fn(move |_conn| {
-            let server = server.clone();
-            async move {
-                Ok::<_, http::Error>(service_fn(move |req| {
-                    let server = server.clone();
-                    super::service(req, server)
-                }))
-            }
-        });
+        let make_svc = router_service(server);
 
         // NB: specify port 0 to let the OS pick the port.
         let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
@@ -667,5 +914,14 @@ mod tests {
         tokio::task::spawn(server);
         println!("Started server at {}", server_url);
         server_url
+    }
+
+    /// Run the specified SQL query and return formatted results as a string
+    async fn run_query(db: &Db, query: &str) -> Vec<RecordBatch> {
+        let planner = SQLQueryPlanner::default();
+        let executor = Executor::new();
+        let physical_plan = planner.query(db, query, &executor).await.unwrap();
+
+        collect(physical_plan).await.unwrap()
     }
 }

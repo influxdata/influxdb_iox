@@ -1,15 +1,13 @@
 //! This module handles the manipulation / execution of storage
 //! plans. This is currently implemented using DataFusion, and this
 //! interface abstracts away many of the details
+pub(crate) mod context;
 mod counters;
+pub mod field;
 pub mod fieldlist;
-mod planning;
 mod schema_pivot;
 pub mod seriesset;
 pub mod stringset;
-
-// Export function to make window bounds without exposing its implementation
-pub use planning::make_window_bound_expr;
 
 use std::sync::Arc;
 
@@ -19,7 +17,8 @@ use arrow_deps::{
 };
 use counters::ExecutionCounters;
 
-use planning::IOxExecutionContext;
+use context::IOxExecutionContext;
+use field::FieldColumns;
 use schema_pivot::SchemaPivotNode;
 
 use fieldlist::{FieldList, IntoFieldList};
@@ -164,7 +163,7 @@ pub struct SeriesSetPlan {
     /// Note these are `Arc` strings because they are duplicated for
     /// *each* resulting `SeriesSet` that is produced when this type
     /// of plan is executed.
-    pub field_columns: Vec<Arc<String>>,
+    pub field_columns: FieldColumns,
 
     /// If present, how many of the series_set_plan::tag_columns
     /// should be used to compute the group
@@ -173,13 +172,24 @@ pub struct SeriesSetPlan {
 
 impl SeriesSetPlan {
     /// Create a SeriesSetPlan that will not produce any Group items
-    pub fn new(
+    pub fn new_from_shared_timestamp(
         table_name: Arc<String>,
         plan: LogicalPlan,
         tag_columns: Vec<Arc<String>>,
         field_columns: Vec<Arc<String>>,
     ) -> Self {
+        Self::new(table_name, plan, tag_columns, field_columns.into())
+    }
+
+    /// Create a SeriesSetPlan that will not produce any Group items
+    pub fn new(
+        table_name: Arc<String>,
+        plan: LogicalPlan,
+        tag_columns: Vec<Arc<String>>,
+        field_columns: FieldColumns,
+    ) -> Self {
         let num_prefix_tag_group_columns = None;
+
         Self {
             table_name,
             plan,
@@ -234,7 +244,8 @@ impl Executor {
     pub async fn to_string_set(&self, plan: StringSetPlan) -> Result<StringSetRef> {
         match plan {
             StringSetPlan::Known(res) => res,
-            StringSetPlan::Plan(plans) => run_logical_plans(self.counters.clone(), plans)
+            StringSetPlan::Plan(plans) => self
+                .run_logical_plans(plans)
                 .await?
                 .into_stringset()
                 .context(StringSetConversion),
@@ -271,8 +282,8 @@ impl Executor {
         let handles = plans
             .into_iter()
             .map(|plan| {
-                // Clone Arc's for transmission to threads
-                let counters = self.counters.clone();
+                // TODO run these on some executor other than the main tokio pool (maybe?)
+                let ctx = self.new_context();
                 let (plan_tx, plan_rx) = mpsc::channel(1);
                 rx_channels.push(plan_rx);
 
@@ -286,12 +297,9 @@ impl Executor {
                     } = plan;
 
                     let tag_columns = Arc::new(tag_columns);
-                    let field_columns = Arc::new(field_columns);
 
-                    // TODO run these on some executor other than the main tokio pool (maybe?)
-                    let ctx = IOxExecutionContext::new(counters);
                     let physical_plan = ctx
-                        .make_plan(&plan)
+                        .prepare_plan(&plan)
                         .await
                         .context(DataFusionPhysicalPlanning)?;
 
@@ -349,7 +357,7 @@ impl Executor {
                         tokio::task::spawn(async move {
                             let ctx = IOxExecutionContext::new(counters);
                             let physical_plan = ctx
-                                .make_plan(&plan)
+                                .prepare_plan(&plan)
                                 .await
                                 .context(DataFusionPhysicalPlanning)?;
 
@@ -381,8 +389,40 @@ impl Executor {
 
     /// Run the plan and return a record batch reader for reading the results
     pub async fn run_logical_plan(&self, plan: LogicalPlan) -> Result<Vec<RecordBatch>> {
-        let counters = self.counters.clone();
-        run_logical_plans(counters, vec![plan]).await
+        self.run_logical_plans(vec![plan]).await
+    }
+
+    /// Create a new execution context, suitable for executing a new query
+    pub fn new_context(&self) -> IOxExecutionContext {
+        IOxExecutionContext::new(self.counters.clone())
+    }
+
+    /// plans and runs the plans in parallel and collects the results
+    /// run each plan in parallel and collect the results
+    async fn run_logical_plans(&self, plans: Vec<LogicalPlan>) -> Result<Vec<RecordBatch>> {
+        let value_futures = plans
+            .into_iter()
+            .map(|plan| {
+                let ctx = self.new_context();
+                // TODO run these on some executor other than the main tokio pool
+                tokio::task::spawn(async move {
+                    let physical_plan = ctx.prepare_plan(&plan).await.expect("making logical plan");
+
+                    // TODO: avoid this buffering
+                    ctx.collect(physical_plan)
+                        .await
+                        .context(DataFusionExecution)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        // now, wait for all the values to resolve and collect them together
+        let mut results = Vec::new();
+        for join_handle in value_futures {
+            let mut plan_result = join_handle.await.context(JoinError)??;
+            results.append(&mut plan_result);
+        }
+        Ok(results)
     }
 }
 /// Create a SchemaPivot node which  an arbitrary input like
@@ -403,38 +443,6 @@ pub fn make_schema_pivot(input: LogicalPlan) -> LogicalPlan {
     let node = Arc::new(SchemaPivotNode::new(input));
 
     LogicalPlan::Extension { node }
-}
-
-/// plans and runs the plans in parallel and collects the results
-/// run each plan in parallel and collect the results
-async fn run_logical_plans(
-    counters: Arc<ExecutionCounters>,
-    plans: Vec<LogicalPlan>,
-) -> Result<Vec<RecordBatch>> {
-    let value_futures = plans
-        .into_iter()
-        .map(|plan| {
-            let counters = counters.clone();
-            // TODO run these on some executor other than the main tokio pool
-            tokio::task::spawn(async move {
-                let ctx = IOxExecutionContext::new(counters);
-                let physical_plan = ctx.make_plan(&plan).await.expect("making logical plan");
-
-                // TODO: avoid this buffering
-                ctx.collect(physical_plan)
-                    .await
-                    .context(DataFusionExecution)
-            })
-        })
-        .collect::<Vec<_>>();
-
-    // now, wait for all the values to resolve and collect them together
-    let mut results = Vec::new();
-    for join_handle in value_futures {
-        let mut plan_result = join_handle.await.context(JoinError)??;
-        results.append(&mut plan_result);
-    }
-    Ok(results)
 }
 
 #[cfg(test)]

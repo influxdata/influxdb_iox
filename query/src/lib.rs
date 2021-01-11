@@ -8,54 +8,57 @@
 use arrow_deps::arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use data_types::{data::ReplicatedWrite, partition_metadata::Table as TableStats};
-use exec::{FieldListPlan, SeriesSetPlans, StringSetPlan};
-use influxdb_line_protocol::ParsedLine;
+use exec::{Executor, FieldListPlan, SeriesSetPlans, StringSetPlan};
 
 use std::{fmt::Debug, sync::Arc};
 
 pub mod exec;
+pub mod frontend;
 pub mod func;
 pub mod group_by;
 pub mod id;
 pub mod predicate;
 pub mod util;
-pub mod window;
 
 use self::group_by::GroupByAndAggregate;
 use self::predicate::{Predicate, TimestampRange};
 
-/// A `TSDatabase` describes something that Timeseries data using the
-/// InfluxDB Line Protocol data model (`ParsedLine` structures) and
-/// provides an interface to query that data. The query methods on
-/// this trait such as `tag_columns are specific to this data model.
+/// A `Database` is the main trait implemented by the IOx subsystems
+/// that store actual data.
 ///
-/// The IOx storage engine implements this trait to provide Timeseries
-/// specific queries, but also provides more generic access to the same
-/// underlying data via other interfaces (e.g. SQL).
+/// Databases store data organized by partitions and each partition stores
+/// data in Chunks.
 ///
-/// The InfluxDB Timeseries data model can can be thought of as a
-/// relational database table where each column has both a type as
-/// well as one of the following categories:
-///
-/// * Tag (always String type)
-/// * Field (Float64, Int64, UInt64, String, or Bool)
-/// * Time (Int64)
-///
-/// While the underlying storage is the same for columns in different
-/// categories with the same data type, columns of different
-/// categories are treated differently in the different query types.
+/// TODO: Move all Query and Line Protocol specific things out of this
+/// trait and into the various query planners.
 #[async_trait]
-pub trait TSDatabase: Debug + Send + Sync {
-    /// the type of partition that is stored by this database
-    type Partition: Send + Sync + 'static + PartitionChunk;
+pub trait Database: Debug + Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
-
-    /// writes parsed lines into this database
-    async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), Self::Error>;
 
     /// Stores the replicated write in the write buffer and, if enabled, the
     /// write ahead log.
     async fn store_replicated_write(&self, write: &ReplicatedWrite) -> Result<(), Self::Error>;
+
+    /// Fetch the specified table names and columns as Arrow
+    /// RecordBatches. Columns are returned in the order specified.
+    async fn table_to_arrow(
+        &self,
+        table_name: &str,
+        columns: &[&str],
+    ) -> Result<Vec<RecordBatch>, Self::Error>;
+
+    /// Return the partition keys for data in this DB
+    async fn partition_keys(&self) -> Result<Vec<String>, Self::Error>;
+
+    /// Return the table names that are in a given partition key
+    async fn table_names_for_partition(
+        &self,
+        partition_key: &str,
+    ) -> Result<Vec<String>, Self::Error>;
+
+    // ----------
+    // The functions below are slated for removal
+    // ---------
 
     /// Returns a plan that lists the names of tables in this
     /// database that have at least one row that matches the
@@ -107,63 +110,31 @@ pub trait TSDatabase: Debug + Send + Sync {
     ) -> Result<SeriesSetPlans, Self::Error>;
 }
 
-#[async_trait]
-pub trait SQLDatabase: Debug + Send + Sync {
-    /// the type of partition that is stored by this database
-    type Partition: Send + Sync + 'static + PartitionChunk;
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Execute the specified query and return arrow record batches with the
-    /// result
-    async fn query(&self, query: &str) -> Result<Vec<RecordBatch>, Self::Error>;
-
-    /// Fetch the specified table names and columns as Arrow
-    /// RecordBatches. Columns are returned in the order specified.
-    async fn table_to_arrow(
-        &self,
-        table_name: &str,
-        columns: &[&str],
-    ) -> Result<Vec<RecordBatch>, Self::Error>;
-
-    /// Return the partition keys for data in this DB
-    async fn partition_keys(&self) -> Result<Vec<String>, Self::Error>;
-
-    /// Return the table names that are in a given partition key
-    async fn table_names_for_partition(
-        &self,
-        partition_key: &str,
-    ) -> Result<Vec<String>, Self::Error>;
-
-    /// Removes the partition from the database and returns it
-    async fn remove_partition(
-        &self,
-        partition_key: &str,
-    ) -> Result<Arc<Self::Partition>, Self::Error>;
-}
-
 /// Collection of data that shares the same partition key
 pub trait PartitionChunk: Debug + Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    /// returns the partition key
-    fn key(&self) -> &str;
+    /// returns the Id of this chunk. Ids are unique within a
+    /// particular partition.
+    fn id(&self) -> u64;
 
     /// returns the partition metadata stats for every table in the partition
     fn table_stats(&self) -> Result<Vec<TableStats>, Self::Error>;
 
-    /// converts the table to an Arrow RecordBatch
+    /// converts the table to an Arrow RecordBatch and writes to dst
     fn table_to_arrow(
         &self,
+        dst: &mut Vec<RecordBatch>,
         table_name: &str,
         columns: &[&str],
-    ) -> Result<RecordBatch, Self::Error>;
+    ) -> Result<(), Self::Error>;
 }
 
 #[async_trait]
 /// Storage for `Databases` which can be retrieved by name
 pub trait DatabaseStore: Debug + Send + Sync {
     /// The type of database that is stored by this DatabaseStore
-    type Database: TSDatabase + SQLDatabase;
+    type Database: Database;
 
     /// The type of error this DataBase store generates
     type Error: std::error::Error + Send + Sync + 'static;
@@ -175,13 +146,17 @@ pub trait DatabaseStore: Debug + Send + Sync {
     /// Retrieve the database specified by `name`, creating it if it
     /// doesn't exist.
     async fn db_or_create(&self, name: &str) -> Result<Arc<Self::Database>, Self::Error>;
+
+    /// Provide a query executor to use for running queries on
+    /// databases in this `DatabaseStore`
+    fn executor(&self) -> Arc<Executor>;
 }
 
 // Note: I would like to compile this module only in the 'test' cfg,
 // but when I do so then other modules can not find them. For example:
 //
 // error[E0433]: failed to resolve: could not find `test` in `storage`
-//   --> src/server/write_buffer_routes.rs:353:19
+//   --> src/server/mutable_buffer_routes.rs:353:19
 //     |
 // 353 |     use query::test::TestDatabaseStore;
 //     |                ^^^^ could not find `test` in `query`

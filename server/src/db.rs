@@ -1,0 +1,242 @@
+//! This module contains the main IOx Database object which has the
+//! instances of the immutable buffer, read buffer, and object store
+
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+
+use async_trait::async_trait;
+use data_types::{data::ReplicatedWrite, database_rules::DatabaseRules};
+use mutable_buffer::MutableBufferDb;
+use query::Database;
+use read_buffer::Database as ReadBufferDb;
+use serde::{Deserialize, Serialize};
+use snafu::{OptionExt, ResultExt, Snafu};
+
+use crate::buffer::Buffer;
+
+mod chunk;
+use chunk::DBChunk;
+
+#[derive(Debug, Snafu)]
+pub enum Error {
+    #[snafu(display("Mutable Buffer Chunk Error: {}", source))]
+    MutableBufferChunk {
+        source: mutable_buffer::chunk::Error,
+    },
+
+    #[snafu(display("Cannot write to this database: no mutable buffer configured"))]
+    DatatbaseNotWriteable {},
+
+    #[snafu(display("Cannot read to this database: no mutable buffer configured"))]
+    DatabaseNotReadable {},
+
+    #[snafu(display("Error rolling partition: {}", source))]
+    RollingPartition {
+        source: mutable_buffer::database::Error,
+    },
+
+    #[snafu(display("Error querying mutable buffer: {}", source))]
+    MutableBufferRead {
+        source: mutable_buffer::database::Error,
+    },
+
+    #[snafu(display("Error writing to mutable buffer: {}", source))]
+    MutableBufferWrite {
+        source: mutable_buffer::database::Error,
+    },
+}
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+#[derive(Debug, Serialize, Deserialize)]
+/// This is the main IOx Database object. It is the root object of any
+/// specific InfluxDB IOx instance
+pub struct Db {
+    #[serde(flatten)]
+    pub rules: DatabaseRules,
+
+    #[serde(skip)]
+    /// The (optional) mutable buffer stores incoming writes. If a
+    /// database does not have a mutable buffer it can not accept
+    /// writes (it is a read replica)
+    pub mutable_buffer: Option<Arc<MutableBufferDb>>,
+
+    #[serde(skip)]
+    /// The read buffer holds chunk data in an in-memory optimized
+    /// format.
+    pub read_buffer: Arc<ReadBufferDb>,
+
+    #[serde(skip)]
+    wal_buffer: Option<Buffer>,
+
+    #[serde(skip)]
+    sequence: AtomicU64,
+}
+impl Db {
+    pub fn new(
+        rules: DatabaseRules,
+        mutable_buffer: Option<Arc<MutableBufferDb>>,
+        read_buffer: Arc<ReadBufferDb>,
+        wal_buffer: Option<Buffer>,
+        sequence: AtomicU64,
+    ) -> Self {
+        Self {
+            rules,
+            mutable_buffer,
+            read_buffer,
+            wal_buffer,
+            sequence,
+        }
+    }
+
+    /// Rolls over the active chunk in the database's specified partition
+    pub async fn rollover_partition(&self, partition_key: &str) -> Result<Arc<DBChunk>> {
+        if let Some(local_store) = self.mutable_buffer.as_ref() {
+            local_store
+                .rollover_partition(partition_key)
+                .await
+                .context(RollingPartition)
+                .map(|c| Arc::new(DBChunk::MutableBuffer(c)))
+        } else {
+            DatatbaseNotWriteable {}.fail()
+        }
+    }
+
+    /// Returns the next write sequence number
+    pub fn next_sequence(&self) -> u64 {
+        self.sequence.fetch_add(1, Ordering::SeqCst)
+    }
+}
+
+impl PartialEq for Db {
+    fn eq(&self, other: &Self) -> bool {
+        self.rules == other.rules
+    }
+}
+impl Eq for Db {}
+
+#[async_trait]
+impl Database for Db {
+    type Error = Error;
+
+    // Note that most of these functions will eventually be removed from
+    // this trait. For now, pass them directly on to the local store
+
+    async fn store_replicated_write(&self, write: &ReplicatedWrite) -> Result<(), Self::Error> {
+        self.mutable_buffer
+            .as_ref()
+            .context(DatatbaseNotWriteable)?
+            .store_replicated_write(write)
+            .await
+            .context(MutableBufferWrite)
+    }
+
+    async fn table_names(
+        &self,
+        predicate: query::predicate::Predicate,
+    ) -> Result<query::exec::StringSetPlan, Self::Error> {
+        self.mutable_buffer
+            .as_ref()
+            .context(DatabaseNotReadable)?
+            .table_names(predicate)
+            .await
+            .context(MutableBufferRead)
+    }
+
+    async fn tag_column_names(
+        &self,
+        predicate: query::predicate::Predicate,
+    ) -> Result<query::exec::StringSetPlan, Self::Error> {
+        self.mutable_buffer
+            .as_ref()
+            .context(DatabaseNotReadable)?
+            .tag_column_names(predicate)
+            .await
+            .context(MutableBufferRead)
+    }
+
+    async fn field_column_names(
+        &self,
+        predicate: query::predicate::Predicate,
+    ) -> Result<query::exec::FieldListPlan, Self::Error> {
+        self.mutable_buffer
+            .as_ref()
+            .context(DatabaseNotReadable)?
+            .field_column_names(predicate)
+            .await
+            .context(MutableBufferRead)
+    }
+
+    async fn column_values(
+        &self,
+        column_name: &str,
+        predicate: query::predicate::Predicate,
+    ) -> Result<query::exec::StringSetPlan, Self::Error> {
+        self.mutable_buffer
+            .as_ref()
+            .context(DatabaseNotReadable)?
+            .column_values(column_name, predicate)
+            .await
+            .context(MutableBufferRead)
+    }
+
+    async fn query_series(
+        &self,
+        predicate: query::predicate::Predicate,
+    ) -> Result<query::exec::SeriesSetPlans, Self::Error> {
+        self.mutable_buffer
+            .as_ref()
+            .context(DatabaseNotReadable)?
+            .query_series(predicate)
+            .await
+            .context(MutableBufferRead)
+    }
+
+    async fn query_groups(
+        &self,
+        predicate: query::predicate::Predicate,
+        gby_agg: query::group_by::GroupByAndAggregate,
+    ) -> Result<query::exec::SeriesSetPlans, Self::Error> {
+        self.mutable_buffer
+            .as_ref()
+            .context(DatabaseNotReadable)?
+            .query_groups(predicate, gby_agg)
+            .await
+            .context(MutableBufferRead)
+    }
+
+    async fn table_to_arrow(
+        &self,
+        table_name: &str,
+        columns: &[&str],
+    ) -> Result<Vec<arrow_deps::arrow::record_batch::RecordBatch>, Self::Error> {
+        self.mutable_buffer
+            .as_ref()
+            .context(DatabaseNotReadable)?
+            .table_to_arrow(table_name, columns)
+            .await
+            .context(MutableBufferRead)
+    }
+
+    async fn partition_keys(&self) -> Result<Vec<String>, Self::Error> {
+        self.mutable_buffer
+            .as_ref()
+            .context(DatabaseNotReadable)?
+            .partition_keys()
+            .await
+            .context(MutableBufferRead)
+    }
+
+    async fn table_names_for_partition(
+        &self,
+        partition_key: &str,
+    ) -> Result<Vec<String>, Self::Error> {
+        self.mutable_buffer
+            .as_ref()
+            .context(DatabaseNotReadable)?
+            .table_names_for_partition(partition_key)
+            .await
+            .context(MutableBufferRead)
+    }
+}

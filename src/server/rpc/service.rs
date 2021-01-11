@@ -29,12 +29,9 @@ use crate::server::rpc::input::GrpcInputs;
 use data_types::DatabaseName;
 
 use query::{
-    exec::{
-        seriesset::{Error as SeriesSetError, SeriesSetItem},
-        Executor as QueryExecutor,
-    },
+    exec::seriesset::{Error as SeriesSetError, SeriesSetItem},
     predicate::PredicateBuilder,
-    DatabaseStore, TSDatabase,
+    Database, DatabaseStore,
 };
 
 use snafu::{OptionExt, ResultExt, Snafu};
@@ -227,7 +224,6 @@ impl Error {
 #[derive(Debug)]
 pub struct GrpcService<T: DatabaseStore> {
     db_store: Arc<T>,
-    executor: Arc<QueryExecutor>,
 }
 
 impl<T> GrpcService<T>
@@ -235,8 +231,8 @@ where
     T: DatabaseStore + 'static,
 {
     /// Create a new GrpcService connected to `db_store`
-    pub fn new(db_store: Arc<T>, executor: Arc<QueryExecutor>) -> Self {
-        Self { db_store, executor }
+    pub fn new(db_store: Arc<T>) -> Self {
+        Self { db_store }
     }
 }
 
@@ -286,16 +282,9 @@ where
             predicate.loggable()
         );
 
-        read_filter_impl(
-            tx.clone(),
-            self.db_store.clone(),
-            self.executor.clone(),
-            db_name,
-            range,
-            predicate,
-        )
-        .await
-        .map_err(|e| e.to_status())?;
+        read_filter_impl(tx.clone(), self.db_store.clone(), db_name, range, predicate)
+            .await
+            .map_err(|e| e.to_status())?;
 
         Ok(tonic::Response::new(rx))
     }
@@ -332,8 +321,6 @@ where
             InternalHintsFieldNotSupported { hints }.fail()?
         }
 
-        warn!("read_group implementation not yet complete: https://github.com/influxdata/influxdb_iox/issues/448");
-
         let aggregate_string = format!(
             "aggregate: {:?}, group: {:?}, group_keys: {:?}",
             aggregate, group, group_keys
@@ -349,7 +336,6 @@ where
         query_group_impl(
             tx.clone(),
             self.db_store.clone(),
-            self.executor.clone(),
             db_name,
             range,
             predicate,
@@ -400,7 +386,6 @@ where
         query_group_impl(
             tx.clone(),
             self.db_store.clone(),
-            self.executor.clone(),
             db_name,
             range,
             predicate,
@@ -441,7 +426,6 @@ where
 
         let response = tag_keys_impl(
             self.db_store.clone(),
-            self.executor.clone(),
             db_name,
             measurement,
             range,
@@ -491,8 +475,7 @@ where
                 unimplemented!("tag_value for a measurement, with general predicate");
             }
 
-            measurement_name_impl(self.db_store.clone(), self.executor.clone(), db_name, range)
-                .await
+            measurement_name_impl(self.db_store.clone(), db_name, range).await
         } else if tag_key.is_field() {
             info!(
                 "tag_values with tag_key=[xff] (field name) for database {}, range: {:?}, predicate: {} --> returning fields",
@@ -500,15 +483,8 @@ where
                 predicate.loggable()
             );
 
-            let fieldlist = field_names_impl(
-                self.db_store.clone(),
-                self.executor.clone(),
-                db_name,
-                None,
-                range,
-                predicate,
-            )
-            .await?;
+            let fieldlist =
+                field_names_impl(self.db_store.clone(), db_name, None, range, predicate).await?;
 
             // Pick out the field names into a Vec<Vec<u8>>for return
             let values = fieldlist
@@ -531,7 +507,6 @@ where
 
             tag_values_impl(
                 self.db_store.clone(),
-                self.executor.clone(),
                 db_name,
                 tag_key,
                 measurement,
@@ -569,15 +544,18 @@ where
         //
 
         // For now, hard code our list of support
-        let caps = [(
-            "WindowAggregate",
-            vec![
-                "Count", "Sum", // "First"
-                // "Last",
-                "Min", "Max", "Mean",
-                // "Offset"
-            ],
-        )];
+        let caps = [
+            (
+                "WindowAggregate",
+                vec![
+                    "Count", "Sum", // "First"
+                    // "Last",
+                    "Min", "Max", "Mean",
+                    // "Offset"
+                ],
+            ),
+            ("Group", vec!["First", "Last", "Min", "Max"]),
+        ];
 
         // Turn it into the HashMap -> Capabiltity
         let caps = caps
@@ -628,10 +606,9 @@ where
             predicate.loggable()
         );
 
-        let response =
-            measurement_name_impl(self.db_store.clone(), self.executor.clone(), db_name, range)
-                .await
-                .map_err(|e| e.to_status());
+        let response = measurement_name_impl(self.db_store.clone(), db_name, range)
+            .await
+            .map_err(|e| e.to_status());
 
         tx.send(response)
             .await
@@ -671,7 +648,6 @@ where
 
         let response = tag_keys_impl(
             self.db_store.clone(),
-            self.executor.clone(),
             db_name,
             measurement,
             range,
@@ -717,7 +693,6 @@ where
 
         let response = tag_values_impl(
             self.db_store.clone(),
-            self.executor.clone(),
             db_name,
             tag_key,
             measurement,
@@ -764,7 +739,6 @@ where
 
         let response = field_names_impl(
             self.db_store.clone(),
-            self.executor.clone(),
             db_name,
             measurement,
             range,
@@ -814,7 +788,6 @@ fn get_database_name(input: &impl GrpcInputs) -> Result<DatabaseName<'static>, S
 /// (optional) range
 async fn measurement_name_impl<T>(
     db_store: Arc<T>,
-    executor: Arc<QueryExecutor>,
     db_name: DatabaseName<'static>,
     range: Option<TimestampRange>,
 ) -> Result<StringValuesResponse>
@@ -833,6 +806,8 @@ where
             db_name: db_name.to_string(),
             source: Box::new(e),
         })?;
+
+    let executor = db_store.executor();
 
     let table_names = executor
         .to_string_set(plan)
@@ -855,7 +830,6 @@ where
 /// predicates
 async fn tag_keys_impl<T>(
     db_store: Arc<T>,
-    executor: Arc<QueryExecutor>,
     db_name: DatabaseName<'static>,
     measurement: Option<String>,
     range: Option<TimestampRange>,
@@ -879,6 +853,8 @@ where
         .db(&db_name)
         .await
         .context(DatabaseNotFound { db_name: &*db_name })?;
+
+    let executor = db_store.executor();
 
     let tag_key_plan = db
         .tag_column_names(predicate)
@@ -910,7 +886,6 @@ where
 /// arbitratry predicates
 async fn tag_values_impl<T>(
     db_store: Arc<T>,
-    executor: Arc<QueryExecutor>,
     db_name: DatabaseName<'static>,
     tag_name: String,
     measurement: Option<String>,
@@ -935,6 +910,8 @@ where
         .db(&db_name)
         .await
         .context(DatabaseNotFound { db_name: &*db_name })?;
+
+    let executor = db_store.executor();
 
     let tag_value_plan =
         db.column_values(&tag_name, predicate)
@@ -972,7 +949,6 @@ where
 async fn read_filter_impl<'a, T>(
     tx: mpsc::Sender<Result<ReadResponse, Status>>,
     db_store: Arc<T>,
-    executor: Arc<QueryExecutor>,
     db_name: DatabaseName<'static>,
     range: Option<TimestampRange>,
     rpc_predicate: Option<Predicate>,
@@ -994,6 +970,8 @@ where
         .db(&db_name)
         .await
         .context(DatabaseNotFound { db_name: &*db_name })?;
+
+    let executor = db_store.executor();
 
     let series_plan =
         db.query_series(predicate)
@@ -1054,7 +1032,6 @@ async fn convert_series_set(
 async fn query_group_impl<T>(
     tx: mpsc::Sender<Result<ReadResponse, Status>>,
     db_store: Arc<T>,
-    executor: Arc<QueryExecutor>,
     db_name: DatabaseName<'static>,
     range: Option<TimestampRange>,
     rpc_predicate: Option<Predicate>,
@@ -1077,6 +1054,8 @@ where
         .db(&db_name)
         .await
         .context(DatabaseNotFound { db_name: &*db_name })?;
+
+    let executor = db_store.executor();
 
     let grouped_series_set_plan =
         db.query_groups(predicate, gby_agg)
@@ -1115,7 +1094,6 @@ where
 /// predicate
 async fn field_names_impl<T>(
     db_store: Arc<T>,
-    executor: Arc<QueryExecutor>,
     db_name: DatabaseName<'static>,
     measurement: Option<String>,
     range: Option<TimestampRange>,
@@ -1139,6 +1117,8 @@ where
         .db(&db_name)
         .await
         .context(DatabaseNotFound { db_name: &*db_name })?;
+
+    let executor = db_store.executor();
 
     let fieldlist_plan =
         db.field_column_names(predicate)
@@ -1164,23 +1144,13 @@ where
 /// implementing the IOx and Storage gRPC interfaces, the
 /// underlying hyper server instance. Resolves when the server has
 /// shutdown.
-pub async fn make_server<T>(
-    socket: TcpListener,
-    storage: Arc<T>,
-    executor: Arc<QueryExecutor>,
-) -> Result<()>
+pub async fn make_server<T>(socket: TcpListener, storage: Arc<T>) -> Result<()>
 where
     T: DatabaseStore + 'static,
 {
     tonic::transport::Server::builder()
-        .add_service(IOxTestingServer::new(GrpcService::new(
-            storage.clone(),
-            executor.clone(),
-        )))
-        .add_service(StorageServer::new(GrpcService::new(
-            storage.clone(),
-            executor.clone(),
-        )))
+        .add_service(IOxTestingServer::new(GrpcService::new(storage.clone())))
+        .add_service(StorageServer::new(GrpcService::new(storage.clone())))
         .serve_with_incoming(socket)
         .await
         .context(ServerError {})
@@ -1190,8 +1160,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::panic::SendPanicsToTracing;
     use arrow_deps::arrow::datatypes::DataType;
+    use panic_logging::SendPanicsToTracing;
     use query::{
         exec::fieldlist::{Field, FieldList},
         exec::FieldListPlan,
@@ -1240,6 +1210,8 @@ mod tests {
             "WindowAggregate".into(),
             to_str_vec(&["Count", "Sum", "Min", "Max", "Mean"]),
         );
+
+        expected_capabilities.insert("Group".into(), to_str_vec(&["First", "Last", "Min", "Max"]));
 
         assert_eq!(
             expected_capabilities,
@@ -2587,7 +2559,6 @@ mod tests {
         iox_client: IOxTestingClient,
         storage_client: StorageClientWrapper,
         test_storage: Arc<TestDatabaseStore>,
-        _test_executor: Arc<QueryExecutor>,
     }
 
     impl Fixture {
@@ -2595,7 +2566,6 @@ mod tests {
         /// a fixture with the test server and clients
         async fn new() -> Result<Self, FixtureError> {
             let test_storage = Arc::new(TestDatabaseStore::new());
-            let test_executor = Arc::new(QueryExecutor::default());
 
             // Get a random port from the kernel by asking for port 0.
             let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
@@ -2608,7 +2578,7 @@ mod tests {
 
             println!("Starting InfluxDB IOx rpc test server on {:?}", bind_addr);
 
-            let server = make_server(socket, test_storage.clone(), test_executor.clone());
+            let server = make_server(socket, test_storage.clone());
             tokio::task::spawn(server);
 
             let iox_client = connect_to_server::<IOxTestingClient>(bind_addr)
@@ -2624,7 +2594,6 @@ mod tests {
                 iox_client,
                 storage_client,
                 test_storage,
-                _test_executor: test_executor,
             })
         }
     }

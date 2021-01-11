@@ -3,17 +3,20 @@
 
 use arrow_deps::arrow::record_batch::RecordBatch;
 
-use crate::group_by::GroupByAndAggregate;
+use crate::{exec::Executor, group_by::GroupByAndAggregate};
 use crate::{
     exec::FieldListPlan,
     exec::{
         stringset::{StringSet, StringSetRef},
         SeriesSetPlans, StringSetPlan,
     },
-    DatabaseStore, PartitionChunk, Predicate, SQLDatabase, TSDatabase, TimestampRange,
+    Database, DatabaseStore, PartitionChunk, Predicate, TimestampRange,
 };
 
-use data_types::data::ReplicatedWrite;
+use data_types::{
+    data::{lines_to_replicated_write, ReplicatedWrite},
+    database_rules::{DatabaseRules, PartitionTemplate, TemplatePart},
+};
 use influxdb_line_protocol::{parse_lines, ParsedLine};
 
 use async_trait::async_trait;
@@ -110,7 +113,14 @@ pub enum TestError {
 
     #[snafu(display("Test database execution:  {:?}", source))]
     Execution { source: crate::exec::Error },
+
+    #[snafu(display("Test error writing to database: {}", source))]
+    DatabaseWrite {
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
 }
+
+pub type Result<T, E = TestError> = std::result::Result<T, E>;
 
 impl TestDatabase {
     pub fn new() -> Self {
@@ -134,9 +144,14 @@ impl TestDatabase {
             .collect::<Result<Vec<_>, _>>()
             .unwrap_or_else(|_| panic!("parsing line protocol: {}", lp_data));
 
-        self.write_lines(&parsed_lines)
-            .await
-            .expect("writing lines");
+        let mut writer = TestLPWriter::default();
+        writer.write_lines(self, &parsed_lines).await.unwrap();
+
+        // Writes parsed lines into this database
+        let mut saved_lines = self.saved_lines.lock().await;
+        for line in parsed_lines {
+            saved_lines.push(line.to_string())
+        }
     }
 
     /// Set the list of column names that will be returned on a call to
@@ -221,6 +236,7 @@ fn predicate_to_test_string(predicate: &Predicate) -> String {
         field_columns,
         exprs,
         range,
+        partition_key,
     } = predicate;
 
     let mut result = String::new();
@@ -242,23 +258,17 @@ fn predicate_to_test_string(predicate: &Predicate) -> String {
         write!(result, " range: {:?}", range).unwrap();
     }
 
+    if let Some(partition_key) = partition_key {
+        write!(result, " partition_key: {:?}", partition_key).unwrap();
+    }
+
     write!(result, "}}").unwrap();
     result
 }
 
 #[async_trait]
-impl TSDatabase for TestDatabase {
-    type Partition = TestPartition;
+impl Database for TestDatabase {
     type Error = TestError;
-
-    /// Writes parsed lines into this database
-    async fn write_lines(&self, lines: &[ParsedLine<'_>]) -> Result<(), Self::Error> {
-        let mut saved_lines = self.saved_lines.lock().await;
-        for line in lines {
-            saved_lines.push(line.to_string())
-        }
-        Ok(())
-    }
 
     /// Adds the replicated write to this database
     async fn store_replicated_write(&self, write: &ReplicatedWrite) -> Result<(), Self::Error> {
@@ -398,38 +408,6 @@ impl TSDatabase for TestDatabase {
                 message: "No saved query_groups in TestDatabase",
             })
     }
-}
-
-#[async_trait]
-impl SQLDatabase for TestDatabase {
-    type Partition = TestPartition;
-    type Error = TestError;
-
-    /// Execute the specified query and return arrow record batches with the
-    /// result
-    async fn query(&self, _query: &str) -> Result<Vec<RecordBatch>, Self::Error> {
-        unimplemented!("query Not yet implemented");
-    }
-
-    /// Return the partition keys for data in this DB
-    async fn partition_keys(&self) -> Result<Vec<String>, Self::Error> {
-        unimplemented!("partition_keys not yet implemented for test database");
-    }
-
-    /// Return the table names that are in a given partition key
-    async fn table_names_for_partition(
-        &self,
-        _partition_key: &str,
-    ) -> Result<Vec<String>, Self::Error> {
-        unimplemented!("table_names_for_partition not yet implemented for test database");
-    }
-
-    async fn remove_partition(
-        &self,
-        _partition_key: &str,
-    ) -> Result<Arc<Self::Partition>, Self::Error> {
-        unimplemented!()
-    }
 
     /// Fetch the specified table names and columns as Arrow
     /// RecordBatches. Columns are returned in the order specified.
@@ -440,15 +418,28 @@ impl SQLDatabase for TestDatabase {
     ) -> Result<Vec<RecordBatch>, Self::Error> {
         unimplemented!()
     }
+
+    /// Return the partition keys for data in this DB
+    async fn partition_keys(&self) -> Result<Vec<String>, Self::Error> {
+        unimplemented!("partition_keys not yet for test database");
+    }
+
+    /// Return the table names that are in a given partition key
+    async fn table_names_for_partition(
+        &self,
+        _partition_key: &str,
+    ) -> Result<Vec<String>, Self::Error> {
+        unimplemented!("table_names_for_partition not implemented for test database");
+    }
 }
 
 #[derive(Debug)]
-pub struct TestPartition {}
+pub struct TestChunk {}
 
-impl PartitionChunk for TestPartition {
+impl PartitionChunk for TestChunk {
     type Error = TestError;
 
-    fn key(&self) -> &str {
+    fn id(&self) -> u64 {
         unimplemented!()
     }
 
@@ -458,9 +449,10 @@ impl PartitionChunk for TestPartition {
 
     fn table_to_arrow(
         &self,
+        _dst: &mut Vec<RecordBatch>,
         _table_name: &str,
         _columns: &[&str],
-    ) -> Result<RecordBatch, Self::Error> {
+    ) -> Result<(), Self::Error> {
         unimplemented!()
     }
 }
@@ -468,6 +460,7 @@ impl PartitionChunk for TestPartition {
 #[derive(Debug)]
 pub struct TestDatabaseStore {
     databases: Mutex<BTreeMap<String, Arc<TestDatabase>>>,
+    executor: Arc<Executor>,
 }
 
 impl TestDatabaseStore {
@@ -489,6 +482,7 @@ impl Default for TestDatabaseStore {
     fn default() -> Self {
         Self {
             databases: Mutex::new(BTreeMap::new()),
+            executor: Arc::new(Executor::new()),
         }
     }
 }
@@ -516,5 +510,45 @@ impl DatabaseStore for TestDatabaseStore {
             databases.insert(name.to_string(), new_db.clone());
             Ok(new_db)
         }
+    }
+
+    fn executor(&self) -> Arc<Executor> {
+        self.executor.clone()
+    }
+}
+
+/// Helper for writing line protocol data directly into test databases
+/// (handles creating sequence numbers and writer ids
+#[derive(Debug, Default)]
+pub struct TestLPWriter {
+    writer_id: u32,
+    sequence_number: u64,
+}
+
+impl TestLPWriter {
+    // writes data in LineProtocol format into a database
+    pub async fn write_lines<D: Database>(
+        &mut self,
+        database: &D,
+        lines: &[ParsedLine<'_>],
+    ) -> Result<()> {
+        // partitions data in hourly segments
+        let partition_template = PartitionTemplate {
+            parts: vec![TemplatePart::TimeFormat("%Y-%m-%dT%H".to_string())],
+        };
+
+        let rules = DatabaseRules {
+            partition_template,
+            ..Default::default()
+        };
+
+        let write = lines_to_replicated_write(self.writer_id, self.sequence_number, &lines, &rules);
+        self.sequence_number += 1;
+        database
+            .store_replicated_write(&write)
+            .await
+            .map_err(|e| TestError::DatabaseWrite {
+                source: Box::new(e),
+            })
     }
 }
