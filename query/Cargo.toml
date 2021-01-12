@@ -8,7 +8,7 @@ description = "IOx Query Interface and Executor"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-# This create is designed to be indepndent of the rest of the IOx
+# This create is designed to be independent of the rest of the IOx
 # server and specific storage systems such as Mutable Buffer and Read Buffer.
 #
 # The rationale for this is to:
