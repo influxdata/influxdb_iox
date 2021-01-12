@@ -542,6 +542,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn duplicate_database_name_rejected() -> Result {
+        // Covers #643
+
+        let manager = TestConnectionManager::new();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let server = Server::new(manager, store);
+        server.set_id(1).await;
+
+        let name = "bananas";
+
+        // Create a database
+        server
+            .create_database(name, DatabaseRules::default())
+            .await
+            .expect("failed to create database");
+
+        // Then try and create another with the same name
+        let got = server
+            .create_database(name, DatabaseRules::default())
+            .await
+            .unwrap_err();
+
+        if !matches!(got, Error::DatabaseAlreadyExists {..}) {
+            panic!("expected already exists error");
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn database_name_validation() -> Result {
         let manager = TestConnectionManager::new();
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
