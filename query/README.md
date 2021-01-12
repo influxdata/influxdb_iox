@@ -16,15 +16,15 @@ Sources of Chunk data
 * ReadBuffer
 * MutableBuffer
 * Parquet Files
-* Others (possibly in the fugure, like Remote Chunk?)
+* Others (possibly in the future, like Remote Chunk?)
 
 The goal is to use the shared query / plan representation in order to
-avoid N*M combinations of languge and Chunk source.
+avoid N*M combinations of language and Chunk source.
 
 Thus query planning is implemented in terms of traits, and those
-traits are implemented by different chunk impementations.
+traits are implemented by different chunk implementations.
 
-Amont othe rthings, this means that this crate should not depend
+Among other things, this means that this crate should not depend
 directly on the ReadBuffer or the MutableBuffer.
 
 
