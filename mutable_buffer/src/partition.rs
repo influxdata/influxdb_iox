@@ -137,8 +137,9 @@ impl Partition {
         chunks
     }
 
-    /// return the chunk by id (if it is closed). Returns an error if the chunk
-    /// is still open
+    /// return the chunk by id. If the requested chunk is still open,
+    /// returns a snapshot of that chunk which will not be affected by
+    /// subsequent writes.
     pub fn get_chunk(&self, chunk_id: u32) -> Result<Arc<Chunk>> {
         if let Some(chunk) = self.closed_chunks.get(&chunk_id) {
             Ok(chunk.clone())
