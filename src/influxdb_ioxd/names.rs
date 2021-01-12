@@ -1,6 +1,3 @@
-pub mod http_routes;
-pub mod rpc;
-
 use data_types::{DatabaseName, DatabaseNameError};
 use snafu::{ResultExt, Snafu};
 

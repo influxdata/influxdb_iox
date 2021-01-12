@@ -9,7 +9,7 @@
 //! Long term, we expect to create IOx specific api in terms of
 //! database names and may remove this quasi /v2 API.
 
-use super::{org_and_bucket_to_database, OrgBucketMappingError};
+use super::names::{org_and_bucket_to_database, OrgBucketMappingError};
 
 // Influx crates
 use arrow_deps::{arrow, datafusion::physical_plan::collect};
