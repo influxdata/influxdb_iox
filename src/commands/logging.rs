@@ -61,7 +61,6 @@ impl LoggingLevel {
                         lvl
                     );
                 } else {
-                    println!("Setting RUST_LOG: {}", lvl);
                     std::env::set_var("RUST_LOG", lvl);
                 }
             }
