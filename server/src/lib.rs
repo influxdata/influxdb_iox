@@ -135,6 +135,8 @@ pub enum Error {
     ErrorDeserializing { source: serde_json::Error },
     #[snafu(display("store error: {}", source))]
     StoreError { source: object_store::Error },
+    #[snafu(display("database already exists"))]
+    DatabaseAlreadyExists { db_name: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -209,7 +211,16 @@ impl<M: ConnectionManager> Server<M> {
         let db = Db::new(rules, mutable_buffer, read_buffer, wal_buffer, sequence);
 
         let mut config = self.config.write().await;
-        config.databases.insert(db_name, Arc::new(db));
+
+        // If the database already exists, do not overwrite it.
+        if config.databases.contains_key(&db_name) {
+            // TODO: update database configuration
+            return Err(Error::DatabaseAlreadyExists {
+                db_name: db_name.to_string(),
+            });
+        }
+
+        assert!(config.databases.insert(db_name, Arc::new(db)).is_none());
 
         Ok(())
     }
