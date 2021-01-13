@@ -35,9 +35,7 @@ impl LoggingLevel {
     /// Return a LoggingLevel that represents the most verbose logging
     /// of `self` and `other`
     pub fn combine(self, other: Self) -> Self {
-        let self_val: u64 = self.into();
-        let other_val: u64 = other.into();
-        Self::new(std::cmp::max(self_val, other_val))
+        Self::new(std::cmp::max(self as u64, other as u64))
     }
 
     /// set RUST_LOG to the level represented by self, unless RUST_LOG
@@ -124,15 +122,5 @@ impl LoggingLevel {
             .init();
 
         drop_handle
-    }
-}
-
-impl From<LoggingLevel> for u64 {
-    fn from(level: LoggingLevel) -> Self {
-        match level {
-            LoggingLevel::Default => 0,
-            LoggingLevel::Verbose => 1,
-            LoggingLevel::Debug => 2,
-        }
     }
 }
