@@ -196,28 +196,23 @@ async fn dispatch_args(matches: ArgMatches<'_>) {
         ("server", Some(sub_matches)) => {
             // Note don't set up basic logging here, different logging rules appy in server
             // mode
-            println!("InfluxDB IOx server starting");
-            match commands::influxdb_ioxd::main(logging_level, Some(Config::from_clap(sub_matches)))
-                .await
-            {
-                Ok(()) => eprintln!("Shutdown OK"),
-                Err(e) => {
-                    error!("Server shutdown with error: {}", e);
-                    std::process::exit(ReturnCode::ServerExitedAbnormally as _);
-                }
+            let res =
+                commands::influxdb_ioxd::main(logging_level, Some(Config::from_clap(sub_matches)))
+                    .await;
+
+            if let Err(e) = res {
+                error!("Server shutdown with error: {}", e);
+                std::process::exit(ReturnCode::ServerExitedAbnormally as _);
             }
         }
         // handle the case where the user didn't specify a command
         (_, _) => {
             // Note don't set up basic logging here, different logging rules appy in server
             // mode
-            println!("InfluxDB IOx server starting");
-            match commands::influxdb_ioxd::main(logging_level, None).await {
-                Ok(()) => eprintln!("Shutdown OK"),
-                Err(e) => {
-                    error!("Server shutdown with error: {}", e);
-                    std::process::exit(ReturnCode::ServerExitedAbnormally as _);
-                }
+            let res = commands::influxdb_ioxd::main(logging_level, None).await;
+            if let Err(e) = res {
+                error!("Server shutdown with error: {}", e);
+                std::process::exit(ReturnCode::ServerExitedAbnormally as _);
             }
         }
     }
