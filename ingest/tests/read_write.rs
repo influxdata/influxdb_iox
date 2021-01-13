@@ -1,3 +1,4 @@
+use data_types::schema::{builder::SchemaBuilder, LPFieldType};
 use ingest::parquet::writer::{CompressionLevel, IOxParquetTableWriter};
 use packers::{IOxTableWriter, Packer, Packers};
 
@@ -6,15 +7,18 @@ use std::fs;
 
 #[test]
 fn test_write_parquet_data() {
-    let schema = data_types::table_schema::SchemaBuilder::new("measurement_name")
+    let schema = SchemaBuilder::new()
+        .measurement("measurement_name")
         .tag("tag1")
-        .field("string_field", data_types::table_schema::DataType::String)
-        .field("float_field", data_types::table_schema::DataType::Float)
-        .field("int_field", data_types::table_schema::DataType::Integer)
-        .field("bool_field", data_types::table_schema::DataType::Boolean)
-        .build();
+        .lp_field("string_field", LPFieldType::String)
+        .lp_field("float_field", LPFieldType::Float)
+        .lp_field("int_field", LPFieldType::Integer)
+        .lp_field("bool_field", LPFieldType::Boolean)
+        .timestamp()
+        .build()
+        .unwrap();
 
-    assert_eq!(schema.get_col_defs().len(), 6);
+    assert_eq!(schema.len(), 6);
     let mut packers = vec![
         Packers::Bytes(Packer::new()),   // 0: tag1
         Packers::Bytes(Packer::new()),   // 1: string_field
