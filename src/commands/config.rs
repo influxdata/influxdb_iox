@@ -130,10 +130,81 @@ pub fn load_config() -> Config {
     // Load the Config struct - this pulls in any envs set by the user or
     // sourced above, and applies any defaults.
     //
-    // Strip the "server" portion of the args so the generated Clap instance
-    // plays nicely with the subcommand bits in main.
 
-    let args = std::env::args().filter(|arg| arg != "server");
+    //let args = std::env::args().filter(|arg| arg != "server");
+    Config::from_iter(strip_server(std::env::args()).iter())
+}
 
-    Config::from_iter(args)
+/// Strip everything prior to the "server" portion of the args so the generated
+/// Clap instance plays nicely with the subcommand bits in main.
+fn strip_server(args: impl Iterator<Item = String>) -> Vec<String> {
+    let mut seen_server = false;
+    args.enumerate()
+        .filter_map(|(i, arg)| {
+            if i != 0 && !seen_server {
+                if arg == "server" {
+                    seen_server = true;
+                }
+                None
+            } else {
+                Some(arg)
+            }
+        })
+        .collect::<Vec<_>>()
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    #[test]
+    fn test_strip_server() {
+        assert_eq!(
+            strip_server(to_vec(&["cmd",]).into_iter()),
+            to_vec(&["cmd"])
+        );
+        assert_eq!(
+            strip_server(to_vec(&["cmd", "-v"]).into_iter()),
+            to_vec(&["cmd"])
+        );
+        assert_eq!(
+            strip_server(to_vec(&["cmd", "-v", "server"]).into_iter()),
+            to_vec(&["cmd"])
+        );
+        assert_eq!(
+            strip_server(to_vec(&["cmd", "-v", "server", "-v"]).into_iter()),
+            to_vec(&["cmd", "-v"])
+        );
+        assert_eq!(
+            strip_server(to_vec(&["cmd", "-v", "server", "-vv"]).into_iter()),
+            to_vec(&["cmd", "-vv"])
+        );
+
+        // and it doesn't strip repeated instances of server
+        assert_eq!(
+            strip_server(to_vec(&["cmd", "-v", "server", "--gcp_path"]).into_iter()),
+            to_vec(&["cmd", "--gcp_path"])
+        );
+        assert_eq!(
+            strip_server(to_vec(&["cmd", "-v", "server", "--gcp_path", "server"]).into_iter()),
+            to_vec(&["cmd", "--gcp_path", "server"])
+        );
+
+        assert_eq!(
+            strip_server(to_vec(&["cmd", "-vv"]).into_iter()),
+            to_vec(&["cmd"])
+        );
+        assert_eq!(
+            strip_server(to_vec(&["cmd", "-vv", "server"]).into_iter()),
+            to_vec(&["cmd"])
+        );
+        assert_eq!(
+            strip_server(to_vec(&["cmd", "-vv", "server", "-vv"]).into_iter()),
+            to_vec(&["cmd", "-vv"])
+        );
+    }
+
+    fn to_vec(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
 }
