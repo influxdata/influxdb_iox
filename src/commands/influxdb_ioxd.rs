@@ -72,7 +72,7 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// This is the entry point for the IOx server. confg represents
+/// This is the entry point for the IOx server. `config` represents
 /// command line arguments, if any
 ///
 /// The logging_level passed in is the global setting (e.g. if -v or
