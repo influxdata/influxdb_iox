@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub mod http_routes;
-pub mod names;
 pub mod rpc;
 
 use server::{ConnectionManagerImpl as ConnectionManager, Server as AppServer};
