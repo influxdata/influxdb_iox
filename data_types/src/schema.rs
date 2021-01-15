@@ -5,7 +5,6 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt,
 };
-use tracing::warn;
 
 use arrow_deps::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
@@ -84,6 +83,14 @@ impl From<&Schema> for ArrowSchemaRef {
     }
 }
 
+impl TryFrom<ArrowSchemaRef> for Schema {
+    type Error = Error;
+
+    fn try_from(value: ArrowSchemaRef) -> Result<Self, Self::Error> {
+        Self::try_from_arrow(value)
+    }
+}
+
 const MEASUREMENT_METADATA_KEY: &str = "iox::measurement::name";
 
 impl Schema {
@@ -91,7 +98,7 @@ impl Schema {
     ///
     /// All metadata validation is done on creation (todo maybe offer
     /// a fallable version where the checks are done on access)?
-    pub fn new_from_arrow(inner: ArrowSchemaRef) -> Result<Self> {
+    fn try_from_arrow(inner: ArrowSchemaRef) -> Result<Self> {
         // All column names must be unique
         let mut field_names = HashSet::new();
         for f in inner.fields() {
@@ -174,9 +181,7 @@ impl Schema {
 
         // Call new_from_arrow to do normal, additional validation
         // (like dupe column detection)
-        Self::new_from_arrow(ArrowSchemaRef::new(ArrowSchema::new_with_metadata(
-            fields, metadata,
-        )))
+        ArrowSchemaRef::new(ArrowSchema::new_with_metadata(fields, metadata)).try_into()
     }
 
     /// Provide a reference to the underlying Arrow Schema object
@@ -418,7 +423,7 @@ mod test {
         ]));
 
         // Given a schema created from arrow record batch with no metadata
-        let schema = Schema::new_from_arrow(arrow_schema.clone()).unwrap();
+        let schema: Schema = arrow_schema.clone().try_into().unwrap();
         assert_eq!(schema.len(), 2);
 
         // It still works, but has no lp column types
@@ -459,7 +464,7 @@ mod test {
 
         let arrow_schema = ArrowSchemaRef::new(ArrowSchema::new_with_metadata(fields, metadata));
 
-        let schema = Schema::new_from_arrow(arrow_schema).unwrap();
+        let schema: Schema = arrow_schema.try_into().unwrap();
         assert_column_eq!(schema, 0, LPColumnType::Tag, "tag_col");
         assert_column_eq!(
             schema,
@@ -512,8 +517,8 @@ mod test {
 
         let arrow_schema = ArrowSchemaRef::new(ArrowSchema::new_with_metadata(fields, metadata));
 
-        // Having this succeed is a primary test
-        let schema = Schema::new_from_arrow(arrow_schema).unwrap();
+        // Having this succeed is the primary test
+        let schema: Schema = arrow_schema.try_into().unwrap();
 
         let (lp_column_type, field) = schema.field(0);
         assert_eq!(field.name(), "tag_col");
@@ -541,7 +546,7 @@ mod test {
 
         let arrow_schema = ArrowSchemaRef::new(ArrowSchema::new_with_metadata(fields, metadata));
 
-        let res = Schema::new_from_arrow(arrow_schema);
+        let res = Schema::try_from_arrow(arrow_schema);
         assert_eq!(res.unwrap_err().to_string(), "Error: Incompatible metadata type found in schema for column 'tag_col'. Metadata specified Tag which is incompatible with actual type Int64");
     }
 
@@ -559,7 +564,7 @@ mod test {
 
         let arrow_schema = ArrowSchemaRef::new(ArrowSchema::new_with_metadata(fields, metadata));
 
-        let res = Schema::new_from_arrow(arrow_schema);
+        let res = Schema::try_from_arrow(arrow_schema);
         assert_eq!(res.unwrap_err().to_string(), "Error: Incompatible metadata type found in schema for column 'int_col'. Metadata specified Field(Float) which is incompatible with actual type Int64");
     }
 
@@ -579,7 +584,7 @@ mod test {
 
         let arrow_schema = ArrowSchemaRef::new(ArrowSchema::new_with_metadata(fields, metadata));
 
-        let res = Schema::new_from_arrow(arrow_schema);
+        let res = Schema::try_from_arrow(arrow_schema);
         assert_eq!(res.unwrap_err().to_string(), "Error: Incompatible metadata type found in schema for column 'time'. Metadata specified Timestamp which is incompatible with actual type Utf8");
     }
 
@@ -594,7 +599,7 @@ mod test {
 
         let arrow_schema = ArrowSchemaRef::new(ArrowSchema::new(fields));
 
-        let res = Schema::new_from_arrow(arrow_schema);
+        let res = Schema::try_from_arrow(arrow_schema);
         assert_eq!(
             res.unwrap_err().to_string(),
             "Error: Duplicate column name found in schema: 'the_column'"
@@ -615,7 +620,7 @@ mod test {
         // the metadata makes it through a round trip
 
         let arrow_schema_1: ArrowSchemaRef = schema1.clone().into();
-        let schema2 = Schema::new_from_arrow(arrow_schema_1).unwrap();
+        let schema2 = Schema::try_from_arrow(arrow_schema_1).unwrap();
 
         for s in &[schema1, schema2] {
             assert_eq!(s.measurement().unwrap(), "the_measurement");

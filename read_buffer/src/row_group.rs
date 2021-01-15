@@ -1,4 +1,9 @@
-use std::{borrow::Cow, collections::BTreeMap, convert::TryFrom, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::BTreeMap,
+    convert::{TryFrom, TryInto},
+    sync::Arc,
+};
 
 use data_types::schema::{LPColumnType, Schema};
 use hashbrown::{hash_map, HashMap};
@@ -832,7 +837,9 @@ impl From<RecordBatch> for RowGroup {
     fn from(rb: RecordBatch) -> Self {
         let rows = rb.num_rows();
         // TODO proper error handling here if the input schema is bad
-        let schema = Schema::new_from_arrow(rb.schema())
+        let schema: Schema = rb
+            .schema()
+            .try_into()
             .expect("Valid timeseries schema when creating row group");
 
         let mut columns = BTreeMap::new();
