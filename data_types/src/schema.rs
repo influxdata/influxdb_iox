@@ -1,10 +1,4 @@
 //! This module contains the schema definiton for IOx
-#![warn(
-    missing_debug_implementations,
-    clippy::explicit_iter_loop,
-    clippy::use_self
-)]
-
 use snafu::Snafu;
 use std::{
     collections::{HashMap, HashSet},
