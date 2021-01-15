@@ -303,6 +303,9 @@ fn convert_to_parquet_schema(schema: &Schema) -> Result<Arc<parquet::schema::typ
             Some(InfluxColumnType::Field(InfluxFieldType::Integer)) => {
                 (PhysicalType::INT64, Some(LogicalType::UINT_64))
             }
+            Some(InfluxColumnType::Field(InfluxFieldType::UInteger)) => {
+                (PhysicalType::INT64, Some(LogicalType::UINT_64))
+            }
             Some(InfluxColumnType::Field(InfluxFieldType::String)) => {
                 (PhysicalType::BYTE_ARRAY, Some(LogicalType::UTF8))
             }
@@ -428,6 +431,14 @@ fn create_writer_props(
                     .set_column_dictionary_enabled(col_path, false);
             }
             Some(InfluxColumnType::Field(InfluxFieldType::Integer)) => {
+                builder = set_integer_encoding(
+                    influxdb_column_type.unwrap(),
+                    compression_level,
+                    col_path,
+                    builder,
+                )
+            }
+            Some(InfluxColumnType::Field(InfluxFieldType::UInteger)) => {
                 builder = set_integer_encoding(
                     influxdb_column_type.unwrap(),
                     compression_level,

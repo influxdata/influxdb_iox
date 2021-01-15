@@ -58,7 +58,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 ///
 /// The metadata can be used to map back and forth to the InfluxDB
 /// data model, which is described in the
-/// [documentation](https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_tutorial).
+/// [documentation](https://docs.influxdata.com/influxdb/v2.0/reference/syntax/line-protocol/).
 ///
 /// Specifically, each column in the Arrow schema has a corresponding
 /// InfluxDB data model type of Tag, Field or Timestamp which is stored in
@@ -236,13 +236,16 @@ impl Schema {
 
 /// Valid types for InfluxDB data model, as defined in [the documentation]
 ///
-/// [the documentation]: https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_tutorial/#data-types
+/// [the documentation]: https://docs.influxdata.com/influxdb/v2.0/reference/syntax/line-protocol/
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum InfluxFieldType {
     /// 64-bit floating point number (TDB if NULLs / Nans are allowed)
     Float,
     /// 64-bit signed integer
     Integer,
+    /// Unsigned 64-bit integers. Trailing u on the number specifies an unsigned
+    /// integer.
+    UInteger,
     /// UTF-8 encoded string
     String,
     /// true or false
@@ -254,6 +257,7 @@ impl From<InfluxFieldType> for ArrowDataType {
         match t {
             InfluxFieldType::Float => Self::Float64,
             InfluxFieldType::Integer => Self::Int64,
+            InfluxFieldType::UInteger => Self::UInt64,
             InfluxFieldType::String => Self::Utf8,
             InfluxFieldType::Boolean => Self::Boolean,
         }
@@ -267,6 +271,7 @@ impl TryFrom<ArrowDataType> for InfluxFieldType {
         match value {
             ArrowDataType::Float64 => Ok(Self::Float),
             ArrowDataType::Int64 => Ok(Self::Integer),
+            ArrowDataType::UInt64 => Ok(Self::UInteger),
             ArrowDataType::Utf8 => Ok(Self::String),
             ArrowDataType::Boolean => Ok(Self::Boolean),
             _ => Err("No corresponding type in the InfluxDB data model"),
@@ -275,7 +280,7 @@ impl TryFrom<ArrowDataType> for InfluxFieldType {
 }
 
 /// Valid types for fields in the InfluxDB data model, as described in the
-/// [documentation](https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_tutorial).
+/// [documentation](https://docs.influxdata.com/influxdb/v2.0/reference/syntax/line-protocol/).
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum InfluxColumnType {
     /// Tag
@@ -312,6 +317,9 @@ impl From<&InfluxColumnType> for &'static str {
             InfluxColumnType::Tag => "iox::column_type::tag",
             InfluxColumnType::Field(InfluxFieldType::Float) => "iox::column_type::field::float",
             InfluxColumnType::Field(InfluxFieldType::Integer) => "iox::column_type::field::integer",
+            InfluxColumnType::Field(InfluxFieldType::UInteger) => {
+                "iox::column_type::field::uinteger"
+            }
             InfluxColumnType::Field(InfluxFieldType::String) => "iox::column_type::field::string",
             InfluxColumnType::Field(InfluxFieldType::Boolean) => "iox::column_type::field::boolean",
             InfluxColumnType::Timestamp => "iox::column_type::timestamp",
@@ -335,6 +343,7 @@ impl TryFrom<&str> for InfluxColumnType {
             "iox::column_type::tag" => Ok(Self::Tag),
             "iox::column_type::field::float" => Ok(Self::Field(InfluxFieldType::Float)),
             "iox::column_type::field::integer" => Ok(Self::Field(InfluxFieldType::Integer)),
+            "iox::column_type::field::uinteger" => Ok(Self::Field(InfluxFieldType::UInteger)),
             "iox::column_type::field::string" => Ok(Self::Field(InfluxFieldType::String)),
             "iox::column_type::field::boolean" => Ok(Self::Field(InfluxFieldType::Boolean)),
             "iox::column_type::timestamp" => Ok(Self::Timestamp),
@@ -414,6 +423,8 @@ macro_rules! assert_column_eq {
 #[cfg(test)]
 mod test {
     use super::{builder::SchemaBuilder, *};
+    use InfluxColumnType::*;
+    use InfluxFieldType::*;
 
     #[test]
     fn new_from_arrow_no_metadata() {
@@ -443,15 +454,17 @@ mod test {
         let fields = vec![
             ArrowField::new("tag_col", ArrowDataType::Utf8, false),
             ArrowField::new("int_col", ArrowDataType::Int64, false),
+            ArrowField::new("uint_col", ArrowDataType::UInt64, false),
             ArrowField::new("float_col", ArrowDataType::Float64, false),
             ArrowField::new("str_col", ArrowDataType::Utf8, false),
             ArrowField::new("bool_col", ArrowDataType::Boolean, false),
             ArrowField::new("time_col", ArrowDataType::Int64, false),
         ];
 
-        let metadata: HashMap<String, String> = vec![
+        let metadata: HashMap<_, _> = vec![
             ("tag_col", "iox::column_type::tag"),
             ("int_col", "iox::column_type::field::integer"),
+            ("uint_col", "iox::column_type::field::uinteger"),
             ("float_col", "iox::column_type::field::float"),
             ("str_col", "iox::column_type::field::string"),
             ("bool_col", "iox::column_type::field::boolean"),
@@ -465,33 +478,14 @@ mod test {
         let arrow_schema = ArrowSchemaRef::new(ArrowSchema::new_with_metadata(fields, metadata));
 
         let schema: Schema = arrow_schema.try_into().unwrap();
-        assert_column_eq!(schema, 0, InfluxColumnType::Tag, "tag_col");
-        assert_column_eq!(
-            schema,
-            1,
-            InfluxColumnType::Field(InfluxFieldType::Integer),
-            "int_col"
-        );
-        assert_column_eq!(
-            schema,
-            2,
-            InfluxColumnType::Field(InfluxFieldType::Float),
-            "float_col"
-        );
-        assert_column_eq!(
-            schema,
-            3,
-            InfluxColumnType::Field(InfluxFieldType::String),
-            "str_col"
-        );
-        assert_column_eq!(
-            schema,
-            4,
-            InfluxColumnType::Field(InfluxFieldType::Boolean),
-            "bool_col"
-        );
-        assert_column_eq!(schema, 5, InfluxColumnType::Timestamp, "time_col");
-        assert_eq!(schema.len(), 6);
+        assert_column_eq!(schema, 0, Tag, "tag_col");
+        assert_column_eq!(schema, 1, Field(Integer), "int_col");
+        assert_column_eq!(schema, 2, Field(UInteger), "uint_col");
+        assert_column_eq!(schema, 3, Field(Float), "float_col");
+        assert_column_eq!(schema, 4, Field(String), "str_col");
+        assert_column_eq!(schema, 5, Field(Boolean), "bool_col");
+        assert_column_eq!(schema, 6, Timestamp, "time_col");
+        assert_eq!(schema.len(), 7);
 
         assert_eq!(schema.measurement().unwrap(), "the_measurement");
     }
@@ -505,7 +499,7 @@ mod test {
 
         // This metadata models metadata that was not created by this
         // rust module itself
-        let metadata: HashMap<String, String> = vec![
+        let metadata: HashMap<_, _> = vec![
             ("tag_col", "something_other_than_iox"),
             ("int_col", "iox::column_type::field::some_new_exotic_type"),
             ("non_existent_col", "iox::column_type::field::float"),
@@ -536,7 +530,7 @@ mod test {
             ArrowField::new("tag_col", ArrowDataType::Int64, false), // not a valid tag type
         ];
 
-        let metadata: HashMap<String, String> = vec![
+        let metadata: HashMap<_, _> = vec![
             ("tag_col", "iox::column_type::tag"), /* claims that tag_col is a tag, but it is an
                                                    * integer */
         ]
@@ -555,7 +549,7 @@ mod test {
     fn new_from_arrow_metadata_mismatched_field() {
         let fields = vec![ArrowField::new("int_col", ArrowDataType::Int64, false)];
 
-        let metadata: HashMap<String, String> = vec![
+        let metadata: HashMap<_, _> = vec![
             ("int_col", "iox::column_type::field::float"), // metadata claims it is a float
         ]
         .into_iter()
@@ -575,7 +569,7 @@ mod test {
             ArrowField::new("time", ArrowDataType::Utf8, false), // timestamp can't be strings
         ];
 
-        let metadata: HashMap<String, String> = vec![
+        let metadata: HashMap<_, _> = vec![
             ("time", "iox::column_type::timestamp"), // metadata claims it is a timstam
         ]
         .into_iter()
@@ -609,7 +603,7 @@ mod test {
     #[test]
     fn test_round_trip() {
         let schema1 = SchemaBuilder::new()
-            .influx_field("the_field", InfluxFieldType::String)
+            .influx_field("the_field", String)
             .tag("the_tag")
             .timestamp()
             .measurement("the_measurement")
@@ -624,14 +618,9 @@ mod test {
 
         for s in &[schema1, schema2] {
             assert_eq!(s.measurement().unwrap(), "the_measurement");
-            assert_column_eq!(
-                s,
-                0,
-                InfluxColumnType::Field(InfluxFieldType::String),
-                "the_field"
-            );
-            assert_column_eq!(s, 1, InfluxColumnType::Tag, "the_tag");
-            assert_column_eq!(s, 2, InfluxColumnType::Timestamp, "time");
+            assert_column_eq!(s, 0, Field(String), "the_field");
+            assert_column_eq!(s, 1, Tag, "the_tag");
+            assert_column_eq!(s, 2, Timestamp, "time");
             assert_eq!(3, s.len());
         }
     }
@@ -639,7 +628,7 @@ mod test {
     #[test]
     fn test_iter() {
         let schema = SchemaBuilder::new()
-            .influx_field("the_field", InfluxFieldType::String)
+            .influx_field("the_field", String)
             .tag("the_tag")
             .timestamp()
             .measurement("the_measurement")

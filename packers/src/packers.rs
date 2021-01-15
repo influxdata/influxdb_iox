@@ -200,6 +200,9 @@ impl std::convert::From<InfluxColumnType> for Packers {
             InfluxColumnType::Field(InfluxFieldType::Integer) => {
                 Self::Integer(Packer::<i64>::new())
             }
+            InfluxColumnType::Field(InfluxFieldType::UInteger) => {
+                unimplemented!();
+            }
             InfluxColumnType::Field(InfluxFieldType::String) => {
                 Self::Bytes(Packer::<ByteArray>::new())
             }

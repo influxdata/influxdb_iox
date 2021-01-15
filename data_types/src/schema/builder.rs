@@ -305,51 +305,35 @@ mod test {
     use crate::assert_column_eq;
 
     use super::*;
+    use InfluxColumnType::*;
+    use InfluxFieldType::*;
 
     #[test]
     fn test_builder_basic() {
         let s = SchemaBuilder::new()
-            .influx_field("str_field", InfluxFieldType::String)
+            .influx_field("str_field", String)
             .tag("the_tag")
-            .influx_field("int_field", InfluxFieldType::Integer)
-            .influx_field("bool_field", InfluxFieldType::Boolean)
-            .influx_field("float_field", InfluxFieldType::Float)
+            .influx_field("int_field", Integer)
+            .influx_field("uint_field", UInteger)
+            .influx_field("bool_field", Boolean)
+            .influx_field("float_field", Float)
             .tag("the_second_tag")
             .timestamp()
             .measurement("the_measurement")
             .build()
             .unwrap();
 
-        assert_column_eq!(
-            s,
-            0,
-            InfluxColumnType::Field(InfluxFieldType::String),
-            "str_field"
-        );
-        assert_column_eq!(s, 1, InfluxColumnType::Tag, "the_tag");
-        assert_column_eq!(
-            s,
-            2,
-            InfluxColumnType::Field(InfluxFieldType::Integer),
-            "int_field"
-        );
-        assert_column_eq!(
-            s,
-            3,
-            InfluxColumnType::Field(InfluxFieldType::Boolean),
-            "bool_field"
-        );
-        assert_column_eq!(
-            s,
-            4,
-            InfluxColumnType::Field(InfluxFieldType::Float),
-            "float_field"
-        );
-        assert_column_eq!(s, 5, InfluxColumnType::Tag, "the_second_tag");
-        assert_column_eq!(s, 6, InfluxColumnType::Timestamp, "time");
+        assert_column_eq!(s, 0, Field(String), "str_field");
+        assert_column_eq!(s, 1, Tag, "the_tag");
+        assert_column_eq!(s, 2, Field(Integer), "int_field");
+        assert_column_eq!(s, 3, Field(UInteger), "uint_field");
+        assert_column_eq!(s, 4, Field(Boolean), "bool_field");
+        assert_column_eq!(s, 5, Field(Float), "float_field");
+        assert_column_eq!(s, 6, Tag, "the_second_tag");
+        assert_column_eq!(s, 7, Timestamp, "time");
 
         assert_eq!(s.measurement().unwrap(), "the_measurement");
-        assert_eq!(s.len(), 7);
+        assert_eq!(s.len(), 8);
     }
 
     #[test]
@@ -364,13 +348,13 @@ mod test {
         assert_eq!(field.name(), "the_tag");
         assert_eq!(field.data_type(), &ArrowDataType::Utf8);
         assert_eq!(field.is_nullable(), true);
-        assert_eq!(influxdb_column_type, Some(InfluxColumnType::Tag));
+        assert_eq!(influxdb_column_type, Some(Tag));
 
         let (influxdb_column_type, field) = s.field(1);
         assert_eq!(field.name(), "the_non_null_tag");
         assert_eq!(field.data_type(), &ArrowDataType::Utf8);
         assert_eq!(field.is_nullable(), false);
-        assert_eq!(influxdb_column_type, Some(InfluxColumnType::Tag));
+        assert_eq!(influxdb_column_type, Some(Tag));
 
         assert_eq!(s.len(), 2);
     }
@@ -388,10 +372,7 @@ mod test {
         assert_eq!(field.name(), "the_influx_field");
         assert_eq!(field.data_type(), &ArrowDataType::Float64);
         assert_eq!(field.is_nullable(), true);
-        assert_eq!(
-            influxdb_column_type,
-            Some(InfluxColumnType::Field(InfluxFieldType::Float))
-        );
+        assert_eq!(influxdb_column_type, Some(Field(Float)));
 
         let (influxdb_column_type, field) = s.field(1);
         assert_eq!(field.name(), "the_no_influx_field");
@@ -415,10 +396,7 @@ mod test {
         assert_eq!(field.name(), "the_influx_field");
         assert_eq!(field.data_type(), &ArrowDataType::Float64);
         assert_eq!(field.is_nullable(), false);
-        assert_eq!(
-            influxdb_column_type,
-            Some(InfluxColumnType::Field(InfluxFieldType::Float))
-        );
+        assert_eq!(influxdb_column_type, Some(Field(Float)));
 
         let (influxdb_column_type, field) = s.field(1);
         assert_eq!(field.name(), "the_no_influx_field");
@@ -450,7 +428,7 @@ mod test {
     fn test_builder_dupe_field_and_tag() {
         let res = SchemaBuilder::new()
             .tag("the name")
-            .influx_field("the name", InfluxFieldType::Integer)
+            .influx_field("the name", Integer)
             .build();
 
         assert_eq!(res.unwrap_err().to_string(), "Error validating schema: Error validating schema: 'the name' is both a field and a tag");
@@ -466,10 +444,10 @@ mod test {
     #[test]
     fn test_lp_builder_basic() {
         let s = InfluxSchemaBuilder::new()
-            .saw_influx_field("the_field", InfluxFieldType::Float)
+            .saw_influx_field("the_field", Float)
             .saw_tag("the_tag")
             .saw_tag("the_tag")
-            .saw_influx_field("the_field", InfluxFieldType::Float)
+            .saw_influx_field("the_field", Float)
             .saw_measurement("the_measurement")
             .unwrap()
             .saw_tag("the_tag")
@@ -479,15 +457,10 @@ mod test {
             .build()
             .unwrap();
 
-        assert_column_eq!(s, 0, InfluxColumnType::Tag, "the_tag");
-        assert_column_eq!(s, 1, InfluxColumnType::Tag, "the_second_tag");
-        assert_column_eq!(
-            s,
-            2,
-            InfluxColumnType::Field(InfluxFieldType::Float),
-            "the_field"
-        );
-        assert_column_eq!(s, 3, InfluxColumnType::Timestamp, "time");
+        assert_column_eq!(s, 0, Tag, "the_tag");
+        assert_column_eq!(s, 1, Tag, "the_second_tag");
+        assert_column_eq!(s, 2, Field(Float), "the_field");
+        assert_column_eq!(s, 3, Timestamp, "time");
 
         assert_eq!(s.measurement().unwrap(), "the_measurement");
         assert_eq!(s.len(), 4);
@@ -497,7 +470,7 @@ mod test {
     fn test_lp_builder_no_measurement() {
         let res = InfluxSchemaBuilder::new()
             .saw_tag("the_tag")
-            .saw_influx_field("the_field", InfluxFieldType::Float)
+            .saw_influx_field("the_field", Float)
             .build();
 
         assert_eq!(res.unwrap_err().to_string(), "No measurement provided");
@@ -518,19 +491,14 @@ mod test {
         let s = InfluxSchemaBuilder::new()
             .saw_measurement("the_measurement")
             .unwrap()
-            .saw_influx_field("the_field", InfluxFieldType::Float)
+            .saw_influx_field("the_field", Float)
             // same field name seen again as a different type
-            .saw_influx_field("the_field", InfluxFieldType::Integer)
+            .saw_influx_field("the_field", Integer)
             .build()
             .unwrap();
 
-        assert_column_eq!(
-            s,
-            0,
-            InfluxColumnType::Field(InfluxFieldType::Float),
-            "the_field"
-        );
-        assert_column_eq!(s, 1, InfluxColumnType::Timestamp, "time");
+        assert_column_eq!(s, 0, Field(Float), "the_field");
+        assert_column_eq!(s, 1, Timestamp, "time");
 
         assert_eq!(s.len(), 2);
     }
