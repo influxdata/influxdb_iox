@@ -11,7 +11,7 @@
 )]
 
 use data_types::{
-    schema::{builder::LPSchemaBuilder, LPFieldType, Schema},
+    schema::{builder::InfluxSchemaBuilder, InfluxFieldType, Schema},
     TIME_COLUMN_NAME,
 };
 use influxdb_line_protocol::{FieldValue, ParsedLine};
@@ -294,7 +294,7 @@ impl<'a> MeasurementSampler<'a> {
     fn deduce_schema_from_sample(&mut self) -> Result<Schema, Error> {
         ensure!(!self.schema_sample.is_empty(), NeedsAtLeastOneLine);
 
-        let mut builder = LPSchemaBuilder::new();
+        let mut builder = InfluxSchemaBuilder::new();
 
         for line in &self.schema_sample {
             let series = &line.series;
@@ -307,12 +307,12 @@ impl<'a> MeasurementSampler<'a> {
             }
             for (field_name, field_value) in &line.field_set {
                 let field_type = match field_value {
-                    FieldValue::F64(_) => LPFieldType::Float,
-                    FieldValue::I64(_) => LPFieldType::Integer,
-                    FieldValue::String(_) => LPFieldType::String,
-                    FieldValue::Boolean(_) => LPFieldType::Boolean,
+                    FieldValue::F64(_) => InfluxFieldType::Float,
+                    FieldValue::I64(_) => InfluxFieldType::Integer,
+                    FieldValue::String(_) => InfluxFieldType::String,
+                    FieldValue::Boolean(_) => InfluxFieldType::Boolean,
                 };
-                builder = builder.saw_lp_field(field_name.as_str(), field_type);
+                builder = builder.saw_influx_field(field_name.as_str(), field_type);
             }
         }
 
@@ -417,12 +417,12 @@ fn pack_lines<'a>(schema: &Schema, lines: &[ParsedLine<'a>]) -> Vec<Packers> {
     let mut packers: Vec<_> = schema
         .iter()
         .enumerate()
-        .map(|(idx, (lp_column_type, _))| {
-            debug!("  Column definition [{}] = {:?}", idx, lp_column_type);
+        .map(|(idx, (influxdb_column_type, _))| {
+            debug!("  Column definition [{}] = {:?}", idx, influxdb_column_type);
 
             // Initialise a Packer<T> for the matching data type wrapped in a
             // Packers enum variant to allow it to live in a vector.
-            let mut packer = Packers::from(lp_column_type.unwrap());
+            let mut packer = Packers::from(influxdb_column_type.unwrap());
             packer.reserve_exact(lines.len());
             packer
         })
@@ -827,7 +827,7 @@ impl TSMFileConverter {
 
         let mut fks = Vec::new();
         for (field_key, block_type) in m.field_columns().to_owned() {
-            builder = builder.lp_field(&field_key, to_data_type(&block_type));
+            builder = builder.influx_field(&field_key, to_data_type(&block_type));
             fks.push((field_key.clone(), block_type));
             packed_columns.push(Packers::from(block_type));
         }
@@ -1073,13 +1073,13 @@ impl TSMFileConverter {
     }
 }
 
-fn to_data_type(value: &BlockType) -> LPFieldType {
+fn to_data_type(value: &BlockType) -> InfluxFieldType {
     match value {
-        BlockType::Float => LPFieldType::Float,
-        BlockType::Integer => LPFieldType::Integer,
-        BlockType::Bool => LPFieldType::Boolean,
-        BlockType::Str => LPFieldType::String,
-        BlockType::Unsigned => LPFieldType::Integer,
+        BlockType::Float => InfluxFieldType::Float,
+        BlockType::Integer => InfluxFieldType::Integer,
+        BlockType::Bool => InfluxFieldType::Boolean,
+        BlockType::Str => InfluxFieldType::String,
+        BlockType::Unsigned => InfluxFieldType::Integer,
     }
 }
 
@@ -1094,7 +1094,7 @@ impl std::fmt::Debug for TSMFileConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use data_types::{assert_column_eq, schema::LPColumnType};
+    use data_types::{assert_column_eq, schema::InfluxColumnType};
     use influxdb_tsm::{
         reader::{BlockData, MockBlockDecoder},
         Block,
@@ -1288,15 +1288,15 @@ mod tests {
         assert_eq!(schema.measurement().unwrap(), "cpu");
 
         println!("Converted to {:#?}", schema);
-        assert_column_eq!(schema, 0, LPColumnType::Tag, "host");
-        assert_column_eq!(schema, 1, LPColumnType::Tag, "region");
+        assert_column_eq!(schema, 0, InfluxColumnType::Tag, "host");
+        assert_column_eq!(schema, 1, InfluxColumnType::Tag, "region");
         assert_column_eq!(
             schema,
             2,
-            LPColumnType::Field(LPFieldType::Integer),
+            InfluxColumnType::Field(InfluxFieldType::Integer),
             "usage_system"
         );
-        assert_column_eq!(schema, 3, LPColumnType::Timestamp, "time");
+        assert_column_eq!(schema, 3, InfluxColumnType::Timestamp, "time");
     }
 
     #[test]
@@ -1313,15 +1313,15 @@ mod tests {
         assert_eq!(schema.measurement().unwrap(), "cpu");
 
         println!("Converted to {:#?}", schema);
-        assert_column_eq!(schema, 0, LPColumnType::Tag, "host");
-        assert_column_eq!(schema, 1, LPColumnType::Tag, "region");
+        assert_column_eq!(schema, 0, InfluxColumnType::Tag, "host");
+        assert_column_eq!(schema, 1, InfluxColumnType::Tag, "region");
         assert_column_eq!(
             schema,
             2,
-            LPColumnType::Field(LPFieldType::Integer),
+            InfluxColumnType::Field(InfluxFieldType::Integer),
             "usage_system"
         );
-        assert_column_eq!(schema, 3, LPColumnType::Timestamp, "time");
+        assert_column_eq!(schema, 3, InfluxColumnType::Timestamp, "time");
     }
 
     #[test]
@@ -1341,21 +1341,21 @@ mod tests {
 
         // then both field names appear in the resulting schema
         println!("Converted to {:#?}", schema);
-        assert_column_eq!(schema, 0, LPColumnType::Tag, "host");
-        assert_column_eq!(schema, 1, LPColumnType::Tag, "region");
+        assert_column_eq!(schema, 0, InfluxColumnType::Tag, "host");
+        assert_column_eq!(schema, 1, InfluxColumnType::Tag, "region");
         assert_column_eq!(
             schema,
             2,
-            LPColumnType::Field(LPFieldType::Integer),
+            InfluxColumnType::Field(InfluxFieldType::Integer),
             "usage_system"
         );
         assert_column_eq!(
             schema,
             3,
-            LPColumnType::Field(LPFieldType::Float),
+            InfluxColumnType::Field(InfluxFieldType::Float),
             "usage_user"
         );
-        assert_column_eq!(schema, 4, LPColumnType::Timestamp, "time");
+        assert_column_eq!(schema, 4, InfluxColumnType::Timestamp, "time");
     }
 
     #[test]
@@ -1375,15 +1375,15 @@ mod tests {
 
         // Then both tag names appear in the resulting schema
         println!("Converted to {:#?}", schema);
-        assert_column_eq!(schema, 0, LPColumnType::Tag, "host");
-        assert_column_eq!(schema, 1, LPColumnType::Tag, "fail_group");
+        assert_column_eq!(schema, 0, InfluxColumnType::Tag, "host");
+        assert_column_eq!(schema, 1, InfluxColumnType::Tag, "fail_group");
         assert_column_eq!(
             schema,
             2,
-            LPColumnType::Field(LPFieldType::Integer),
+            InfluxColumnType::Field(InfluxFieldType::Integer),
             "usage_system"
         );
-        assert_column_eq!(schema, 3, LPColumnType::Timestamp, "time");
+        assert_column_eq!(schema, 3, InfluxColumnType::Timestamp, "time");
     }
 
     #[test]
@@ -1406,14 +1406,14 @@ mod tests {
         // we want??)
         println!("Converted to {:#?}", schema);
 
-        assert_column_eq!(schema, 0, LPColumnType::Tag, "host");
+        assert_column_eq!(schema, 0, InfluxColumnType::Tag, "host");
         assert_column_eq!(
             schema,
             1,
-            LPColumnType::Field(LPFieldType::Integer),
+            InfluxColumnType::Field(InfluxFieldType::Integer),
             "usage_system"
         );
-        assert_column_eq!(schema, 2, LPColumnType::Timestamp, "time");
+        assert_column_eq!(schema, 2, InfluxColumnType::Timestamp, "time");
     }
 
     #[test]
@@ -1445,10 +1445,10 @@ mod tests {
         let log = Arc::new(Mutex::new(WriterLog::new()));
         let table_writer = Box::new(NoOpWriter::new(log.clone(), String::from("cpu")));
 
-        let schema = LPSchemaBuilder::new()
+        let schema = InfluxSchemaBuilder::new()
             .saw_measurement("cpu")
             .unwrap()
-            .saw_lp_field("usage_system", LPFieldType::Integer)
+            .saw_influx_field("usage_system", InfluxFieldType::Integer)
             .build()
             .unwrap();
 
@@ -1529,32 +1529,32 @@ mod tests {
         // Then the correct schema is extracted
         println!("Converted to {:#?}", schema);
 
-        assert_column_eq!(schema, 0, LPColumnType::Tag, "tag1");
+        assert_column_eq!(schema, 0, InfluxColumnType::Tag, "tag1");
         assert_column_eq!(
             schema,
             1,
-            LPColumnType::Field(LPFieldType::Integer),
+            InfluxColumnType::Field(InfluxFieldType::Integer),
             "int_field"
         );
         assert_column_eq!(
             schema,
             2,
-            LPColumnType::Field(LPFieldType::Float),
+            InfluxColumnType::Field(InfluxFieldType::Float),
             "float_field"
         );
         assert_column_eq!(
             schema,
             3,
-            LPColumnType::Field(LPFieldType::String),
+            InfluxColumnType::Field(InfluxFieldType::String),
             "str_field"
         );
         assert_column_eq!(
             schema,
             4,
-            LPColumnType::Field(LPFieldType::Boolean),
+            InfluxColumnType::Field(InfluxFieldType::Boolean),
             "bool_field"
         );
-        assert_column_eq!(schema, 5, LPColumnType::Timestamp, "time");
+        assert_column_eq!(schema, 5, InfluxColumnType::Timestamp, "time");
 
         Ok(())
     }
@@ -1879,23 +1879,28 @@ mod tests {
         let decoder = MockBlockDecoder::new(block_map);
         let (schema, packers) = TSMFileConverter::process_measurement_table(decoder, &mut table)?;
 
-        assert_column_eq!(schema, 0, LPColumnType::Tag, "az");
-        assert_column_eq!(schema, 1, LPColumnType::Tag, "region");
-        assert_column_eq!(schema, 2, LPColumnType::Tag, "server");
-        assert_column_eq!(schema, 3, LPColumnType::Field(LPFieldType::Float), "temp");
+        assert_column_eq!(schema, 0, InfluxColumnType::Tag, "az");
+        assert_column_eq!(schema, 1, InfluxColumnType::Tag, "region");
+        assert_column_eq!(schema, 2, InfluxColumnType::Tag, "server");
+        assert_column_eq!(
+            schema,
+            3,
+            InfluxColumnType::Field(InfluxFieldType::Float),
+            "temp"
+        );
         assert_column_eq!(
             schema,
             4,
-            LPColumnType::Field(LPFieldType::Float),
+            InfluxColumnType::Field(InfluxFieldType::Float),
             "voltage"
         );
         assert_column_eq!(
             schema,
             5,
-            LPColumnType::Field(LPFieldType::Integer),
+            InfluxColumnType::Field(InfluxFieldType::Integer),
             "watts"
         );
-        assert_column_eq!(schema, 6, LPColumnType::Timestamp, "time");
+        assert_column_eq!(schema, 6, InfluxColumnType::Timestamp, "time");
 
         // az column
         assert_eq!(

@@ -1,4 +1,4 @@
-use data_types::schema::{builder::SchemaBuilder, LPFieldType};
+use data_types::schema::{builder::SchemaBuilder, InfluxFieldType};
 use ingest::parquet::writer::{CompressionLevel, IOxParquetTableWriter};
 use packers::{IOxTableWriter, Packer, Packers};
 
@@ -10,10 +10,10 @@ fn test_write_parquet_data() {
     let schema = SchemaBuilder::new()
         .measurement("measurement_name")
         .tag("tag1")
-        .lp_field("string_field", LPFieldType::String)
-        .lp_field("float_field", LPFieldType::Float)
-        .lp_field("int_field", LPFieldType::Integer)
-        .lp_field("bool_field", LPFieldType::Boolean)
+        .influx_field("string_field", InfluxFieldType::String)
+        .influx_field("float_field", InfluxFieldType::Float)
+        .influx_field("int_field", InfluxFieldType::Integer)
+        .influx_field("bool_field", InfluxFieldType::Boolean)
         .timestamp()
         .build()
         .unwrap();

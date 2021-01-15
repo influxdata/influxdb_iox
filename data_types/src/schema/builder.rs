@@ -7,7 +7,7 @@ use tracing::warn;
 
 use arrow_deps::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField};
 
-use super::{LPColumnType, LPFieldType, Schema, TIME_COLUMN_NAME};
+use super::{InfluxColumnType, InfluxFieldType, Schema, TIME_COLUMN_NAME};
 
 /// Database schema creation / validation errors.
 #[derive(Debug, Snafu)]
@@ -46,7 +46,7 @@ pub struct SchemaBuilder {
     tag_cols: HashSet<String>,
 
     /// which columns represent fields
-    field_cols: HashMap<String, LPColumnType>,
+    field_cols: HashMap<String, InfluxColumnType>,
 
     /// which field was the time column, if any
     time_col: Option<String>,
@@ -64,7 +64,7 @@ impl SchemaBuilder {
         self.add_column(
             column_name,
             true,
-            Some(LPColumnType::Tag),
+            Some(InfluxColumnType::Tag),
             ArrowDataType::Utf8,
         )
     }
@@ -75,45 +75,58 @@ impl SchemaBuilder {
         self.add_column(
             column_name,
             false,
-            Some(LPColumnType::Tag),
+            Some(InfluxColumnType::Tag),
             ArrowDataType::Utf8,
         )
     }
 
     /// Add a new field column with the specified InfluxDB data model  type
-    pub fn lp_field(self, column_name: &str, lp_field_type: LPFieldType) -> Self {
-        let arrow_type: ArrowDataType = lp_field_type.into();
+    pub fn influx_field(self, column_name: &str, influxdb_field_type: InfluxFieldType) -> Self {
+        let arrow_type: ArrowDataType = influxdb_field_type.into();
         self.add_column(
             column_name,
             false,
-            Some(LPColumnType::Field(lp_field_type)),
+            Some(InfluxColumnType::Field(influxdb_field_type)),
             arrow_type,
         )
     }
 
     /// Add a new nullable field column with the specified Arrow datatype.
     pub fn field(self, column_name: &str, arrow_type: ArrowDataType) -> Self {
-        let lp_column_type = arrow_type.clone().try_into().map(LPColumnType::Field).ok();
+        let influxdb_column_type = arrow_type
+            .clone()
+            .try_into()
+            .map(InfluxColumnType::Field)
+            .ok();
 
-        self.add_column(column_name, true, lp_column_type, arrow_type)
+        self.add_column(column_name, true, influxdb_column_type, arrow_type)
     }
 
     /// Add a new field column with the specified Arrow datatype that can not be
     /// null
     pub fn non_null_field(self, column_name: &str, arrow_type: ArrowDataType) -> Self {
-        let lp_column_type = arrow_type.clone().try_into().map(LPColumnType::Field).ok();
+        let influxdb_column_type = arrow_type
+            .clone()
+            .try_into()
+            .map(InfluxColumnType::Field)
+            .ok();
 
-        self.add_column(column_name, false, lp_column_type, arrow_type)
+        self.add_column(column_name, false, influxdb_column_type, arrow_type)
     }
 
-    /// Add the timestamp column
+    /// Add the InfluxDB data model timestamp column
     pub fn timestamp(self) -> Self {
-        let lp_column_type = LPColumnType::Timestamp;
-        let arrow_type = (&lp_column_type).into();
-        self.add_column(TIME_COLUMN_NAME, false, Some(lp_column_type), arrow_type)
+        let influxdb_column_type = InfluxColumnType::Timestamp;
+        let arrow_type = (&influxdb_column_type).into();
+        self.add_column(
+            TIME_COLUMN_NAME,
+            false,
+            Some(influxdb_column_type),
+            arrow_type,
+        )
     }
 
-    /// Set optional measurement name
+    /// Set optional InfluxDB data model measurement name
     pub fn measurement(mut self, measurement_name: impl Into<String>) -> Self {
         self.measurement = Some(measurement_name.into());
         self
@@ -123,26 +136,26 @@ impl SchemaBuilder {
     /// schema validation happens at this time.
 
     /// ```
-    /// use data_types::schema::{builder::SchemaBuilder, LPColumnType, LPFieldType};
+    /// use data_types::schema::{builder::SchemaBuilder, InfluxColumnType, InfluxFieldType};
     ///
     /// let schema = SchemaBuilder::new()
     ///   .tag("region")
-    ///   .lp_field("counter", LPFieldType::Float)
+    ///   .influx_field("counter", InfluxFieldType::Float)
     ///   .timestamp()
     ///   .build()
     ///   .unwrap();
     ///
-    /// let (lp_column_type, arrow_field) = schema.field(0);
+    /// let (influxdb_column_type, arrow_field) = schema.field(0);
     /// assert_eq!(arrow_field.name(), "region");
-    /// assert_eq!(lp_column_type, Some(LPColumnType::Tag));
+    /// assert_eq!(influxdb_column_type, Some(InfluxColumnType::Tag));
     ///
-    /// let (lp_column_type, arrow_field) = schema.field(1);
+    /// let (influxdb_column_type, arrow_field) = schema.field(1);
     /// assert_eq!(arrow_field.name(), "counter");
-    /// assert_eq!(lp_column_type, Some(LPColumnType::Field(LPFieldType::Float)));
+    /// assert_eq!(influxdb_column_type, Some(InfluxColumnType::Field(InfluxFieldType::Float)));
     ///
-    /// let (lp_column_type, arrow_field) = schema.field(2);
+    /// let (influxdb_column_type, arrow_field) = schema.field(2);
     /// assert_eq!(arrow_field.name(), "time");
-    /// assert_eq!(lp_column_type, Some(LPColumnType::Timestamp));
+    /// assert_eq!(influxdb_column_type, Some(InfluxColumnType::Timestamp));
     /// ```
     pub fn build(self) -> Result<Schema> {
         let Self {
@@ -163,21 +176,21 @@ impl SchemaBuilder {
         mut self,
         column_name: &str,
         nullable: bool,
-        lp_column_type: Option<LPColumnType>,
+        influxdb_column_type: Option<InfluxColumnType>,
         arrow_type: ArrowDataType,
     ) -> Self {
         self.fields
             .push(ArrowField::new(column_name, arrow_type, nullable));
 
-        match &lp_column_type {
-            Some(LPColumnType::Tag) => {
+        match &influxdb_column_type {
+            Some(InfluxColumnType::Tag) => {
                 self.tag_cols.insert(column_name.to_string());
             }
-            Some(LPColumnType::Field(_)) => {
+            Some(InfluxColumnType::Field(_)) => {
                 self.field_cols
-                    .insert(column_name.to_string(), lp_column_type.unwrap());
+                    .insert(column_name.to_string(), influxdb_column_type.unwrap());
             }
-            Some(LPColumnType::Timestamp) => {
+            Some(InfluxColumnType::Timestamp) => {
                 self.time_col = Some(column_name.to_string());
             }
             None => {}
@@ -194,11 +207,11 @@ impl SchemaBuilder {
 /// order of appearance) followed by fields (in order of appearance)
 /// and then timestamp
 #[derive(Debug, Default)]
-pub struct LPSchemaBuilder {
+pub struct InfluxSchemaBuilder {
     /// What tag names we have seen so far
     tag_set: HashSet<String>,
     /// What field names we have seen so far
-    field_set: HashMap<String, LPFieldType>,
+    field_set: HashMap<String, InfluxFieldType>,
 
     /// Keep track of the tag_columns in order they were added
     tag_list: Vec<String>,
@@ -209,7 +222,7 @@ pub struct LPSchemaBuilder {
     measurement: Option<String>,
 }
 
-impl LPSchemaBuilder {
+impl InfluxSchemaBuilder {
     pub fn new() -> Self {
         Self::default()
     }
@@ -247,15 +260,19 @@ impl LPSchemaBuilder {
     /// type, ignoring if that field has been seen TODO error if the
     /// field is a different type (old implementation produces warn!
     /// in this condition)
-    pub fn saw_lp_field(mut self, column_name: &str, lp_field_type: LPFieldType) -> Self {
-        if let Some(existing_lp_field_type) = self.field_set.get(column_name) {
-            if &lp_field_type != existing_lp_field_type {
+    pub fn saw_influx_field(
+        mut self,
+        column_name: &str,
+        influxdb_field_type: InfluxFieldType,
+    ) -> Self {
+        if let Some(existing_influxdb_field_type) = self.field_set.get(column_name) {
+            if &influxdb_field_type != existing_influxdb_field_type {
                 warn!("Ignoring new type for field '{}': Previously it had type {:?}, attempted to set type {:?}.",
-                      column_name, existing_lp_field_type, lp_field_type);
+                      column_name, existing_influxdb_field_type, influxdb_field_type);
             }
         } else {
             self.field_set
-                .insert(column_name.to_string(), lp_field_type);
+                .insert(column_name.to_string(), influxdb_field_type);
             self.field_list.push(column_name.to_string())
         }
         self
@@ -274,8 +291,8 @@ impl LPSchemaBuilder {
 
         // then fields (in order they were added)
         let builder = self.field_list.iter().fold(builder, |builder, field_name| {
-            let lp_field_type = self.field_set.get(field_name).unwrap();
-            builder.lp_field(field_name, *lp_field_type)
+            let influxdb_field_type = self.field_set.get(field_name).unwrap();
+            builder.influx_field(field_name, *influxdb_field_type)
         });
 
         // and now timestamp
@@ -292,29 +309,44 @@ mod test {
     #[test]
     fn test_builder_basic() {
         let s = SchemaBuilder::new()
-            .lp_field("str_field", LPFieldType::String)
+            .influx_field("str_field", InfluxFieldType::String)
             .tag("the_tag")
-            .lp_field("int_field", LPFieldType::Integer)
-            .lp_field("bool_field", LPFieldType::Boolean)
-            .lp_field("float_field", LPFieldType::Float)
+            .influx_field("int_field", InfluxFieldType::Integer)
+            .influx_field("bool_field", InfluxFieldType::Boolean)
+            .influx_field("float_field", InfluxFieldType::Float)
             .tag("the_second_tag")
             .timestamp()
             .measurement("the_measurement")
             .build()
             .unwrap();
 
-        assert_column_eq!(s, 0, LPColumnType::Field(LPFieldType::String), "str_field");
-        assert_column_eq!(s, 1, LPColumnType::Tag, "the_tag");
-        assert_column_eq!(s, 2, LPColumnType::Field(LPFieldType::Integer), "int_field");
+        assert_column_eq!(
+            s,
+            0,
+            InfluxColumnType::Field(InfluxFieldType::String),
+            "str_field"
+        );
+        assert_column_eq!(s, 1, InfluxColumnType::Tag, "the_tag");
+        assert_column_eq!(
+            s,
+            2,
+            InfluxColumnType::Field(InfluxFieldType::Integer),
+            "int_field"
+        );
         assert_column_eq!(
             s,
             3,
-            LPColumnType::Field(LPFieldType::Boolean),
+            InfluxColumnType::Field(InfluxFieldType::Boolean),
             "bool_field"
         );
-        assert_column_eq!(s, 4, LPColumnType::Field(LPFieldType::Float), "float_field");
-        assert_column_eq!(s, 5, LPColumnType::Tag, "the_second_tag");
-        assert_column_eq!(s, 6, LPColumnType::Timestamp, "time");
+        assert_column_eq!(
+            s,
+            4,
+            InfluxColumnType::Field(InfluxFieldType::Float),
+            "float_field"
+        );
+        assert_column_eq!(s, 5, InfluxColumnType::Tag, "the_second_tag");
+        assert_column_eq!(s, 6, InfluxColumnType::Timestamp, "time");
 
         assert_eq!(s.measurement().unwrap(), "the_measurement");
         assert_eq!(s.len(), 7);
@@ -328,17 +360,17 @@ mod test {
             .build()
             .unwrap();
 
-        let (lp_column_type, field) = s.field(0);
+        let (influxdb_column_type, field) = s.field(0);
         assert_eq!(field.name(), "the_tag");
         assert_eq!(field.data_type(), &ArrowDataType::Utf8);
         assert_eq!(field.is_nullable(), true);
-        assert_eq!(lp_column_type, Some(LPColumnType::Tag));
+        assert_eq!(influxdb_column_type, Some(InfluxColumnType::Tag));
 
-        let (lp_column_type, field) = s.field(1);
+        let (influxdb_column_type, field) = s.field(1);
         assert_eq!(field.name(), "the_non_null_tag");
         assert_eq!(field.data_type(), &ArrowDataType::Utf8);
         assert_eq!(field.is_nullable(), false);
-        assert_eq!(lp_column_type, Some(LPColumnType::Tag));
+        assert_eq!(influxdb_column_type, Some(InfluxColumnType::Tag));
 
         assert_eq!(s.len(), 2);
     }
@@ -346,26 +378,26 @@ mod test {
     #[test]
     fn test_builder_field() {
         let s = SchemaBuilder::new()
-            .field("the_lp_field", ArrowDataType::Float64)
+            .field("the_influx_field", ArrowDataType::Float64)
             // can't represent with lp
-            .field("the_no_lp_field", ArrowDataType::Decimal(10, 0))
+            .field("the_no_influx_field", ArrowDataType::Decimal(10, 0))
             .build()
             .unwrap();
 
-        let (lp_column_type, field) = s.field(0);
-        assert_eq!(field.name(), "the_lp_field");
+        let (influxdb_column_type, field) = s.field(0);
+        assert_eq!(field.name(), "the_influx_field");
         assert_eq!(field.data_type(), &ArrowDataType::Float64);
         assert_eq!(field.is_nullable(), true);
         assert_eq!(
-            lp_column_type,
-            Some(LPColumnType::Field(LPFieldType::Float))
+            influxdb_column_type,
+            Some(InfluxColumnType::Field(InfluxFieldType::Float))
         );
 
-        let (lp_column_type, field) = s.field(1);
-        assert_eq!(field.name(), "the_no_lp_field");
+        let (influxdb_column_type, field) = s.field(1);
+        assert_eq!(field.name(), "the_no_influx_field");
         assert_eq!(field.data_type(), &ArrowDataType::Decimal(10, 0));
         assert_eq!(field.is_nullable(), true);
-        assert_eq!(lp_column_type, None);
+        assert_eq!(influxdb_column_type, None);
 
         assert_eq!(s.len(), 2);
     }
@@ -373,26 +405,26 @@ mod test {
     #[test]
     fn test_builder_non_field() {
         let s = SchemaBuilder::new()
-            .non_null_field("the_lp_field", ArrowDataType::Float64)
+            .non_null_field("the_influx_field", ArrowDataType::Float64)
             // can't represent with lp
-            .non_null_field("the_no_lp_field", ArrowDataType::Decimal(10, 0))
+            .non_null_field("the_no_influx_field", ArrowDataType::Decimal(10, 0))
             .build()
             .unwrap();
 
-        let (lp_column_type, field) = s.field(0);
-        assert_eq!(field.name(), "the_lp_field");
+        let (influxdb_column_type, field) = s.field(0);
+        assert_eq!(field.name(), "the_influx_field");
         assert_eq!(field.data_type(), &ArrowDataType::Float64);
         assert_eq!(field.is_nullable(), false);
         assert_eq!(
-            lp_column_type,
-            Some(LPColumnType::Field(LPFieldType::Float))
+            influxdb_column_type,
+            Some(InfluxColumnType::Field(InfluxFieldType::Float))
         );
 
-        let (lp_column_type, field) = s.field(1);
-        assert_eq!(field.name(), "the_no_lp_field");
+        let (influxdb_column_type, field) = s.field(1);
+        assert_eq!(field.name(), "the_no_influx_field");
         assert_eq!(field.data_type(), &ArrowDataType::Decimal(10, 0));
         assert_eq!(field.is_nullable(), false);
-        assert_eq!(lp_column_type, None);
+        assert_eq!(influxdb_column_type, None);
 
         assert_eq!(s.len(), 2);
     }
@@ -418,7 +450,7 @@ mod test {
     fn test_builder_dupe_field_and_tag() {
         let res = SchemaBuilder::new()
             .tag("the name")
-            .lp_field("the name", LPFieldType::Integer)
+            .influx_field("the name", InfluxFieldType::Integer)
             .build();
 
         assert_eq!(res.unwrap_err().to_string(), "Error validating schema: Error validating schema: 'the name' is both a field and a tag");
@@ -433,11 +465,11 @@ mod test {
 
     #[test]
     fn test_lp_builder_basic() {
-        let s = LPSchemaBuilder::new()
-            .saw_lp_field("the_field", LPFieldType::Float)
+        let s = InfluxSchemaBuilder::new()
+            .saw_influx_field("the_field", InfluxFieldType::Float)
             .saw_tag("the_tag")
             .saw_tag("the_tag")
-            .saw_lp_field("the_field", LPFieldType::Float)
+            .saw_influx_field("the_field", InfluxFieldType::Float)
             .saw_measurement("the_measurement")
             .unwrap()
             .saw_tag("the_tag")
@@ -447,10 +479,15 @@ mod test {
             .build()
             .unwrap();
 
-        assert_column_eq!(s, 0, LPColumnType::Tag, "the_tag");
-        assert_column_eq!(s, 1, LPColumnType::Tag, "the_second_tag");
-        assert_column_eq!(s, 2, LPColumnType::Field(LPFieldType::Float), "the_field");
-        assert_column_eq!(s, 3, LPColumnType::Timestamp, "time");
+        assert_column_eq!(s, 0, InfluxColumnType::Tag, "the_tag");
+        assert_column_eq!(s, 1, InfluxColumnType::Tag, "the_second_tag");
+        assert_column_eq!(
+            s,
+            2,
+            InfluxColumnType::Field(InfluxFieldType::Float),
+            "the_field"
+        );
+        assert_column_eq!(s, 3, InfluxColumnType::Timestamp, "time");
 
         assert_eq!(s.measurement().unwrap(), "the_measurement");
         assert_eq!(s.len(), 4);
@@ -458,9 +495,9 @@ mod test {
 
     #[test]
     fn test_lp_builder_no_measurement() {
-        let res = LPSchemaBuilder::new()
+        let res = InfluxSchemaBuilder::new()
             .saw_tag("the_tag")
-            .saw_lp_field("the_field", LPFieldType::Float)
+            .saw_influx_field("the_field", InfluxFieldType::Float)
             .build();
 
         assert_eq!(res.unwrap_err().to_string(), "No measurement provided");
@@ -468,7 +505,7 @@ mod test {
 
     #[test]
     fn test_lp_builder_different_measurement() {
-        let res = LPSchemaBuilder::new()
+        let res = InfluxSchemaBuilder::new()
             .saw_measurement("m1")
             .unwrap()
             .saw_measurement("m2");
@@ -478,17 +515,22 @@ mod test {
 
     #[test]
     fn test_lp_changed_field_type() {
-        let s = LPSchemaBuilder::new()
+        let s = InfluxSchemaBuilder::new()
             .saw_measurement("the_measurement")
             .unwrap()
-            .saw_lp_field("the_field", LPFieldType::Float)
+            .saw_influx_field("the_field", InfluxFieldType::Float)
             // same field name seen again as a different type
-            .saw_lp_field("the_field", LPFieldType::Integer)
+            .saw_influx_field("the_field", InfluxFieldType::Integer)
             .build()
             .unwrap();
 
-        assert_column_eq!(s, 0, LPColumnType::Field(LPFieldType::Float), "the_field");
-        assert_column_eq!(s, 1, LPColumnType::Timestamp, "time");
+        assert_column_eq!(
+            s,
+            0,
+            InfluxColumnType::Field(InfluxFieldType::Float),
+            "the_field"
+        );
+        assert_column_eq!(s, 1, InfluxColumnType::Timestamp, "time");
 
         assert_eq!(s.len(), 2);
     }

@@ -10,7 +10,7 @@ use std::iter;
 use std::slice::Chunks;
 
 use arrow_deps::parquet::data_type::ByteArray;
-use data_types::schema::{LPColumnType, LPFieldType};
+use data_types::schema::{InfluxColumnType, InfluxFieldType};
 use std::default::Default;
 
 // NOTE: See https://blog.twitter.com/engineering/en_us/a/2013/dremel-made-simple-with-parquet.html
@@ -192,15 +192,21 @@ impl std::convert::From<Vec<Option<String>>> for Packers {
     }
 }
 
-impl std::convert::From<LPColumnType> for Packers {
-    fn from(t: LPColumnType) -> Self {
+impl std::convert::From<InfluxColumnType> for Packers {
+    fn from(t: InfluxColumnType) -> Self {
         match t {
-            LPColumnType::Tag => Self::Bytes(Packer::<ByteArray>::new()),
-            LPColumnType::Field(LPFieldType::Float) => Self::Float(Packer::<f64>::new()),
-            LPColumnType::Field(LPFieldType::Integer) => Self::Integer(Packer::<i64>::new()),
-            LPColumnType::Field(LPFieldType::String) => Self::Bytes(Packer::<ByteArray>::new()),
-            LPColumnType::Field(LPFieldType::Boolean) => Self::Boolean(Packer::<bool>::new()),
-            LPColumnType::Timestamp => Self::Integer(Packer::<i64>::new()),
+            InfluxColumnType::Tag => Self::Bytes(Packer::<ByteArray>::new()),
+            InfluxColumnType::Field(InfluxFieldType::Float) => Self::Float(Packer::<f64>::new()),
+            InfluxColumnType::Field(InfluxFieldType::Integer) => {
+                Self::Integer(Packer::<i64>::new())
+            }
+            InfluxColumnType::Field(InfluxFieldType::String) => {
+                Self::Bytes(Packer::<ByteArray>::new())
+            }
+            InfluxColumnType::Field(InfluxFieldType::Boolean) => {
+                Self::Boolean(Packer::<bool>::new())
+            }
+            InfluxColumnType::Timestamp => Self::Integer(Packer::<i64>::new()),
         }
     }
 }

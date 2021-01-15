@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use data_types::schema::{LPColumnType, Schema};
+use data_types::schema::{InfluxColumnType, Schema};
 use hashbrown::{hash_map, HashMap};
 use itertools::Itertools;
 
@@ -848,7 +848,7 @@ impl From<RecordBatch> for RowGroup {
             let col_name = field.name();
 
             match lp_type {
-                Some(LPColumnType::Tag) => {
+                Some(InfluxColumnType::Tag) => {
                     assert_eq!(arrow_column.data_type(), &arrow::datatypes::DataType::Utf8);
                     let arr: &arrow::array::StringArray = arrow_column
                         .as_any()
@@ -859,7 +859,7 @@ impl From<RecordBatch> for RowGroup {
 
                     columns.insert(col_name.to_owned(), ColumnType::Tag(column_data));
                 }
-                Some(LPColumnType::Field(_)) => {
+                Some(InfluxColumnType::Field(_)) => {
                     let column_data = match arrow_column.data_type() {
                         arrow::datatypes::DataType::Int64 => Column::from(
                             arrow_column
@@ -887,7 +887,7 @@ impl From<RecordBatch> for RowGroup {
 
                     columns.insert(col_name.to_owned(), ColumnType::Field(column_data));
                 }
-                Some(LPColumnType::Timestamp) => {
+                Some(InfluxColumnType::Timestamp) => {
                     assert_eq!(col_name, TIME_COLUMN_NAME);
 
                     let column_data = Column::from(match arrow_column.data_type() {

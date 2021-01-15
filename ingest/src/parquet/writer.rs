@@ -9,7 +9,7 @@ use arrow_deps::parquet::{
     },
     schema::types::{ColumnPath, Type},
 };
-use data_types::schema::{LPColumnType, LPFieldType, Schema};
+use data_types::schema::{InfluxColumnType, InfluxFieldType, Schema};
 use parquet::file::writer::ParquetWriter;
 use snafu::{OptionExt, ResultExt, Snafu};
 use std::{
@@ -97,7 +97,7 @@ where
     ///
     /// ```
     /// # use std::fs;
-    /// # use data_types::schema::{builder::SchemaBuilder, LPFieldType};
+    /// # use data_types::schema::{builder::SchemaBuilder, InfluxFieldType};
     /// # use packers::IOxTableWriter;
     /// # use packers::{Packer, Packers};
     /// # use ingest::parquet::writer::{IOxParquetTableWriter, CompressionLevel};
@@ -106,7 +106,7 @@ where
     /// let schema = SchemaBuilder::new()
     ///      .measurement("measurement_name")
     ///      .tag("tag1")
-    ///      .lp_field("field1", LPFieldType::Integer)
+    ///      .influx_field("field1", InfluxFieldType::Integer)
     ///      .timestamp()
     ///      .build()
     ///      .unwrap();
@@ -289,22 +289,24 @@ where
 fn convert_to_parquet_schema(schema: &Schema) -> Result<Arc<parquet::schema::types::Type>, Error> {
     let mut parquet_columns = Vec::new();
 
-    for (i, (lp_column_type, field)) in schema.iter().enumerate() {
+    for (i, (influxdb_column_type, field)) in schema.iter().enumerate() {
         debug!(
             "Determining parquet schema for column[{}] {:?} -> {:?}",
-            i, lp_column_type, field
+            i, influxdb_column_type, field
         );
-        let (physical_type, logical_type) = match lp_column_type {
-            Some(LPColumnType::Tag) => (PhysicalType::BYTE_ARRAY, Some(LogicalType::UTF8)),
-            Some(LPColumnType::Field(LPFieldType::Boolean)) => (PhysicalType::BOOLEAN, None),
-            Some(LPColumnType::Field(LPFieldType::Float)) => (PhysicalType::DOUBLE, None),
-            Some(LPColumnType::Field(LPFieldType::Integer)) => {
+        let (physical_type, logical_type) = match influxdb_column_type {
+            Some(InfluxColumnType::Tag) => (PhysicalType::BYTE_ARRAY, Some(LogicalType::UTF8)),
+            Some(InfluxColumnType::Field(InfluxFieldType::Boolean)) => {
+                (PhysicalType::BOOLEAN, None)
+            }
+            Some(InfluxColumnType::Field(InfluxFieldType::Float)) => (PhysicalType::DOUBLE, None),
+            Some(InfluxColumnType::Field(InfluxFieldType::Integer)) => {
                 (PhysicalType::INT64, Some(LogicalType::UINT_64))
             }
-            Some(LPColumnType::Field(LPFieldType::String)) => {
+            Some(InfluxColumnType::Field(InfluxFieldType::String)) => {
                 (PhysicalType::BYTE_ARRAY, Some(LogicalType::UTF8))
             }
-            Some(LPColumnType::Timestamp) => {
+            Some(InfluxColumnType::Timestamp) => {
                 // At the time of writing, the underlying rust parquet
                 // library doesn't support nanosecond timestamp
                 // precisions yet
@@ -362,7 +364,7 @@ fn convert_to_parquet_schema(schema: &Schema) -> Result<Arc<parquet::schema::typ
 }
 
 fn set_integer_encoding(
-    lp_column_type: LPColumnType,
+    influxdb_column_type: InfluxColumnType,
     compression_level: CompressionLevel,
     col_path: ColumnPath,
     builder: WriterPropertiesBuilder,
@@ -371,7 +373,7 @@ fn set_integer_encoding(
         CompressionLevel::Maximum => {
             debug!(
                 "Setting encoding of {:?} col {} to DELTA_BINARY_PACKED (Maximum)",
-                lp_column_type, col_path
+                influxdb_column_type, col_path
             );
             builder
                 .set_column_encoding(col_path.clone(), Encoding::DELTA_BINARY_PACKED)
@@ -380,7 +382,7 @@ fn set_integer_encoding(
         CompressionLevel::Compatibility => {
             debug!(
                 "Setting encoding of {:?} col {} to PLAIN/RLE (Compatibility)",
-                lp_column_type, col_path
+                influxdb_column_type, col_path
             );
             builder
                 .set_column_encoding(col_path.clone(), Encoding::PLAIN)
@@ -411,54 +413,57 @@ fn create_writer_props(
     // dictionary encoding overrides all other encodings. Thus, we
     // must explicitly disable dictionary encoding when another
     // encoding is desired.
-    for (i, (lp_column_type, field)) in schema.iter().enumerate() {
+    for (i, (influxdb_column_type, field)) in schema.iter().enumerate() {
         let column_name = field.name().clone();
         let col_path: ColumnPath = column_name.into();
 
-        match lp_column_type {
-            Some(LPColumnType::Field(LPFieldType::Boolean)) => {
-                debug!("Setting encoding of {:?} col {} to RLE", lp_column_type, i);
+        match influxdb_column_type {
+            Some(InfluxColumnType::Field(InfluxFieldType::Boolean)) => {
+                debug!(
+                    "Setting encoding of {:?} col {} to RLE",
+                    influxdb_column_type, i
+                );
                 builder = builder
                     .set_column_encoding(col_path.clone(), Encoding::RLE)
                     .set_column_dictionary_enabled(col_path, false);
             }
-            Some(LPColumnType::Field(LPFieldType::Integer)) => {
+            Some(InfluxColumnType::Field(InfluxFieldType::Integer)) => {
                 builder = set_integer_encoding(
-                    lp_column_type.unwrap(),
+                    influxdb_column_type.unwrap(),
                     compression_level,
                     col_path,
                     builder,
                 )
             }
-            Some(LPColumnType::Field(LPFieldType::Float)) => {
+            Some(InfluxColumnType::Field(InfluxFieldType::Float)) => {
                 debug!(
                     "Setting encoding of {:?} col {} to PLAIN",
-                    lp_column_type, col_path
+                    influxdb_column_type, col_path
                 );
                 builder = builder
                     .set_column_encoding(col_path.clone(), Encoding::PLAIN)
                     .set_column_dictionary_enabled(col_path, false);
             }
-            Some(LPColumnType::Field(LPFieldType::String)) => {
+            Some(InfluxColumnType::Field(InfluxFieldType::String)) => {
                 debug!(
                     "Setting encoding of non-tag val {:?} col {} to DELTA_LENGTH_BYTE_ARRAY",
-                    lp_column_type, col_path
+                    influxdb_column_type, col_path
                 );
                 builder = builder
                     .set_column_encoding(col_path.clone(), Encoding::DELTA_LENGTH_BYTE_ARRAY)
                     .set_column_dictionary_enabled(col_path, false);
             }
             // tag values are often very much repeated
-            Some(LPColumnType::Tag) => {
+            Some(InfluxColumnType::Tag) => {
                 debug!(
                     "Setting encoding of tag val {:?} col {} to dictionary",
-                    lp_column_type, col_path
+                    influxdb_column_type, col_path
                 );
                 builder = builder.set_column_dictionary_enabled(col_path, true);
             }
-            Some(LPColumnType::Timestamp) => {
+            Some(InfluxColumnType::Timestamp) => {
                 builder = set_integer_encoding(
-                    lp_column_type.unwrap(),
+                    influxdb_column_type.unwrap(),
                     compression_level,
                     col_path,
                     builder,
@@ -518,10 +523,10 @@ mod tests {
         let schema = SchemaBuilder::new()
             .measurement("measurement_name")
             .tag("tag1")
-            .lp_field("string_field", LPFieldType::String)
-            .lp_field("float_field", LPFieldType::Float)
-            .lp_field("int_field", LPFieldType::Integer)
-            .lp_field("bool_field", LPFieldType::Boolean)
+            .influx_field("string_field", InfluxFieldType::String)
+            .influx_field("float_field", InfluxFieldType::Float)
+            .influx_field("int_field", InfluxFieldType::Integer)
+            .influx_field("bool_field", InfluxFieldType::Boolean)
             .timestamp()
             .build()
             .unwrap();
@@ -546,10 +551,10 @@ mod tests {
         SchemaBuilder::new()
             .measurement("measurement_name")
             .tag("tag1")
-            .lp_field("string_field", LPFieldType::String)
-            .lp_field("float_field", LPFieldType::Float)
-            .lp_field("int_field", LPFieldType::Integer)
-            .lp_field("bool_field", LPFieldType::Boolean)
+            .influx_field("string_field", InfluxFieldType::String)
+            .influx_field("float_field", InfluxFieldType::Float)
+            .influx_field("int_field", InfluxFieldType::Integer)
+            .influx_field("bool_field", InfluxFieldType::Boolean)
             .timestamp()
             .build()
             .unwrap()

@@ -1,6 +1,10 @@
 //! This module contains the schema definiton for IOx
 use snafu::Snafu;
-use std::{collections::{BTreeSet, HashMap, HashSet}, convert::{TryFrom, TryInto}, fmt};
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    convert::{TryFrom, TryInto},
+    fmt,
+};
 
 use arrow_deps::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
@@ -25,11 +29,11 @@ pub enum Error {
 
     #[snafu(display(
         "Error: Incompatible metadata type found in schema for column '{}'. Metadata specified {:?} which is incompatible with actual type {:?}",
-        column_name, lp_column_type, actual_type
+        column_name, influxdb_column_type, actual_type
     ))]
     IncompatibleMetadata {
         column_name: String,
-        lp_column_type: LPColumnType,
+        influxdb_column_type: InfluxColumnType,
         actual_type: ArrowDataType,
     },
 
@@ -40,7 +44,7 @@ pub enum Error {
     ))]
     InvalidTimestamp {
         column_name: String,
-        existing_type: LPColumnType,
+        existing_type: InfluxColumnType,
     },
 }
 
@@ -111,13 +115,13 @@ impl Schema {
 
         // for each field, ensure any type specified by the metadata
         // is compatible with the actual type of the field
-        for (lp_column_type, field) in schema.iter() {
-            if let Some(lp_column_type) = lp_column_type {
+        for (influxdb_column_type, field) in schema.iter() {
+            if let Some(influxdb_column_type) = influxdb_column_type {
                 let actual_type = field.data_type();
-                if !lp_column_type.valid_arrow_type(actual_type) {
+                if !influxdb_column_type.valid_arrow_type(actual_type) {
                     return IncompatibleMetadata {
                         column_name: field.name(),
-                        lp_column_type,
+                        influxdb_column_type,
                         actual_type: actual_type.clone(),
                     }
                     .fail();
@@ -141,34 +145,34 @@ impl Schema {
         measurement: Option<String>,
         fields: Vec<ArrowField>,
         tag_cols: HashSet<String>,
-        field_cols: HashMap<String, LPColumnType>,
+        field_cols: HashMap<String, InfluxColumnType>,
         time_col: Option<String>,
     ) -> Result<Self> {
         let mut metadata = HashMap::new();
 
         for tag_name in tag_cols.into_iter() {
-            metadata.insert(tag_name, LPColumnType::Tag.to_string());
+            metadata.insert(tag_name, InfluxColumnType::Tag.to_string());
         }
 
         // Ensure we don't have columns that were specified to be both fields and tags
-        for (column_name, lp_column_type) in field_cols.into_iter() {
+        for (column_name, influxdb_column_type) in field_cols.into_iter() {
             if metadata.get(&column_name).is_some() {
                 return BothFieldAndTag { column_name }.fail();
             }
-            metadata.insert(column_name, lp_column_type.to_string());
+            metadata.insert(column_name, influxdb_column_type.to_string());
         }
 
         // Ensure we didn't ask the field to be both a timestamp and a field or tag
         if let Some(column_name) = time_col {
             if let Some(existing_type) = metadata.get(&column_name) {
-                let existing_type: LPColumnType = existing_type.as_str().try_into().unwrap();
+                let existing_type: InfluxColumnType = existing_type.as_str().try_into().unwrap();
                 return InvalidTimestamp {
                     column_name,
                     existing_type,
                 }
                 .fail();
             }
-            metadata.insert(column_name, LPColumnType::Timestamp.to_string());
+            metadata.insert(column_name, InfluxColumnType::Timestamp.to_string());
         }
 
         if let Some(measurement) = measurement {
@@ -189,23 +193,24 @@ impl Schema {
     /// schema field for the column at index `idx`. Panics if `idx` is
     /// greater than or equal to self.len()
     ///
-    /// if there is no corresponding metadata for LPColumnType,
-    /// returns None for the lp_column_type
-    pub fn field(&self, idx: usize) -> (Option<LPColumnType>, &ArrowField) {
+    /// if there is no corresponding influx metadata,
+    /// returns None for the influxdb_column_type
+    pub fn field(&self, idx: usize) -> (Option<InfluxColumnType>, &ArrowField) {
         let field = self.inner.field(idx);
 
         // Lookup and translate metadata type, if present
         // invalid metadata was detected and reported as part of the constructor
-        let lp_column_type = self
+        let influxdb_column_type = self
             .inner
             .metadata()
             .get(field.name())
-            .and_then(|lp_column_type_str| lp_column_type_str.as_str().try_into().ok());
+            .and_then(|influxdb_column_type_str| influxdb_column_type_str.as_str().try_into().ok());
 
-        (lp_column_type, field)
+        (influxdb_column_type, field)
     }
 
-    /// Provides the InfluxDB data model measurement name for this schema, if any
+    /// Provides the InfluxDB data model measurement name for this schema, if
+    /// any
     pub fn measurement(&self) -> Option<&String> {
         self.inner.metadata().get(MEASUREMENT_METADATA_KEY)
     }
@@ -233,7 +238,7 @@ impl Schema {
 ///
 /// [the documentation]: https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_tutorial/#data-types
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum LPFieldType {
+pub enum InfluxFieldType {
     /// 64-bit floating point number (TDB if NULLs / Nans are allowed)
     Float,
     /// 64-bit signed integer
@@ -244,18 +249,18 @@ pub enum LPFieldType {
     Boolean,
 }
 
-impl From<LPFieldType> for ArrowDataType {
-    fn from(t: LPFieldType) -> Self {
+impl From<InfluxFieldType> for ArrowDataType {
+    fn from(t: InfluxFieldType) -> Self {
         match t {
-            LPFieldType::Float => Self::Float64,
-            LPFieldType::Integer => Self::Int64,
-            LPFieldType::String => Self::Utf8,
-            LPFieldType::Boolean => Self::Boolean,
+            InfluxFieldType::Float => Self::Float64,
+            InfluxFieldType::Integer => Self::Int64,
+            InfluxFieldType::String => Self::Utf8,
+            InfluxFieldType::Boolean => Self::Boolean,
         }
     }
 }
 
-impl TryFrom<ArrowDataType> for LPFieldType {
+impl TryFrom<ArrowDataType> for InfluxFieldType {
     type Error = &'static str;
 
     fn try_from(value: ArrowDataType) -> Result<Self, Self::Error> {
@@ -272,15 +277,15 @@ impl TryFrom<ArrowDataType> for LPFieldType {
 /// Valid types for fields in the InfluxDB data model, as described in the
 /// [documentation](https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_tutorial).
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum LPColumnType {
+pub enum InfluxColumnType {
     /// Tag
     ///
     /// Note: tags are always stored as a Utf8, but eventually this
     /// should allow for both Utf8 and Dictionary
     Tag,
 
-    /// Field: Data of type defined in LPFieldType
-    Field(LPFieldType),
+    /// Field: Data of type in InfluxDB Data model
+    Field(InfluxFieldType),
 
     /// Timestamp
     ///
@@ -289,7 +294,7 @@ pub enum LPColumnType {
     Timestamp,
 }
 
-impl LPColumnType {
+impl InfluxColumnType {
     /// returns true if `arrow_type` can validly store this column type
     pub fn valid_arrow_type(&self, data_type: &ArrowDataType) -> bool {
         // Note this function is forward looking and imagines the day
@@ -300,52 +305,51 @@ impl LPColumnType {
     }
 }
 
-/// "serialization" of LPColumnType to strings that are stored in arrow metadata
-impl From<&LPColumnType> for &'static str {
-    fn from(t: &LPColumnType) -> Self {
+/// "serialization" to strings that are stored in arrow metadata
+impl From<&InfluxColumnType> for &'static str {
+    fn from(t: &InfluxColumnType) -> Self {
         match t {
-            LPColumnType::Tag => "iox::column_type::tag",
-            LPColumnType::Field(LPFieldType::Float) => "iox::column_type::field::float",
-            LPColumnType::Field(LPFieldType::Integer) => "iox::column_type::field::integer",
-            LPColumnType::Field(LPFieldType::String) => "iox::column_type::field::string",
-            LPColumnType::Field(LPFieldType::Boolean) => "iox::column_type::field::boolean",
-            LPColumnType::Timestamp => "iox::column_type::timestamp",
+            InfluxColumnType::Tag => "iox::column_type::tag",
+            InfluxColumnType::Field(InfluxFieldType::Float) => "iox::column_type::field::float",
+            InfluxColumnType::Field(InfluxFieldType::Integer) => "iox::column_type::field::integer",
+            InfluxColumnType::Field(InfluxFieldType::String) => "iox::column_type::field::string",
+            InfluxColumnType::Field(InfluxFieldType::Boolean) => "iox::column_type::field::boolean",
+            InfluxColumnType::Timestamp => "iox::column_type::timestamp",
         }
     }
 }
 
-impl ToString for LPColumnType {
+impl ToString for InfluxColumnType {
     fn to_string(&self) -> String {
         let s: &str = self.into();
         s.into()
     }
 }
 
-/// "deserialization" of LPColumnType from strings that are stored in arrow
-/// metadata
-impl TryFrom<&str> for LPColumnType {
+/// "deserialization" from strings that are stored in arrow metadata
+impl TryFrom<&str> for InfluxColumnType {
     type Error = String;
     /// this is the inverse of converting to &str
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s {
             "iox::column_type::tag" => Ok(Self::Tag),
-            "iox::column_type::field::float" => Ok(Self::Field(LPFieldType::Float)),
-            "iox::column_type::field::integer" => Ok(Self::Field(LPFieldType::Integer)),
-            "iox::column_type::field::string" => Ok(Self::Field(LPFieldType::String)),
-            "iox::column_type::field::boolean" => Ok(Self::Field(LPFieldType::Boolean)),
+            "iox::column_type::field::float" => Ok(Self::Field(InfluxFieldType::Float)),
+            "iox::column_type::field::integer" => Ok(Self::Field(InfluxFieldType::Integer)),
+            "iox::column_type::field::string" => Ok(Self::Field(InfluxFieldType::String)),
+            "iox::column_type::field::boolean" => Ok(Self::Field(InfluxFieldType::Boolean)),
             "iox::column_type::timestamp" => Ok(Self::Timestamp),
             _ => Err(format!("Unknown column type in metadata: {:?}", s)),
         }
     }
 }
 
-impl From<&LPColumnType> for ArrowDataType {
+impl From<&InfluxColumnType> for ArrowDataType {
     /// What arrow type is used for this column type?
-    fn from(t: &LPColumnType) -> Self {
+    fn from(t: &InfluxColumnType) -> Self {
         match t {
-            LPColumnType::Tag => Self::Utf8,
-            LPColumnType::Field(lp_field_type) => (*lp_field_type).into(),
-            LPColumnType::Timestamp => Self::Int64,
+            InfluxColumnType::Tag => Self::Utf8,
+            InfluxColumnType::Field(influxdb_field_type) => (*influxdb_field_type).into(),
+            InfluxColumnType::Timestamp => Self::Int64,
         }
     }
 }
@@ -363,7 +367,7 @@ impl<'a> fmt::Debug for SchemaIter<'a> {
 }
 
 impl<'a> Iterator for SchemaIter<'a> {
-    type Item = (Option<LPColumnType>, &'a ArrowField);
+    type Item = (Option<InfluxColumnType>, &'a ArrowField);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.idx < self.schema.len() {
@@ -383,14 +387,14 @@ impl<'a> Iterator for SchemaIter<'a> {
 /// Asserts that the result of calling Schema:field(i) is as expected:
 ///
 /// example
-///   assert_column_eq!(schema, 0, LPColumnType::Tag, "host");
+///   assert_column_eq!(schema, 0, InfluxColumnType::Tag, "host");
 #[macro_export]
 macro_rules! assert_column_eq {
-    ($schema:expr, $i:expr, $expected_lp_column_type:expr, $expected_field_name:expr) => {
-        let (lp_column_type, arrow_field) = $schema.field($i);
+    ($schema:expr, $i:expr, $expected_influxdb_column_type:expr, $expected_field_name:expr) => {
+        let (influxdb_column_type, arrow_field) = $schema.field($i);
         assert_eq!(
-            lp_column_type,
-            Some($expected_lp_column_type),
+            influxdb_column_type,
+            Some($expected_influxdb_column_type),
             "Line protocol column mismatch for column {}, field {:?}, in schema {:#?}",
             $i,
             arrow_field,
@@ -423,15 +427,15 @@ mod test {
         assert_eq!(schema.len(), 2);
 
         // It still works, but has no lp column types
-        let (lp_column_type, field) = schema.field(0);
+        let (influxdb_column_type, field) = schema.field(0);
         assert_eq!(field.name(), "col1");
         assert_eq!(field, arrow_schema.field(0));
-        assert_eq!(lp_column_type, None);
+        assert_eq!(influxdb_column_type, None);
 
-        let (lp_column_type, field) = schema.field(1);
+        let (influxdb_column_type, field) = schema.field(1);
         assert_eq!(field.name(), "col2");
         assert_eq!(field, arrow_schema.field(1));
-        assert_eq!(lp_column_type, None);
+        assert_eq!(influxdb_column_type, None);
     }
 
     #[test]
@@ -461,32 +465,32 @@ mod test {
         let arrow_schema = ArrowSchemaRef::new(ArrowSchema::new_with_metadata(fields, metadata));
 
         let schema: Schema = arrow_schema.try_into().unwrap();
-        assert_column_eq!(schema, 0, LPColumnType::Tag, "tag_col");
+        assert_column_eq!(schema, 0, InfluxColumnType::Tag, "tag_col");
         assert_column_eq!(
             schema,
             1,
-            LPColumnType::Field(LPFieldType::Integer),
+            InfluxColumnType::Field(InfluxFieldType::Integer),
             "int_col"
         );
         assert_column_eq!(
             schema,
             2,
-            LPColumnType::Field(LPFieldType::Float),
+            InfluxColumnType::Field(InfluxFieldType::Float),
             "float_col"
         );
         assert_column_eq!(
             schema,
             3,
-            LPColumnType::Field(LPFieldType::String),
+            InfluxColumnType::Field(InfluxFieldType::String),
             "str_col"
         );
         assert_column_eq!(
             schema,
             4,
-            LPColumnType::Field(LPFieldType::Boolean),
+            InfluxColumnType::Field(InfluxFieldType::Boolean),
             "bool_col"
         );
-        assert_column_eq!(schema, 5, LPColumnType::Timestamp, "time_col");
+        assert_column_eq!(schema, 5, InfluxColumnType::Timestamp, "time_col");
         assert_eq!(schema.len(), 6);
 
         assert_eq!(schema.measurement().unwrap(), "the_measurement");
@@ -516,13 +520,13 @@ mod test {
         // Having this succeed is the primary test
         let schema: Schema = arrow_schema.try_into().unwrap();
 
-        let (lp_column_type, field) = schema.field(0);
+        let (influxdb_column_type, field) = schema.field(0);
         assert_eq!(field.name(), "tag_col");
-        assert_eq!(lp_column_type, None);
+        assert_eq!(influxdb_column_type, None);
 
-        let (lp_column_type, field) = schema.field(1);
+        let (influxdb_column_type, field) = schema.field(1);
         assert_eq!(field.name(), "int_col");
-        assert_eq!(lp_column_type, None);
+        assert_eq!(influxdb_column_type, None);
     }
 
     // mismatched metadata / arrow types
@@ -605,7 +609,7 @@ mod test {
     #[test]
     fn test_round_trip() {
         let schema1 = SchemaBuilder::new()
-            .lp_field("the_field", LPFieldType::String)
+            .influx_field("the_field", InfluxFieldType::String)
             .tag("the_tag")
             .timestamp()
             .measurement("the_measurement")
@@ -620,9 +624,14 @@ mod test {
 
         for s in &[schema1, schema2] {
             assert_eq!(s.measurement().unwrap(), "the_measurement");
-            assert_column_eq!(s, 0, LPColumnType::Field(LPFieldType::String), "the_field");
-            assert_column_eq!(s, 1, LPColumnType::Tag, "the_tag");
-            assert_column_eq!(s, 2, LPColumnType::Timestamp, "time");
+            assert_column_eq!(
+                s,
+                0,
+                InfluxColumnType::Field(InfluxFieldType::String),
+                "the_field"
+            );
+            assert_column_eq!(s, 1, InfluxColumnType::Tag, "the_tag");
+            assert_column_eq!(s, 2, InfluxColumnType::Timestamp, "time");
             assert_eq!(3, s.len());
         }
     }
@@ -630,7 +639,7 @@ mod test {
     #[test]
     fn test_iter() {
         let schema = SchemaBuilder::new()
-            .lp_field("the_field", LPFieldType::String)
+            .influx_field("the_field", InfluxFieldType::String)
             .tag("the_tag")
             .timestamp()
             .measurement("the_measurement")
