@@ -90,9 +90,9 @@ impl Schema {
     /// Create a new Schema wrapper over the schema
     ///
     /// All metadata validation is done on creation (todo maybe offer
-    /// an fallable version where the checks are done on access)?
+    /// a fallable version where the checks are done on access)?
     pub fn new_from_arrow(inner: ArrowSchemaRef) -> Result<Self> {
-        // All columm names must be unique
+        // All column names must be unique
         let mut field_names = HashSet::new();
         for f in inner.fields() {
             if field_names.contains(f.name()) {
@@ -106,7 +106,7 @@ impl Schema {
 
         let schema = Self { inner };
 
-        // for each field, ensure any type speified by the metadata
+        // for each field, ensure any type specified by the metadata
         // is compatible with the actual type of the field
         for (lp_column_type, field) in schema.iter() {
             if let Some(lp_column_type) = lp_column_type {
@@ -349,7 +349,7 @@ impl From<&LPColumnType> for ArrowDataType {
     }
 }
 
-/// Thing that implements iterator over a Schema's cokumns
+/// Thing that implements iterator over a Schema's columns.
 pub struct SchemaIter<'a> {
     schema: &'a Schema,
     idx: usize,
