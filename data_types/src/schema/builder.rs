@@ -80,7 +80,7 @@ impl SchemaBuilder {
         )
     }
 
-    /// Add a new field column with the specified line protocol type
+    /// Add a new field column with the specified InfluxDB data model  type
     pub fn lp_field(self, column_name: &str, lp_field_type: LPFieldType) -> Self {
         let arrow_type: ArrowDataType = lp_field_type.into();
         self.add_column(
@@ -186,8 +186,8 @@ impl SchemaBuilder {
     }
 }
 
-/// Specialized Schema Builder for use building up a Schema while
-/// streaming line protocol through it.
+/// Specialized Schema Builder for use building up am InfluxDB data
+/// model Schema while streaming line protocol through it.
 ///
 /// Duplicated tag and field definitions are ignored, and the
 /// resulting schema always has puts tags as the initial columns (in the
@@ -243,9 +243,10 @@ impl LPSchemaBuilder {
         self
     }
 
-    /// Add a new field column with the specified line protocol type, ignoring
-    /// if that field has been seen TODO error if the field is a different
-    /// type (old implementation produces warn! in this condition)
+    /// Add a new field column with the specified InfluxDB data model
+    /// type, ignoring if that field has been seen TODO error if the
+    /// field is a different type (old implementation produces warn!
+    /// in this condition)
     pub fn saw_lp_field(mut self, column_name: &str, lp_field_type: LPFieldType) -> Self {
         if let Some(existing_lp_field_type) = self.field_set.get(column_name) {
             if &lp_field_type != existing_lp_field_type {

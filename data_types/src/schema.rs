@@ -1,10 +1,6 @@
 //! This module contains the schema definiton for IOx
 use snafu::Snafu;
-use std::{
-    collections::{HashMap, HashSet},
-    convert::{TryFrom, TryInto},
-    fmt,
-};
+use std::{collections::{BTreeSet, HashMap, HashSet}, convert::{TryFrom, TryInto}, fmt};
 
 use arrow_deps::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
@@ -56,12 +52,12 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// how to create and interpret the "user defined metadata" added to that schema
 /// by IOx.
 ///
-/// The metadata can be used to map back and forth to the line
-/// protocol data model, which is described in the
+/// The metadata can be used to map back and forth to the InfluxDB
+/// data model, which is described in the
 /// [documentation](https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_tutorial).
 ///
 /// Specifically, each column in the Arrow schema has a corresponding
-/// Line protocol type of Tag, Field or Timestamp which is stored in
+/// InfluxDB data model type of Tag, Field or Timestamp which is stored in
 /// the metadata field of the ArrowSchemaRef
 #[derive(Debug, Clone)]
 pub struct Schema {
@@ -100,7 +96,7 @@ impl Schema {
     /// a fallable version where the checks are done on access)?
     fn try_from_arrow(inner: ArrowSchemaRef) -> Result<Self> {
         // All column names must be unique
-        let mut field_names = HashSet::new();
+        let mut field_names = BTreeSet::new();
         for f in inner.fields() {
             if field_names.contains(f.name()) {
                 return DuplicateColumnName {
@@ -140,7 +136,7 @@ impl Schema {
     /// tag columns: names of any columns which are tags
     ///
     /// field columns: names of any columns which are fields, and
-    /// their associated line protocol types
+    /// their associated InfluxDB data model types
     pub(crate) fn new_from_parts(
         measurement: Option<String>,
         fields: Vec<ArrowField>,
@@ -189,7 +185,7 @@ impl Schema {
         &self.inner
     }
 
-    /// Return the line protocol column type, if any, and underlying arrow
+    /// Return the InfluxDB data model type, if any, and underlying arrow
     /// schema field for the column at index `idx`. Panics if `idx` is
     /// greater than or equal to self.len()
     ///
@@ -209,7 +205,7 @@ impl Schema {
         (lp_column_type, field)
     }
 
-    /// Provides the line protocol measurement name for this schema, if any
+    /// Provides the InfluxDB data model measurement name for this schema, if any
     pub fn measurement(&self) -> Option<&String> {
         self.inner.metadata().get(MEASUREMENT_METADATA_KEY)
     }
@@ -233,7 +229,7 @@ impl Schema {
     }
 }
 
-/// Valid types for Line Protocol Fields, as defined in [the documentation]
+/// Valid types for InfluxDB data model, as defined in [the documentation]
 ///
 /// [the documentation]: https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_tutorial/#data-types
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -268,12 +264,12 @@ impl TryFrom<ArrowDataType> for LPFieldType {
             ArrowDataType::Int64 => Ok(Self::Integer),
             ArrowDataType::Utf8 => Ok(Self::String),
             ArrowDataType::Boolean => Ok(Self::Boolean),
-            _ => Err("No corresponding line protocol type"),
+            _ => Err("No corresponding type in the InfluxDB data model"),
         }
     }
 }
 
-/// Valid types for fields in the line protocol data model, as described in the
+/// Valid types for fields in the InfluxDB data model, as described in the
 /// [documentation](https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_tutorial).
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum LPColumnType {
