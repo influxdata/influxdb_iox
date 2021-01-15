@@ -97,7 +97,7 @@ where
     ///
     /// ```
     /// # use std::fs;
-    /// # use data_types::schema::{SchemaBuilder, LPFieldType};
+    /// # use data_types::schema::{builder::SchemaBuilder, LPFieldType};
     /// # use packers::IOxTableWriter;
     /// # use packers::{Packer, Packers};
     /// # use ingest::parquet::writer::{IOxParquetTableWriter, CompressionLevel};
