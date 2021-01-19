@@ -13,7 +13,7 @@ pub enum Error {
         source: mutable_buffer::chunk::Error,
     },
 
-    #[snafu(display("Reead Buffer Chunk Error: {}", source))]
+    #[snafu(display("Read Buffer Chunk Error: {}", source))]
     ReadBufferChunk { source: read_buffer::Error },
 
     #[snafu(display("Internal Predicate Conversion Error: {}", source))]
@@ -29,12 +29,13 @@ pub enum DBChunk {
         chunk: Arc<mutable_buffer::chunk::Chunk>,
     },
     ReadBuffer {
-        db: Arc<std::sync::RwLock<ReadBufferDb>>,
+        db: Arc<RwLock<ReadBufferDb>>,
         partition_key: String,
         chunk_id: u32,
     },
     ParquetFile, // TODO add appropriate type here
 }
+
 impl DBChunk {
     /// Create a new mutable buffer chunk
     pub fn new_mb(chunk: Arc<mutable_buffer::chunk::Chunk>) -> Arc<Self> {
