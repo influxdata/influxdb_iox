@@ -145,11 +145,11 @@ impl Database {
 
     // Lists all partition keys with data for this database.
     pub fn partition_keys(&self) -> Vec<&String> {
-        self.partitions.keys().collect::<Vec<_>>()
+        self.partitions.keys().collect()
     }
 
-    // Lists all chunk ids in the given partition key. Returns empty
-    // Vec if no partition with the given key exists
+    /// Lists all chunk ids in the given partition key. Returns empty
+    /// `Vec` if no partition with the given key exists
     pub fn chunk_ids(&self, partition_key: &str) -> Vec<u32> {
         self.partitions
             .get(partition_key)

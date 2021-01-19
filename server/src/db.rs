@@ -83,7 +83,7 @@ pub struct Db {
     /// The read buffer holds chunk data in an in-memory optimized
     /// format.
     ///
-    /// TODO: finer grained locking see ticket XXXXXX
+    /// TODO: finer grained locking see ticket https://github.com/influxdata/influxdb_iox/issues/669
     pub read_buffer: Arc<RwLock<ReadBufferDb>>,
 
     #[serde(skip)]
@@ -143,7 +143,7 @@ impl Db {
         Ok(chunks)
     }
 
-    // List chunks that are currently in the mutable_buffer
+    /// List chunks that are currently in the read buffer
     pub async fn read_buffer_chunks(&self, partition_key: &str) -> Vec<Arc<DBChunk>> {
         self.read_buffer
             .read()
