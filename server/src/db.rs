@@ -228,7 +228,7 @@ impl Db {
                 let mut read_buffer = self.read_buffer.write().expect("mutex poisoned");
                 read_buffer.upsert_partition(
                     partition_key,
-                    mb_chunk.id() as u32,
+                    mb_chunk.id(),
                     &stats.name,
                     batch,
                 )

@@ -461,7 +461,7 @@ impl Partition {
         };
     }
 
-    /// Return the chunk ids stored in this partition, or order
+    /// Return the chunk ids stored in this partition, in order of id
     fn chunk_ids(&self) -> Vec<u32> {
         self.chunks.keys().cloned().collect()
     }
