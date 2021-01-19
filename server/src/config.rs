@@ -15,6 +15,9 @@ use std::{
 
 const DB_RULES_FILE_NAME: &str = "rules.json";
 
+/// The Config tracks the configuration od databases and their rules along
+/// with host groups for replication. It is used as an in-memory structure
+/// that can be loaded incrementally from objet storage.
 #[derive(Default, Debug)]
 pub(crate) struct Config {
     state: RwLock<ConfigState>,
@@ -101,6 +104,16 @@ struct ConfigState {
     host_groups: BTreeMap<HostGroupId, Arc<HostGroup>>,
 }
 
+/// CreateDatabaseHandle is retunred when a call is made to `create_db` on
+/// the Config struct. The handle can be used to hold a reservation for the
+/// database name. Calling `commit` on the handle will consume the struct
+/// and move the database from reserved to being in the config.
+///
+/// The goal is to ensure that database names can be reserved with
+/// minimal time holding a write lock on the config state. This allows
+/// the caller (the server) to reserve the database name, persist its
+/// configuration and then commit the change in-memory after it has been
+/// persisted.
 #[derive(Debug)]
 pub(crate) struct CreateDatabaseHandle<'a> {
     pub db: Arc<Db>,
