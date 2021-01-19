@@ -128,19 +128,18 @@ impl Db {
 
     // Return a list of all chunks in the mutable_buffer (that can
     // potentially be migrated into the read buffer or object store)
-    pub async fn mutable_buffer_chunks(&self, partition_key: &str) -> Result<Vec<Arc<DBChunk>>> {
+    pub async fn mutable_buffer_chunks(&self, partition_key: &str) -> Vec<Arc<DBChunk>> {
         let chunks = if let Some(mutable_buffer) = self.mutable_buffer.as_ref() {
             mutable_buffer
                 .chunks(partition_key)
                 .await
-                .context(MutableBufferRead)?
                 .into_iter()
                 .map(DBChunk::new_mb)
                 .collect()
         } else {
             vec![]
         };
-        Ok(chunks)
+        chunks
     }
 
     /// List chunks that are currently in the read buffer
@@ -256,12 +255,12 @@ impl Database for Db {
     type Chunk = DBChunk;
 
     /// Return a covering set of chunks for a particular partition
-    async fn chunks(&self, partition_key: &str) -> Result<Vec<Arc<Self::Chunk>>, Self::Error> {
+    async fn chunks(&self, partition_key: &str) -> Vec<Arc<Self::Chunk>> {
         // return a coverting set of chunks. TODO include read buffer
         // chunks and take them preferentially from the read buffer.
         // returns a coverting set of chunks -- aka take chunks from read buffer
         // preferentially
-        let mutable_chunk_iter = self.mutable_buffer_chunks(partition_key).await?.into_iter();
+        let mutable_chunk_iter = self.mutable_buffer_chunks(partition_key).await.into_iter();
 
         let read_buffer_chunk_iter = self.read_buffer_chunks(partition_key).await.into_iter();
 
@@ -271,9 +270,7 @@ impl Database for Db {
             .collect();
 
         // inserting into the map will have removed any dupes
-        let chunks: Vec<_> = chunks.into_iter().map(|(_id, chunk)| chunk).collect();
-
-        Ok(chunks)
+        chunks.into_iter().map(|(_id, chunk)| chunk).collect()
     }
 
     // Note that most of the functions below will eventually be removed from
@@ -593,7 +590,6 @@ mod tests {
         let mut chunk_ids: Vec<u32> = db
             .mutable_buffer_chunks(partition_key)
             .await
-            .unwrap()
             .iter()
             .map(|chunk| chunk.id())
             .collect();
