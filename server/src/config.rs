@@ -136,7 +136,7 @@ impl<'a> Drop for CreateDatabaseHandle<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use object_store::path::CloudConverter;
+    use object_store::path::cloud::CloudConverter;
 
     #[test]
     fn create_db() {
