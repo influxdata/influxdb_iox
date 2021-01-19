@@ -226,12 +226,7 @@ impl Db {
                 // until all reads to the read buffer to complete and
                 // then will block all reads while the insert is occuring
                 let mut read_buffer = self.read_buffer.write().expect("mutex poisoned");
-                read_buffer.upsert_partition(
-                    partition_key,
-                    mb_chunk.id(),
-                    &stats.name,
-                    batch,
-                )
+                read_buffer.upsert_partition(partition_key, mb_chunk.id(), &stats.name, batch)
             }
         }
 
