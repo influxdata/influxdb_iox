@@ -16,12 +16,6 @@ pub enum DatabaseNameError {
         LENGTH_CONSTRAINT.end()
     ))]
     LengthConstraint { name: String },
-
-    #[snafu(display(
-        "Database name {} contains invalid characters (allowed: alphanumeric, _,  -, and %)",
-        name
-    ))]
-    BadChars { name: String },
 }
 
 /// A correctly formed database name.
@@ -57,17 +51,6 @@ impl<'a> DatabaseName<'a> {
             return Err(DatabaseNameError::LengthConstraint {
                 name: name.to_string(),
             });
-        }
-
-        // Validate the name contains only valid characters.
-        //
-        // NOTE: If changing these characters, please update the error message
-        // above.
-        if !name
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '%')
-        {
-            return BadChars { name }.fail();
         }
 
         Ok(Self(name))
@@ -122,7 +105,7 @@ mod tests {
     #[test]
     fn test_deref() {
         let db = DatabaseName::new("my_example_name").unwrap();
-        assert_eq!(&*db, "my_example_name");
+        assert_eq!(db.as_str(), "my_example_name");
     }
 
     #[test]
@@ -148,8 +131,8 @@ mod tests {
     }
 
     #[test]
-    fn test_bad_chars() {
-        let got = DatabaseName::new("example!").unwrap_err();
-        assert!(matches!(got, DatabaseNameError::BadChars { name: _n }));
+    fn test_previously_bad_chars() {
+        let db = DatabaseName::new("example!").unwrap();
+        assert_eq!(db.as_str(), "example!");
     }
 }

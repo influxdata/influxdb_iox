@@ -615,7 +615,7 @@ mod tests {
         let server = Server::new(manager, store);
         server.set_id(1);
 
-        let reject: [&str; 5] = [
+        let accept = vec![
             "bananas!",
             r#""bananas\"are\"great"#,
             "bananas:good",
@@ -623,15 +623,15 @@ mod tests {
             "bananas\n",
         ];
 
-        for &name in &reject {
+        for name in accept {
             let rules = DatabaseRules {
                 store_locally: true,
                 ..Default::default()
             };
-            let got = server.create_database(name, rules).await.unwrap_err();
-            if !matches!(got, Error::InvalidDatabaseName { .. }) {
-                panic!("expected invalid name error");
-            }
+            server.create_database(name, rules).await.unwrap();
+            // make sure the database has been created
+            let db_name = DatabaseName::new(name).unwrap();
+            assert!(server.db(&db_name).await.is_some());
         }
 
         Ok(())
