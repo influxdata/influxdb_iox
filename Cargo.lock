@@ -889,8 +889,10 @@ dependencies = [
  "flatbuffers 0.6.1",
  "generated_types",
  "influxdb_line_protocol",
+ "percent-encoding",
  "serde",
  "snafu",
+ "test_helpers",
  "tracing",
 ]
 
