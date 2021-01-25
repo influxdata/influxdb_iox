@@ -680,7 +680,7 @@ mod test_influxrpc {
 
     #[async_trait]
     trait DBSetup {
-        // Create several scenarios, scenaro has the same data, but
+        // Create several scenarios, scenario has the same data, but
         // different physical arrangement
         async fn make(&self) -> Vec<DBScenario>;
     }
