@@ -1,5 +1,5 @@
 //! This module contains the main IOx Database object which has the
-//! instances of the immutable buffer, read buffer, and object store
+//! instances of the mutable buffer, read buffer, and object store
 
 use std::{
     collections::BTreeMap,
@@ -543,7 +543,7 @@ mod tests {
         let mb_chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
         assert_eq!(mb_chunk.id(), 0);
 
-        // add a new chunk in immutable buffer, and move chunk1 (but
+        // add a new chunk in mutable buffer, and move chunk1 (but
         // not chunk 0) to read buffer
         writer.write_lp_string(&db, "cpu bar=1 30").await.unwrap();
         let mb_chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
@@ -691,7 +691,7 @@ mod test_influxrpc {
                 &ts_pred_250_300,
                 vec![],
             ),
-            /* cases with multiple chunks in immutable buffer */
+            /* cases with multiple chunks in mutable buffer */
 
             /* cases with chunks in the read buffer */
 

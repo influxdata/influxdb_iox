@@ -463,7 +463,7 @@ impl Chunk {
 }
 
 #[async_trait]
-// The long term plan is for the immutable buffer to not implement the
+// The long term plan is for the mutable buffer to not implement the
 // query api directly so this trait implementation will eventually be
 // removed.
 impl query::PartitionChunk for Chunk {
