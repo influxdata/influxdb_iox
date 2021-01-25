@@ -654,22 +654,22 @@ mod test_influxrpc {
 
     #[tokio::test]
     async fn list_table_names_data_pred_0_201() {
-        run_table_names_test_case!(TwoMeasurements {}, ts_pred_0_201(), vec!["cpu", "disk"]);
+        run_table_names_test_case!(TwoMeasurements {}, tsp(0, 201), vec!["cpu", "disk"]);
     }
 
     #[tokio::test]
     async fn list_table_names_data_pred_0_200() {
-        run_table_names_test_case!(TwoMeasurements {}, ts_pred_0_200(), vec!["cpu"]);
+        run_table_names_test_case!(TwoMeasurements {}, tsp(0, 200), vec!["cpu"]);
     }
 
     #[tokio::test]
     async fn list_table_names_data_pred_50_101() {
-        run_table_names_test_case!(TwoMeasurements {}, ts_pred_50_101(), vec!["cpu"]);
+        run_table_names_test_case!(TwoMeasurements {}, tsp(50, 101), vec!["cpu"]);
     }
 
     #[tokio::test]
     async fn list_table_names_data_pred_250_300() {
-        run_table_names_test_case!(TwoMeasurements {}, ts_pred_250_300(), vec![]);
+        run_table_names_test_case!(TwoMeasurements {}, tsp(250, 300), vec![]);
     }
 
     /// Holds a database and a description with a particular test setup
@@ -759,26 +759,9 @@ mod test_influxrpc {
         Predicate::default()
     }
 
-    // ts in [0, 201]
-    fn ts_pred_0_201() -> Predicate {
-        PredicateBuilder::default().timestamp_range(0, 201).build()
-    }
-
-    // ts in [0, 200]
-    fn ts_pred_0_200() -> Predicate {
-        PredicateBuilder::default().timestamp_range(0, 200).build()
-    }
-
-    // ts in [50, 101]
-    fn ts_pred_50_101() -> Predicate {
-        PredicateBuilder::default().timestamp_range(50, 101).build()
-    }
-
-    // ts in [250, 300]
-    fn ts_pred_250_300() -> Predicate {
-        PredicateBuilder::default()
-            .timestamp_range(250, 300)
-            .build()
+    // make a single timestamp predicate between r1 and r2
+    fn tsp(r1: i64, r2: i64) -> Predicate {
+        PredicateBuilder::default().timestamp_range(r1, r2).build()
     }
 
     fn to_stringset(v: &[&str]) -> StringSetRef {
