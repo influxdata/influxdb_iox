@@ -11,7 +11,8 @@ use arrow::{
 };
 
 /// Returns a single column record batch of type Utf8 from the
-/// contents of something that can be turned into an iterator over &str
+/// contents of something that can be turned into an iterator over
+/// `Option<&str>`
 pub fn str_iter_to_batch<Ptr, I>(field_name: &str, iter: I) -> Result<RecordBatch, ArrowError>
 where
     I: IntoIterator<Item = Option<Ptr>>,
