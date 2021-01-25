@@ -1,5 +1,5 @@
 //! This module contains the main IOx Database object which has the
-//! instances of the immutable buffer, read buffer, and object store
+//! instances of the mutable buffer, read buffer, and object store
 
 use std::{
     collections::BTreeMap,
@@ -285,18 +285,6 @@ impl Database for Db {
             .context(MutableBufferWrite)
     }
 
-    async fn table_names(
-        &self,
-        predicate: query::predicate::Predicate,
-    ) -> Result<query::exec::StringSetPlan, Self::Error> {
-        self.mutable_buffer
-            .as_ref()
-            .context(DatabaseNotReadable)?
-            .table_names(predicate)
-            .await
-            .context(MutableBufferRead)
-    }
-
     async fn tag_column_names(
         &self,
         predicate: query::predicate::Predicate,
@@ -370,19 +358,10 @@ impl Database for Db {
 }
 
 #[cfg(test)]
-mod tests {
-    use arrow_deps::{
-        arrow::record_batch::RecordBatch, assert_table_eq, datafusion::physical_plan::collect,
-    };
-    use query::{
-        exec::Executor, frontend::sql::SQLQueryPlanner, test::TestLPWriter, PartitionChunk,
-    };
-    use test_helpers::assert_contains;
-
+mod test_util {
     use super::*;
-
     /// Create a Database with a local store
-    fn make_db() -> Db {
+    pub fn make_db() -> Db {
         let name = "test_db";
         Db::new(
             DatabaseRules::default(),
@@ -391,6 +370,20 @@ mod tests {
             None, // wal buffer
         )
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_util::make_db;
+    use super::*;
+
+    use arrow_deps::{
+        arrow::record_batch::RecordBatch, assert_table_eq, datafusion::physical_plan::collect,
+    };
+    use query::{
+        exec::Executor, frontend::sql::SQLQueryPlanner, test::TestLPWriter, PartitionChunk,
+    };
+    use test_helpers::assert_contains;
 
     #[tokio::test]
     async fn write_no_mutable_buffer() {
@@ -550,7 +543,7 @@ mod tests {
         let mb_chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
         assert_eq!(mb_chunk.id(), 0);
 
-        // add a new chunk in immutable buffer, and move chunk1 (but
+        // add a new chunk in mutable buffer, and move chunk1 (but
         // not chunk 0) to read buffer
         writer.write_lp_string(&db, "cpu bar=1 30").await.unwrap();
         let mb_chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
@@ -594,5 +587,184 @@ mod tests {
             .collect();
         chunk_ids.sort_unstable();
         chunk_ids
+    }
+}
+
+#[cfg(test)]
+mod test_influxrpc {
+    use super::*;
+    use query::{
+        exec::{
+            stringset::{IntoStringSet, StringSetRef},
+            Executor,
+        },
+        frontend::influxrpc::InfluxRPCPlanner,
+        predicate::{Predicate, PredicateBuilder},
+        test::TestLPWriter,
+    };
+
+    use super::test_util::make_db;
+
+    /// Creates and loads several database scenarios using the db_setup
+    /// function.
+    ///
+    /// runs table_names(predicate) and compares it to the expected
+    /// output
+    macro_rules! run_table_names_test_case {
+        ($DB_SETUP:expr, $PREDICATE:expr, $EXPECTED_NAMES:expr) => {
+            let predicate = $PREDICATE;
+            for scenario in $DB_SETUP.make().await {
+                let DBScenario { scenario_name, db } = scenario;
+                println!("Running scenario '{}'", scenario_name);
+                println!("Predicate: '{:#?}'", predicate);
+                let planner = InfluxRPCPlanner::new();
+                let executor = Executor::new();
+
+                let plan = planner
+                    .table_names(&db, predicate.clone())
+                    .await
+                    .expect("built plan successfully");
+                let names = executor
+                    .to_string_set(plan)
+                    .await
+                    .expect("converted plan to strings successfully");
+
+                let expected_names = $EXPECTED_NAMES;
+                assert_eq!(
+                    names,
+                    to_stringset(&expected_names),
+                    "Error in  scenario '{}'\n\nexpected:\n{:?}\nactual:\n{:?}",
+                    scenario_name,
+                    expected_names,
+                    names
+                );
+            }
+        };
+    }
+
+    #[tokio::test]
+    async fn list_table_names_no_data_no_pred() {
+        run_table_names_test_case!(NoData {}, empty_predicate(), vec![]);
+    }
+
+    #[tokio::test]
+    async fn list_table_names_no_data_pred() {
+        run_table_names_test_case!(TwoMeasurements {}, empty_predicate(), vec!["cpu", "disk"]);
+    }
+
+    #[tokio::test]
+    async fn list_table_names_data_pred_0_201() {
+        run_table_names_test_case!(TwoMeasurements {}, tsp(0, 201), vec!["cpu", "disk"]);
+    }
+
+    #[tokio::test]
+    async fn list_table_names_data_pred_0_200() {
+        run_table_names_test_case!(TwoMeasurements {}, tsp(0, 200), vec!["cpu"]);
+    }
+
+    #[tokio::test]
+    async fn list_table_names_data_pred_50_101() {
+        run_table_names_test_case!(TwoMeasurements {}, tsp(50, 101), vec!["cpu"]);
+    }
+
+    #[tokio::test]
+    async fn list_table_names_data_pred_250_300() {
+        run_table_names_test_case!(TwoMeasurements {}, tsp(250, 300), vec![]);
+    }
+
+    /// Holds a database and a description with a particular test setup
+    struct DBScenario {
+        scenario_name: String,
+        db: Db,
+    }
+
+    #[async_trait]
+    trait DBSetup {
+        // Create several scenarios, scenario has the same data, but
+        // different physical arrangement
+        async fn make(&self) -> Vec<DBScenario>;
+    }
+
+    /// No data
+    struct NoData {}
+    #[async_trait]
+    impl DBSetup for NoData {
+        async fn make(&self) -> Vec<DBScenario> {
+            let partition_key = "1970-01-01T00";
+            let db = make_db();
+            let scenario1 = DBScenario {
+                scenario_name: "New, Empty Database".into(),
+                db,
+            };
+
+            // listing partitions (which may create an entry in a map)
+            // in an empty database
+            let db = make_db();
+            assert_eq!(db.mutable_buffer_chunks(partition_key).await.len(), 1); // only open chunk
+            assert_eq!(db.read_buffer_chunks(partition_key).await.len(), 0);
+            let scenario2 = DBScenario {
+                scenario_name: "New, Empty Database after partitions are listed".into(),
+                db,
+            };
+
+            // a scenario where the database has had data loaded and then deleted
+            let db = make_db();
+            let data = "cpu,region=west user=23.2 100";
+            let mut writer = TestLPWriter::default();
+            writer.write_lp_string(&db, data).await.unwrap();
+            // move data out of open chunk
+            assert_eq!(db.rollover_partition(partition_key).await.unwrap().id(), 0);
+            // drop it
+            db.drop_mutable_buffer_chunk(partition_key, 0)
+                .await
+                .unwrap();
+
+            assert_eq!(db.mutable_buffer_chunks(partition_key).await.len(), 1);
+
+            assert_eq!(db.read_buffer_chunks(partition_key).await.len(), 0); // only open chunk
+
+            let scenario3 = DBScenario {
+                scenario_name: "Empty Database after drop chunk".into(),
+                db,
+            };
+
+            vec![scenario1, scenario2, scenario3]
+        }
+    }
+
+    /// Two measurements data in a single mutable buffer chunk
+    struct TwoMeasurements {}
+    #[async_trait]
+    impl DBSetup for TwoMeasurements {
+        async fn make(&self) -> Vec<DBScenario> {
+            let db = make_db();
+            let data = "cpu,region=west user=23.2 100\n\
+                        cpu,region=west user=21.0 150\n\
+                        disk,region=east bytes=99i 200";
+
+            let mut writer = TestLPWriter::default();
+
+            writer.write_lp_string(&db, data).await.unwrap();
+            vec![
+                DBScenario {
+                    scenario_name: "Data in open chunk of mutable buffer".into(),
+                    db,
+                }, // todo add a scenario where the database has had data loaded and then deleted
+            ]
+        }
+    }
+
+    // No predicate at all
+    fn empty_predicate() -> Predicate {
+        Predicate::default()
+    }
+
+    // make a single timestamp predicate between r1 and r2
+    fn tsp(r1: i64, r2: i64) -> Predicate {
+        PredicateBuilder::default().timestamp_range(r1, r2).build()
+    }
+
+    fn to_stringset(v: &[&str]) -> StringSetRef {
+        v.into_stringset().unwrap()
     }
 }
