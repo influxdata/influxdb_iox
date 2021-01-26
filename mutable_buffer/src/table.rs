@@ -853,12 +853,6 @@ impl Table {
     }
 
     /// Converts this table to an arrow record batch.
-    ///
-    /// If requested_columns is empty (`[]`), retrieve all columns in
-    /// the table
-    ///
-    /// TODO: make this take a ColumnSelection structure rather than &[&str]
-    /// directly.
     pub fn to_arrow(&self, chunk: &Chunk, selection: ChunkSelection<'_>) -> Result<RecordBatch> {
         // translate chunk selection into name/indexes:
         let selection = match selection {
