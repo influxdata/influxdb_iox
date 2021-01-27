@@ -10,7 +10,7 @@ pub fn to_mutable_buffer_selection(selection: Selection<'_>) -> ChunkSelection<'
 }
 
 /// Convert a query::Selection into one specific for read buffer
-pub fn make_read_buffer_selection(selection: Selection<'_>) -> ColumnSelection<'_> {
+pub fn to_read_buffer_selection(selection: Selection<'_>) -> ColumnSelection<'_> {
     match selection {
         Selection::All => ColumnSelection::All,
         Selection::Some(cols) => ColumnSelection::Some(cols),

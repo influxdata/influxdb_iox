@@ -15,7 +15,7 @@ use std::sync::{Arc, RwLock};
 
 use super::{
     pred::to_read_buffer_predicate,
-    selection::{make_read_buffer_selection, to_mutable_buffer_selection},
+    selection::{to_read_buffer_selection, to_mutable_buffer_selection},
 };
 
 use async_trait::async_trait;
@@ -127,7 +127,7 @@ impl PartitionChunk for DBChunk {
                 let predicate = PredicateBuilder::default().build();
                 let rb_predicate =
                     to_read_buffer_predicate(&predicate).context(InternalPredicateConversion)?;
-                let rb_selection = make_read_buffer_selection(selection);
+                let rb_selection = to_read_buffer_selection(selection);
 
                 // run the query
                 let db = db.read().unwrap();
