@@ -282,11 +282,10 @@ impl Table {
         let time_column_id = chunk_predicate.time_column_id;
 
         // figure out the tag columns
-        let selection = TableColSelection::with_capacity(self.column_id_to_index.len());
-
-        let selection = self.column_id_to_index.iter().fold(
-            selection,
-            |selection, (&column_id, &column_index)| {
+        let cols = self
+            .column_id_to_index
+            .iter()
+            .filter_map(|(&column_id, &column_index)| {
                 // keep tag columns and the timestamp column, if needed to evaluate a timestamp
                 // predicate
                 let need_column = if let Column::Tag(_, _) = self.columns[column_index] {
@@ -298,12 +297,16 @@ impl Table {
                 if need_column {
                     // the id came out of our map, so it should always be valid
                     let column_name = chunk.dictionary.lookup_id(column_id).unwrap();
-                    selection.add_column(column_name, column_index)
+                    Some(ColSelection {
+                        column_name,
+                        column_index,
+                    })
                 } else {
-                    selection
+                    None
                 }
-            },
-        );
+            })
+            .collect();
+        let selection = TableColSelection { cols };
 
         // TODO avoid materializing here
         let data = self.to_arrow_impl(chunk, &selection)?;
@@ -817,20 +820,24 @@ impl Table {
     /// Returns the column selection for all the columns in this table, orderd
     /// by table name
     fn all_columns_selection<'a>(&self, chunk: &'a Chunk) -> Result<TableColSelection<'a>> {
-        let selection = TableColSelection::with_capacity(self.column_id_to_index.len());
-
-        let selection = self.column_id_to_index.iter().try_fold(
-            selection,
-            |selection, (&column_id, &column_index)| {
+        let cols = self
+            .column_id_to_index
+            .iter()
+            .map(|(&column_id, &column_index)| {
                 let column_name = chunk.dictionary.lookup_id(column_id).context(
                     ColumnIdNotFoundInDictionary {
                         column_id,
                         chunk: chunk.id,
                     },
                 )?;
-                Ok(selection.add_column(column_name, column_index))
-            },
-        )?;
+                Ok(ColSelection {
+                    column_name,
+                    column_index,
+                })
+            })
+            .collect::<Result<_>>()?;
+
+        let selection = TableColSelection { cols };
 
         // sort so the columns always come out in a predictable name
         Ok(selection.sort_by_name())
@@ -842,14 +849,19 @@ impl Table {
         chunk: &'a Chunk,
         columns: &'a [&'a str],
     ) -> Result<TableColSelection<'a>> {
-        let selection = TableColSelection::with_capacity(columns.len());
-        columns
+        let cols = columns
             .iter()
-            .try_fold(selection, |selection, &column_name| {
+            .map(|&column_name| {
                 let column_index = self.column_index(chunk, column_name)?;
 
-                Ok(selection.add_column(column_name, column_index))
+                Ok(ColSelection {
+                    column_name,
+                    column_index,
+                })
             })
+            .collect::<Result<_>>()?;
+
+        Ok(TableColSelection { cols })
     }
 
     /// Converts this table to an arrow record batch.
@@ -1286,21 +1298,6 @@ struct TableColSelection<'a> {
 }
 
 impl<'a> TableColSelection<'a> {
-    fn with_capacity(sz: usize) -> Self {
-        Self {
-            cols: Vec::with_capacity(sz),
-        }
-    }
-
-    /// Add a column to this selection
-    fn add_column(mut self, name: &'a str, index: usize) -> Self {
-        self.cols.push(ColSelection {
-            column_name: name,
-            column_index: index,
-        });
-        self
-    }
-
     /// Sorts the columns by name
     fn sort_by_name(mut self) -> Self {
         self.cols.sort_by(|a, b| a.column_name.cmp(b.column_name));

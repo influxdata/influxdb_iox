@@ -15,7 +15,7 @@ use std::sync::{Arc, RwLock};
 
 use super::{
     pred::to_read_buffer_predicate,
-    selection::{to_read_buffer_selection, to_mutable_buffer_selection},
+    selection::{to_mutable_buffer_selection, to_read_buffer_selection},
 };
 
 use async_trait::async_trait;
