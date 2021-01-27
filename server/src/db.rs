@@ -11,7 +11,7 @@ use std::{
 
 use async_trait::async_trait;
 use data_types::{data::ReplicatedWrite, database_rules::DatabaseRules};
-use mutable_buffer::MutableBufferDb;
+use mutable_buffer::{chunk::ChunkSelection, MutableBufferDb};
 use query::{Database, PartitionChunk};
 use read_buffer::Database as ReadBufferDb;
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,7 @@ use crate::buffer::Buffer;
 mod chunk;
 use chunk::DBChunk;
 pub mod pred;
+pub mod selection;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -218,7 +219,7 @@ impl Db {
         let mut batches = Vec::new();
         for stats in mb_chunk.table_stats().unwrap() {
             mb_chunk
-                .table_to_arrow(&mut batches, &stats.name, &[])
+                .table_to_arrow(&mut batches, &stats.name, ChunkSelection::All)
                 .unwrap();
             for batch in batches.drain(..) {
                 // As implemented now, taking this write lock will wait
@@ -737,20 +738,56 @@ mod test_influxrpc {
     #[async_trait]
     impl DBSetup for TwoMeasurements {
         async fn make(&self) -> Vec<DBScenario> {
-            let db = make_db();
+            let partition_key = "1970-01-01T00";
             let data = "cpu,region=west user=23.2 100\n\
                         cpu,region=west user=21.0 150\n\
                         disk,region=east bytes=99i 200";
 
+            let db = make_db();
             let mut writer = TestLPWriter::default();
-
             writer.write_lp_string(&db, data).await.unwrap();
-            vec![
-                DBScenario {
-                    scenario_name: "Data in open chunk of mutable buffer".into(),
-                    db,
-                }, // todo add a scenario where the database has had data loaded and then deleted
-            ]
+            let scenario1 = DBScenario {
+                scenario_name: "Data in open chunk of mutable buffer".into(),
+                db,
+            };
+
+            let db = make_db();
+            let mut writer = TestLPWriter::default();
+            writer.write_lp_string(&db, data).await.unwrap();
+            db.rollover_partition(partition_key).await.unwrap();
+            let scenario2 = DBScenario {
+                scenario_name: "Data in closed chunk of mutable buffer".into(),
+                db,
+            };
+
+            let db = make_db();
+            let mut writer = TestLPWriter::default();
+            writer.write_lp_string(&db, data).await.unwrap();
+            db.rollover_partition(partition_key).await.unwrap();
+            db.load_chunk_to_read_buffer(partition_key, 0)
+                .await
+                .unwrap();
+            let scenario3 = DBScenario {
+                scenario_name: "Data in both read buffer and mutable buffer".into(),
+                db,
+            };
+
+            let db = make_db();
+            let mut writer = TestLPWriter::default();
+            writer.write_lp_string(&db, data).await.unwrap();
+            db.rollover_partition(partition_key).await.unwrap();
+            db.load_chunk_to_read_buffer(partition_key, 0)
+                .await
+                .unwrap();
+            db.drop_mutable_buffer_chunk(partition_key, 0)
+                .await
+                .unwrap();
+            let scenario4 = DBScenario {
+                scenario_name: "Data in only buffer and not mutable buffer".into(),
+                db,
+            };
+
+            vec![scenario1, scenario2, scenario3, scenario4]
         }
     }
 
