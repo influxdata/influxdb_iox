@@ -3033,15 +3033,15 @@ dependencies = [
 
 [[package]]
 name = "routerify"
-version = "1.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a60d4018113d2fb05e25e48167a40bf53e77b2c267d998a20a453088b9851621"
+version = "2.0.0-beta-2"
+source = "git+https://github.com/influxdata/routerify?rev=bfe198e#bfe198e006d85b1b648ac96101d676b620d6f569"
 dependencies = [
  "http",
- "hyper 0.13.9",
+ "hyper 0.14.2",
  "lazy_static",
  "percent-encoding",
  "regex",
+ "thiserror",
 ]
 
 [[package]]

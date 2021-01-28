@@ -53,7 +53,10 @@ wal = { path = "wal" }
 
 bytes = "1.0"
 hyper = "0.13"
-routerify = "1.1"
+
+# Forked to upgrade hyper and tokio
+routerify = { git = "https://github.com/influxdata/routerify", rev = "bfe198e" }
+
 tokio = { version = "1.0", features=["macros", "rt-multi-thread"] }
 tokio-stream = {version = "0.1.2", features=["net"]}
 
