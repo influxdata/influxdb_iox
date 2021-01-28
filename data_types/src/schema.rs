@@ -842,6 +842,29 @@ mod test {
     }
 
     #[test]
+    fn test_merge_compatible_schema_no_names() {
+        let schema1 = SchemaBuilder::new().tag("the_tag").build().unwrap();
+
+        // has some of the same and some new, different fields
+        let schema2 = SchemaBuilder::new().tag("the_other_tag").build().unwrap();
+
+        // ensure the merge is not optimized away
+        let merged_schema = schema1.try_merge(schema2).unwrap();
+
+        let expected_schema = SchemaBuilder::new()
+            .tag("the_tag")
+            .tag("the_other_tag")
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            expected_schema, merged_schema,
+            "\nExpected:\n{:#?}\nActual:\n{:#?}",
+            expected_schema, merged_schema
+        );
+    }
+
+    #[test]
     fn test_merge_measurement_names() {
         let schema1 = SchemaBuilder::new().tag("the_tag").build().unwrap();
 
