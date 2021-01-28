@@ -5,7 +5,7 @@ authors = ["Paul Dix <paul@pauldix.net>"]
 edition = "2018"
 
 [dependencies]
-bytes = "0.5.4"
+bytes = "1.0"
 chrono = "0.4"
 futures = "0.3.5"
 itertools = "0.9.0"
@@ -19,10 +19,10 @@ rusoto_s3 = "0.44.0"
 
 # Google Cloud Storage integration
 cloud-storage = { version = "0.4.0" }
-tokio = { version = "0.2", features = ["full"] }
+tokio = { version = "1.0", features=["macros"] }
 
 # Filesystem integration
-tokio-util = "0.3.1"
+tokio-util = "0.6.2"
 walkdir = "2"
 
 # Microsoft Azure Blob storage integration
