@@ -552,8 +552,7 @@ fn persist_bytes_in_background(data: Bytes, store: Arc<ObjectStore>, location: O
             .await
         {
             error!("error writing bytes to store: {}", err);
-            tokio::time::sleep(tokio::time::Duration::from_secs(STORE_ERROR_PAUSE_SECONDS))
-                .await;
+            tokio::time::sleep(tokio::time::Duration::from_secs(STORE_ERROR_PAUSE_SECONDS)).await;
             stream_data = std::io::Result::Ok(data.clone());
         }
 
