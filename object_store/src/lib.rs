@@ -291,19 +291,19 @@ pub enum Error {
     NoDataInMemory,
 
     UnableToPutDataToAzure {
-        source: azure_sdk_core::errors::AzureError,
+        source: Box<dyn std::error::Error + Send + Sync>,
         location: String,
     },
     UnableToGetDataFromAzure {
-        source: azure_sdk_core::errors::AzureError,
+        source: Box<dyn std::error::Error + Send + Sync>,
         location: String,
     },
     UnableToDeleteDataFromAzure {
-        source: azure_sdk_core::errors::AzureError,
+        source: Box<dyn std::error::Error + Send + Sync>,
         location: String,
     },
     UnableToListDataFromAzure {
-        source: azure_sdk_core::errors::AzureError,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 
     #[snafu(display("Unable to create file {}: {}", path.display(), err))]
