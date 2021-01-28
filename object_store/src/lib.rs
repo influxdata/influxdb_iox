@@ -218,12 +218,12 @@ pub enum Error {
     },
 
     UnableToPutDataToGcs {
-        source: tokio::task::JoinError,
+        source: cloud_storage::Error,
         bucket: String,
         location: String,
     },
     UnableToListDataFromGcs {
-        source: tokio::task::JoinError,
+        source: cloud_storage::Error,
         bucket: String,
     },
     UnableToListDataFromGcs2 {
@@ -231,21 +231,11 @@ pub enum Error {
         bucket: String,
     },
     UnableToDeleteDataFromGcs {
-        source: tokio::task::JoinError,
-        bucket: String,
-        location: String,
-    },
-    UnableToDeleteDataFromGcs2 {
         source: cloud_storage::Error,
         bucket: String,
         location: String,
     },
     UnableToGetDataFromGcs {
-        source: tokio::task::JoinError,
-        bucket: String,
-        location: String,
-    },
-    UnableToGetDataFromGcs2 {
         source: cloud_storage::Error,
         bucket: String,
         location: String,

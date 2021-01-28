@@ -20,7 +20,7 @@ rusoto_credential = "0.46.0"
 rusoto_s3 = "0.46.0"
 
 # Google Cloud Storage integration
-cloud-storage = { version = "0.4.0" }
+cloud-storage = { version = "0.7.0" }
 
 # Filesystem integration
 tokio-util = "0.6.2"
