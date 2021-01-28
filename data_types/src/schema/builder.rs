@@ -314,8 +314,7 @@ impl InfluxSchemaBuilder {
 ///    the columns (including any metadata) must be the same
 ///
 /// 2. The measurement names must be consistent: one or both can be
-///    `None`, but if they are `Some(name`), then `name` must be the
-///    same
+///    `None`, or they can both be  are `Some(name`)
 #[derive(Debug, Default)]
 pub struct SchemaMerger {
     inner: Option<Schema>,
