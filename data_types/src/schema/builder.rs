@@ -305,12 +305,17 @@ impl InfluxSchemaBuilder {
 
 /// Schema Merger
 ///
-/// The usecase for this is when different chunks have different
-/// schemas. This struct can be used to build a combined schema.  It
-/// merges Schemas together applying the following rules:
+/// The usecase for merging schemas is when different chunks have
+/// different schemas. This struct can be used to build a combined
+/// schema by mergeing Schemas together according to the following
+/// rules:
 ///
 /// 1. New columns may be added in subsequent schema, but the types of
-/// the columns (including any metadata) must be the same
+///    the columns (including any metadata) must be the same
+///
+/// 2. The measurement names must be consistent: one or both can be
+///    `None`, but if they are `Some(name`), then `name` must be the
+///    same
 #[derive(Debug, Default)]
 pub struct SchemaMerger {
     inner: Option<Schema>,
