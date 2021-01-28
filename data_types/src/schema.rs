@@ -293,7 +293,7 @@ impl Schema {
     }
 
     /// Merges any new columns from new_schema, consuming self. If the
-    /// column already exists, self is unchanged.  if the column
+    /// column already exists, self is unchanged. If the column
     /// definition conflicts with a prior definition, an error is
     /// returned.
     pub fn try_merge(self, other: Self) -> Result<Self> {
