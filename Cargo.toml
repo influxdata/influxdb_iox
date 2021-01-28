@@ -52,7 +52,7 @@ server = { path = "server" }
 wal = { path = "wal" }
 
 bytes = "1.0"
-hyper = "0.13"
+hyper = "0.14"
 
 # Forked to upgrade hyper and tokio
 routerify = { git = "https://github.com/influxdata/routerify", rev = "bfe198e" }

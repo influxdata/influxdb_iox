@@ -1583,7 +1583,7 @@ dependencies = [
  "generated_types",
  "hex",
  "http",
- "hyper 0.13.9",
+ "hyper 0.14.2",
  "influxdb2_client",
  "influxdb_iox_client",
  "influxdb_line_protocol",
