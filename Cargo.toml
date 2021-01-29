@@ -79,9 +79,9 @@ tracing-futures="0.2.4"
 
 # OpenTelemetry sinks for tracing
 tracing-subscriber = "0.2.15"
-tracing-opentelemetry = "0.9.0"
-opentelemetry = { version = "0.10", default-features = false, features = ["trace", "tokio"] }
-opentelemetry-jaeger = { version = "0.9", features = ["tokio"] }
+tracing-opentelemetry = "0.11.0"
+opentelemetry = { version = "0.12", default-features = false, features = ["trace", "tokio-support"] }
+opentelemetry-jaeger = { version = "0.11", features = ["tokio"] }
 
 http = "0.2.0"
 snafu = "0.6.9"
