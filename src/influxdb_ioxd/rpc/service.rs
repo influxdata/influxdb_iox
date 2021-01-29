@@ -1742,10 +1742,10 @@ mod tests {
                 panic!("Unexpected success: {:?}", response);
             }
             Err(status) => {
-                assert_eq!(status.code(), Code::Unknown);
+                assert_eq!(status.code(), Code::Cancelled);
                 assert!(
-                    status.message().contains("transport error"),
-                    "could not find 'transport error' in '{}'",
+                    status.message().contains("stream no longer needed"),
+                    "could not find 'stream no longer needed' in '{}'",
                     status.message()
                 );
             }
