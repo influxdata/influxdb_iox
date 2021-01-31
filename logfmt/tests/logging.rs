@@ -1,0 +1,262 @@
+// Note that this needs to be an integration test because since the tracing
+// structures are global, once you se a logging subscriber you can't undo
+// that.... So punting on that for now
+
+use logfmt::LogFmtLayer;
+use std::{
+    error::Error,
+    fmt,
+    io::{self, Cursor},
+    sync::Mutex,
+};
+use tracing::{debug, error, info, trace, warn};
+use tracing_subscriber::{fmt::MakeWriter, prelude::*};
+
+use lazy_static::lazy_static;
+
+/// Compares the captured messages with the expected messages,
+/// normalizing for time and location
+#[macro_export]
+macro_rules! assert_logs {
+    ($CAPTURE: expr, $EXPECTED_LINES: expr) => {
+        let expected_lines: Vec<String> = $EXPECTED_LINES.iter().map(|&s| s.into()).collect();
+        let actual_lines = $CAPTURE.to_strings();
+
+        let normalized_expected = normalize(expected_lines.iter());
+        let normalized_actual = normalize(actual_lines.iter());
+
+        assert_eq!(
+            normalized_expected, normalized_actual,
+            "\n\nexpected:\n\n{:#?}\nactual:\n\n{:#?}\n\nnormalized_expected:\n\n{:#?}\nnormalized_actual:\n\n{:#?}\n\n",
+            expected_lines, actual_lines,
+            normalized_expected, normalized_actual
+        )
+    };
+}
+
+#[test]
+fn level() {
+    let capture = CapturedWriter::new();
+
+    info!("This is an info message");
+    debug!("This is a debug message");
+    trace!("This is a trace message");
+    warn!("This is a warn message");
+    error!("This is a error message");
+
+    let expected = vec![
+        "level=info msg=\"This is an info message\" target=\"logging\" location=\"logfmt/tests/logging.rs:36\" time=1612181556329599000",
+        "level=debug msg=\"This is a debug message\" target=\"logging\" location=\"logfmt/tests/logging.rs:37\" time=1612181556329618000",
+        "level=trace msg=\"This is a trace message\" target=\"logging\" location=\"logfmt/tests/logging.rs:38\" time=1612181556329634000",
+        "level=warn msg=\"This is a warn message\" target=\"logging\" location=\"logfmt/tests/logging.rs:39\" time=1612181556329646000",
+        "level=error msg=\"This is a error message\" target=\"logging\" location=\"logfmt/tests/logging.rs:40\" time=1612181556329661000",
+    ];
+
+    assert_logs!(capture, expected);
+}
+
+#[test]
+fn event_fields_strings() {
+    let capture = CapturedWriter::new();
+    info!(
+        event_name = "foo bar",
+        other_event = "baz",
+        "This is an info message"
+    );
+
+    let expected = vec![
+            "level=info msg=\"This is an info message\" event_name=\"foo bar\" other_event=baz target=\"logging\" location=\"logfmt/tests/logging.rs:59\" time=1612187170712973000",
+    ];
+
+    assert_logs!(capture, expected);
+}
+
+#[test]
+fn event_fields_numeric() {
+    let capture = CapturedWriter::new();
+    info!(bar = 1, frr = false, "This is an info message");
+
+    let expected = vec![
+        "level=info msg=\"This is an info message\" bar=1 frr=false target=\"logging\" location=\"logfmt/tests/logging.rs:72\" time=1612187170712947000",
+    ];
+
+    assert_logs!(capture, expected);
+}
+
+#[test]
+fn event_fields_repeated() {
+    let capture = CapturedWriter::new();
+    info!(bar = 1, bar = 2, "This is an info message");
+
+    let expected = vec![
+        "level=info msg=\"This is an info message\" bar=1 bar=2 target=\"logging\" location=\"logfmt/tests/logging.rs:84\" time=1612187170712948000",
+    ];
+
+    assert_logs!(capture, expected);
+}
+
+#[test]
+fn event_fields_errors() {
+    let capture = CapturedWriter::new();
+
+    let err: Box<dyn Error + 'static> =
+        io::Error::new(io::ErrorKind::Other, "shaving yak failed!").into();
+
+    error!(the_error = err.as_ref(), "This is an error message");
+    let expected = vec![
+        "level=error msg=\"This is an error message\" the_error=\"\\\"Custom { kind: Other, error: \\\\\\\"shaving yak failed!\\\\\\\" }\\\"\" the_error.display=\"shaving yak failed!\" target=\"logging\" location=\"logfmt/tests/logging.rs:99\" time=1612187170712947000",
+    ];
+    assert_logs!(capture, expected);
+}
+
+#[test]
+fn event_fields_structs() {
+    let capture = CapturedWriter::new();
+    let my_struct = TestDebugStruct::new();
+
+    info!(s = ?my_struct, "This is an info message");
+
+    let expected = vec![
+        "level=info msg=\"This is an info message\" s=\"TestDebugStruct { b: true, s: \\\"The String\\\" }\" target=\"logging\" location=\"logfmt/tests/logging.rs:111\" time=1612187170712937000",
+    ];
+
+    assert_logs!(capture, expected);
+}
+
+// TODO: it might be nice to write some tests for time and location, but for now
+// just punt
+
+/// Test structure that has a debug representation
+#[derive(Debug)]
+struct TestDebugStruct {
+    b: bool,
+    s: String,
+}
+impl TestDebugStruct {
+    fn new() -> Self {
+        Self {
+            b: true,
+            s: "The String".into(),
+        }
+    }
+}
+
+impl fmt::Display for TestDebugStruct {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Display for TestDebugStruct b:{} s:\"{}\"",
+            self.b, self.s
+        )
+    }
+}
+
+/// Normalize lines for easy comparison
+fn normalize<'a>(lines: impl Iterator<Item = &'a String>) -> Vec<String> {
+    lines
+        .map(|line| truncate_at_location(line).to_string())
+        .collect()
+}
+
+/// Truncates the string from location
+///
+/// Example input:
+/// "level=warn msg=\"This is a warn message\" target=\"logging\"
+/// location=\"logfmt/tests/logging.rs:41\" time=1612182445026219000",
+///
+/// Example output:
+/// "level=warn msg=\"This is a warn message\" target=\"logging\"
+fn truncate_at_location(v: &str) -> &str {
+    if let Some(location_start) = v.find("location=") {
+        &v[0..location_start]
+    } else {
+        v
+    }
+}
+
+// Each thread has a local collection of lines that is captured to
+// This is needed because the rust test framework runs the
+// tests potentially using multiple threads but there is a single
+// global logger.
+thread_local! {
+    static LOG_LINES: Mutex<Cursor<Vec<u8>>> = Mutex::new(Cursor::new(Vec::new()));
+}
+
+lazy_static! {
+    // Since we can only setup logging once, we need to have gloabl to
+    // use it among test cases
+    static ref GLOBAL_WRITER: Mutex<CapturedWriter> = {
+        let capture = CapturedWriter::default();
+        tracing_subscriber::registry()
+            .with(LogFmtLayer::new(capture.clone()))
+            .init();
+        Mutex::new(capture)
+    };
+}
+
+// This thing captures log lines
+#[derive(Default, Clone)]
+struct CapturedWriter {
+    // all state is held in the LOG_LINES thread local variable
+}
+
+impl CapturedWriter {
+    fn new() -> Self {
+        let global_writer = GLOBAL_WRITER.lock().expect("mutex poisoned");
+        global_writer.clone().clear()
+    }
+
+    /// Clear all thread local state
+    fn clear(self) -> Self {
+        LOG_LINES.with(|lines| {
+            let mut cursor = lines.lock().expect("mutex poisoned");
+            cursor.get_mut().clear()
+        });
+        self
+    }
+
+    fn to_strings(&self) -> Vec<String> {
+        LOG_LINES.with(|lines| {
+            let cursor = lines.lock().expect("mutex poisoned");
+            let bytes: Vec<u8> = cursor.get_ref().clone();
+            String::from_utf8(bytes)
+                .expect("valid utf8")
+                .lines()
+                .map(|s| s.to_string())
+                .collect()
+        })
+    }
+}
+
+impl fmt::Display for CapturedWriter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for s in self.to_strings() {
+            writeln!(f, "{}", s)?
+        }
+        Ok(())
+    }
+}
+
+impl std::io::Write for CapturedWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        LOG_LINES.with(|lines| {
+            let mut cursor = lines.lock().expect("mutex poisoned");
+            cursor.write(buf)
+        })
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        LOG_LINES.with(|lines| {
+            let mut cursor = lines.lock().expect("mutex poisoned");
+            cursor.flush()
+        })
+    }
+}
+
+impl MakeWriter for CapturedWriter {
+    type Writer = Self;
+
+    fn make_writer(&self) -> Self::Writer {
+        self.clone()
+    }
+}
