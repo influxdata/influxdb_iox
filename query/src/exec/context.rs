@@ -32,11 +32,6 @@ use super::counters::ExecutionCounters;
 struct IOxQueryPlanner {}
 
 impl QueryPlanner for IOxQueryPlanner {
-    fn rewrite_logical_plan(&self, plan: LogicalPlan) -> Result<LogicalPlan> {
-        // TODO: implement any IOx specific query rewrites needed
-        Ok(plan)
-    }
-
     /// Given a `LogicalPlan` created from above, create an
     /// `ExecutionPlan` suitable for execution
     fn create_physical_plan(
@@ -60,7 +55,7 @@ impl ExtensionPlanner for IOxExtensionPlanner {
     fn plan_extension(
         &self,
         node: &dyn UserDefinedLogicalNode,
-        inputs: Vec<Arc<dyn ExecutionPlan>>,
+        inputs: &[Arc<dyn ExecutionPlan>],
         _ctx_state: &ExecutionContextState,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         match node.as_any().downcast_ref::<SchemaPivotNode>() {
