@@ -41,9 +41,7 @@ impl QueryPlanner for IOxQueryPlanner {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         // Teach the default physical planner how to plan SchemaPivot nodes.
         let physical_planner =
-            DefaultPhysicalPlanner::with_extension_planners(vec![Arc::new(
-                IOxExtensionPlanner {},
-            )]);
+            DefaultPhysicalPlanner::with_extension_planners(vec![Arc::new(IOxExtensionPlanner {})]);
         // Delegate most work of physical planning to the default physical planner
         physical_planner.create_physical_plan(logical_plan, ctx_state)
     }
@@ -60,12 +58,11 @@ impl ExtensionPlanner for IOxExtensionPlanner {
         inputs: &[Arc<dyn ExecutionPlan>],
         _ctx_state: &ExecutionContextState,
     ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
-        node
-            .as_any()
+        node.as_any()
             .downcast_ref::<SchemaPivotNode>()
             .map(|schema_pivot| {
                 assert_eq!(inputs.len(), 1, "Inconsistent number of inputs");
-                let execution_plan =  Arc::new(SchemaPivotExec::new(
+                let execution_plan = Arc::new(SchemaPivotExec::new(
                     inputs[0].clone(),
                     schema_pivot.schema().as_ref().clone().into(),
                 ));
