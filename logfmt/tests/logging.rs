@@ -180,10 +180,10 @@ fn event_multi_span() {
     }
 
     let expected = vec![
-        "level=info span_name=\"my_span\" foo=bar span=SPAN0 time=1612209327939714000",
-        "level=info span_name=\"my_second_span\" foo=baz span=SPAN1 time=1612209327939743000",
+        "level=info span_name=\"my_span\" foo=bar span=1 time=1612209327939714000",
+        "level=info span_name=\"my_second_span\" foo=baz span=2 time=1612209327939743000",
         "level=info msg=\"info message in span 2\" shave=yak! target=\"logging\" location=\"logfmt/tests/logging.rs:154\" time=1612209327939774000",
-        "level=info span_name=\"my_second_span\" foo=brmp span=SPAN2 time=1612209327939795000",
+        "level=info span_name=\"my_second_span\" foo=brmp span=3 time=1612209327939795000",
         "level=info msg=\"info message in span 3\" shave=\"mo yak!\" target=\"logging\" location=\"logfmt/tests/logging.rs:160\" time=1612209327939828000",
     ];
 
@@ -243,7 +243,10 @@ fn normalize_location(v: &str) -> String {
 fn normalize_spans(lines: Vec<String>) -> Vec<String> {
     // since there can be multiple unique span values, need to normalize them
     // differently
-    let re = Regex::new(r#"span=(\S+)"#).unwrap();
+    //
+    // Note: we include leading and trailing spaces so that span=2
+    // doesn't also match span=21423
+    let re = Regex::new(r#" span=(\d+) "#).unwrap();
     let span_ids: Vec<String> = lines
         .iter()
         .map(|line| re.find_iter(line))
@@ -257,8 +260,7 @@ fn normalize_spans(lines: Vec<String>) -> Vec<String> {
         .enumerate()
         .fold(lines, |lines, (idx, orig_id)| {
             // replace old span
-            let new_id = format!("span=SPAN{}", idx);
-
+            let new_id = format!(" span=SPAN{} ", idx);
             let re = Regex::new(&orig_id).unwrap();
             lines
                 .into_iter()
