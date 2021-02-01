@@ -232,11 +232,7 @@ fn needs_quotes_and_escaping(value: &str) -> bool {
         return true;
     }
 
-    if value.contains(' ') && !pre_quoted {
-        return true;
-    }
-
-    false
+    value.contains(' ') && !pre_quoted
 }
 
 /// escape any characters in name as needed, otherwise return string as is
