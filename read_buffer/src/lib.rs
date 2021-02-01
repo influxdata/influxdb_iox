@@ -313,6 +313,15 @@ impl Database {
         group_columns: Selection<'input>,
         aggregates: Vec<(ColumnName<'input>, AggregateType)>,
     ) -> Result<ReadAggregateResults> {
+        for (_, agg) in &aggregates {
+            match agg {
+                AggregateType::First | AggregateType::Last => {
+                    return Err(Error::UnsupportedAggregate { agg: *agg });
+                }
+                _ => {}
+            }
+        }
+
         // get read lock on database
         let partition_data = self.data.read().unwrap();
         let mut chunk_table_results = vec![];
@@ -340,15 +349,6 @@ impl Database {
                 chunk.read_aggregate(table_name, predicate.clone(), &group_columns, &aggregates)
             {
                 chunk_table_results.push(table_results);
-            }
-        }
-
-        for (_, agg) in &aggregates {
-            match agg {
-                AggregateType::First | AggregateType::Last => {
-                    return Err(Error::UnsupportedAggregate { agg: *agg });
-                }
-                _ => {}
             }
         }
 
@@ -766,7 +766,7 @@ mod test {
         array::{
             ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array, StringArray, UInt64Array,
         },
-        datatypes::DataType::{Float64, UInt64},
+        datatypes::DataType::{Float64, Int64, UInt64},
     };
 
     use column::Values;
@@ -778,6 +778,7 @@ mod test {
             .non_null_tag("region")
             .non_null_field("counter", Float64)
             .timestamp()
+            .field("sketchy_sensor", Float64)
             .build()
             .unwrap()
             .into();
@@ -786,6 +787,7 @@ mod test {
             Arc::new(StringArray::from(vec!["west", "west", "east"])),
             Arc::new(Float64Array::from(vec![1.2, 3.3, 45.3])),
             Arc::new(Int64Array::from(vec![11111111, 222222, 3333])),
+            Arc::new(Float64Array::from(vec![Some(11.0), None, Some(12.0)])),
         ];
 
         RecordBatch::try_new(schema, data).unwrap()
@@ -1048,6 +1050,7 @@ mod test {
                 .non_null_tag("env")
                 .non_null_tag("region")
                 .non_null_field("counter", Float64)
+                .field("sketchy_sensor", Int64)
                 .timestamp()
                 .build()
                 .unwrap();
@@ -1056,6 +1059,7 @@ mod test {
                 Arc::new(StringArray::from(vec!["us-west", "us-east", "us-west"])),
                 Arc::new(StringArray::from(vec!["west", "west", "east"])),
                 Arc::new(Float64Array::from(vec![1.2, 300.3, 4500.3])),
+                Arc::new(Int64Array::from(vec![None, Some(33), Some(44)])),
                 Arc::new(Int64Array::from(vec![i, 2 * i, 3 * i])),
             ];
 
@@ -1083,12 +1087,18 @@ mod test {
         let exp_env_values = Values::String(vec![Some("us-west")]);
         let exp_region_values = Values::String(vec![Some("west")]);
         let exp_counter_values = Values::F64(vec![1.2]);
+        let exp_sketchy_sensor_values = Values::I64N(vec![None]);
 
         let first_row_group = itr.next().unwrap();
         println!("{:?}", first_row_group);
         assert_rb_column_equals(&first_row_group, "env", &exp_env_values);
         assert_rb_column_equals(&first_row_group, "region", &exp_region_values);
         assert_rb_column_equals(&first_row_group, "counter", &exp_counter_values);
+        assert_rb_column_equals(
+            &first_row_group,
+            "sketchy_sensor",
+            &exp_sketchy_sensor_values,
+        );
         assert_rb_column_equals(&first_row_group, "time", &Values::I64(vec![100])); // first row from first record batch
 
         let second_row_group = itr.next().unwrap();
@@ -1096,6 +1106,11 @@ mod test {
         assert_rb_column_equals(&second_row_group, "env", &exp_env_values);
         assert_rb_column_equals(&second_row_group, "region", &exp_region_values);
         assert_rb_column_equals(&second_row_group, "counter", &exp_counter_values);
+        assert_rb_column_equals(
+            &first_row_group,
+            "sketchy_sensor",
+            &exp_sketchy_sensor_values,
+        );
         assert_rb_column_equals(&second_row_group, "time", &Values::I64(vec![200])); // first row from second record batch
 
         // No more data
@@ -1173,7 +1188,7 @@ mod test {
     }
 
     #[test]
-    fn read_aggregate_multiple_row_groups() {
+    fn read_aggregate() {
         let mut db = Database::new();
 
         // Add a bunch of row groups to a single table in a single chunks
@@ -1183,6 +1198,7 @@ mod test {
                 .non_null_tag("region")
                 .non_null_field("temp", Float64)
                 .non_null_field("counter", UInt64)
+                .field("sketchy_sensor", UInt64)
                 .timestamp()
                 .build()
                 .unwrap();
@@ -1192,17 +1208,62 @@ mod test {
                 Arc::new(StringArray::from(vec!["west", "west", "east"])),
                 Arc::new(Float64Array::from(vec![10.0, 30000.0, 4500.0])),
                 Arc::new(UInt64Array::from(vec![1000, 3000, 5000])),
-                Arc::new(Int64Array::from(vec![i, 20 * i, 30 * i])),
+                Arc::new(UInt64Array::from(vec![Some(44), None, Some(55)])),
+                Arc::new(Int64Array::from(vec![i, 20 + i, 30 + i])),
             ];
 
             // Add a record batch to a single partition
             let rb = RecordBatch::try_new(schema.into(), data).unwrap();
-            println!("rb {:?} {:?}", i, &rb);
             // The row group gets added to the same chunk each time.
             db.upsert_partition("hour_1", 1, "table1", rb);
         }
 
-        // Build the following query:
+        //
+        // Simple Aggregates - no group keys.
+        //
+        //   QUERY:
+        //
+        //   SELECT SUM("counter"), COUNT("counter"), MIN("counter"), MAX("counter")
+        //   FROM "table_1"
+        //   WHERE "time" <= 130
+        //
+
+        let itr = db
+            .read_aggregate(
+                "hour_1",
+                "table1",
+                &[1],
+                Predicate::new(vec![BinaryExpr::from(("time", "<=", 130_i64))]),
+                Selection::Some(&[]),
+                vec![
+                    ("counter", AggregateType::Count),
+                    ("counter", AggregateType::Sum),
+                    ("counter", AggregateType::Min),
+                    ("counter", AggregateType::Max),
+                    ("sketchy_sensor", AggregateType::Count),
+                    ("sketchy_sensor", AggregateType::Sum),
+                    ("sketchy_sensor", AggregateType::Min),
+                    ("sketchy_sensor", AggregateType::Max),
+                ],
+            )
+            .unwrap();
+        let result = itr.collect::<Vec<RecordBatch>>();
+        assert_eq!(result.len(), 1);
+        let result = &result[0];
+
+        assert_rb_column_equals(&result, "counter_count", &Values::U64(vec![3]));
+        assert_rb_column_equals(&result, "counter_sum", &Values::U64(vec![9000]));
+        assert_rb_column_equals(&result, "counter_min", &Values::U64(vec![1000]));
+        assert_rb_column_equals(&result, "counter_max", &Values::U64(vec![5000]));
+        assert_rb_column_equals(&result, "sketchy_sensor_count", &Values::U64(vec![2])); // count of non-null values
+        assert_rb_column_equals(&result, "sketchy_sensor_sum", &Values::U64(vec![99])); // sum of non-null values
+        assert_rb_column_equals(&result, "sketchy_sensor_min", &Values::U64(vec![44])); // min of non-null values
+        assert_rb_column_equals(&result, "sketchy_sensor_max", &Values::U64(vec![55])); // max of non-null values
+
+        //
+        // With group keys
+        //
+        //   QUERY:
         //
         //   SELECT SUM("temp"), MIN("temp"), SUM("counter"), COUNT("counter")
         //   FROM "table_1"
