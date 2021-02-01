@@ -3,6 +3,7 @@
 // that.... So punting on that for now
 
 use logfmt::LogFmtLayer;
+use regex::Regex;
 use std::{
     error::Error,
     fmt,
@@ -72,6 +73,25 @@ fn event_fields_strings() {
 }
 
 #[test]
+fn test_without_normalization() {
+    let capture = CapturedWriter::new();
+    info!(
+        event_name = "foo bar",
+        other_event = "baz",
+        "This is an info message"
+    );
+
+    // double assure that normalization isn't messing with things by
+    // checking for presence of strings as well
+    let log_string = normalize(capture.to_strings().iter()).join("\n");
+    assert!(log_string.contains("This is an info message"));
+    assert!(log_string.contains("event_name"));
+    assert!(log_string.contains("other_event"));
+    assert!(log_string.contains("baz"));
+    assert!(log_string.contains("foo bar"));
+}
+
+#[test]
 fn event_fields_numeric() {
     let capture = CapturedWriter::new();
     info!(bar = 1, frr = false, "This is an info message");
@@ -132,21 +152,44 @@ fn event_spans() {
     info!(shave = "mo yak!", "info message in span");
     std::mem::drop(enter);
 
-    // It would be cool to figure out how to get the span id in the message
     let expected = vec![
-        "level=info msg=\"info message in span\" shave=\"mo yak!\" span=1 target=\"logging\" location=\"logfmt/tests/logging.rs:132\" time=1612208181663260000",
-
+        "level=info span_name=\"my_span\" foo=bar span=1 time=1612209178717290000",
+        "level=info msg=\"info message in span\" shave=\"mo yak!\" span=1 target=\"logging\" location=\"logfmt/tests/logging.rs:132\" time=1612209178717329000",
     ];
 
     assert_logs!(capture, expected);
-
-    // It might be cool for documentation purposes, note that the messages do not
-    // have `my_span` or the `foo=bar` from the span itself
-    let log_string = capture.to_strings().join("\n");
-    assert!(!log_string.contains("foo"), "{}", log_string);
-    assert!(!log_string.contains("bar"), "{}", log_string);
-    assert!(!log_string.contains("my_span"), "{}", log_string);
 }
+
+#[test]
+fn event_multi_span() {
+    // Demonstrate the inclusion of span_id (as `span`)
+    let capture = CapturedWriter::new();
+
+    let span1 = span!(Level::INFO, "my_span", foo = "bar");
+    let _ = span1.enter();
+    {
+        let span2 = span!(Level::INFO, "my_second_span", foo = "baz");
+        let _ = span2.enter();
+        info!(shave = "yak!", "info message in span 2");
+    }
+
+    {
+        let span3 = span!(Level::INFO, "my_second_span", foo = "brmp");
+        let _ = span3.enter();
+        info!(shave = "mo yak!", "info message in span 3");
+    }
+
+    let expected = vec![
+        "level=info span_name=\"my_span\" foo=bar span=SPAN0 time=1612209327939714000",
+        "level=info span_name=\"my_second_span\" foo=baz span=SPAN1 time=1612209327939743000",
+        "level=info msg=\"info message in span 2\" shave=yak! target=\"logging\" location=\"logfmt/tests/logging.rs:154\" time=1612209327939774000",
+        "level=info span_name=\"my_second_span\" foo=brmp span=SPAN2 time=1612209327939795000",
+        "level=info msg=\"info message in span 3\" shave=\"mo yak!\" target=\"logging\" location=\"logfmt/tests/logging.rs:160\" time=1612209327939828000",
+    ];
+
+    assert_logs!(capture, expected);
+}
+
 // TODO: it might be nice to write some tests for time and location, but for now
 // just punt
 
@@ -177,25 +220,51 @@ impl fmt::Display for TestDebugStruct {
 
 /// Normalize lines for easy comparison
 fn normalize<'a>(lines: impl Iterator<Item = &'a String>) -> Vec<String> {
-    lines
-        .map(|line| truncate_at_location(line).to_string())
-        .collect()
+    let lines = lines
+        .map(|line| normalize_timestamp(line))
+        .map(|line| normalize_location(&line))
+        .collect();
+    normalize_spans(lines)
 }
 
-/// Truncates the string from location
-///
-/// Example input:
-/// "level=warn msg=\"This is a warn message\" target=\"logging\"
-/// location=\"logfmt/tests/logging.rs:41\" time=1612182445026219000",
-///
-/// Example output:
-/// "level=warn msg=\"This is a warn message\" target=\"logging\"
-fn truncate_at_location(v: &str) -> &str {
-    if let Some(location_start) = v.find("location=") {
-        &v[0..location_start]
-    } else {
-        v
-    }
+/// s/time=1612187170712947000/time=NORMALIZED/g
+fn normalize_timestamp(v: &str) -> String {
+    let re = Regex::new(r#"time=\d+"#).unwrap();
+    re.replace_all(v, "time=NORMALIZED").to_string()
+}
+
+/// s/location=\"logfmt/tests/logging.rs:128\"/location=NORMALIZED/g
+fn normalize_location(v: &str) -> String {
+    let re = Regex::new(r#"location=".*?""#).unwrap();
+    re.replace_all(v, "location=NORMALIZED").to_string()
+}
+
+/// s/span=1/span=SPAN1/g
+fn normalize_spans(lines: Vec<String>) -> Vec<String> {
+    // since there can be multiple unique span values, need to normalize them
+    // differently
+    let re = Regex::new(r#"span=(\S+)"#).unwrap();
+    let span_ids: Vec<String> = lines
+        .iter()
+        .map(|line| re.find_iter(line))
+        .flatten()
+        .map(|m| m.as_str().to_string())
+        .collect();
+
+    // map span ids to something uniform
+    span_ids
+        .into_iter()
+        .enumerate()
+        .fold(lines, |lines, (idx, orig_id)| {
+            // replace old span
+            let new_id = format!("span=SPAN{}", idx);
+
+            let re = Regex::new(&orig_id).unwrap();
+            lines
+                .into_iter()
+                .map(|line| re.replace_all(&line as &str, &new_id as &str).to_string())
+                .collect()
+        })
 }
 
 // Each thread has a local collection of lines that is captured to

@@ -67,11 +67,25 @@ where
         // record fields
         event.record(&mut p);
         if let Some(span) = ctx.lookup_current() {
-            p.write_span_id(span.id())
+            p.write_span_id(&span.id())
         }
         // record source information
         p.write_source_info(event);
         p.write_timestamp();
+    }
+
+    fn new_span(&self, attrs: &tracing::span::Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
+        let writer = self.writer.make_writer();
+        let metadata = ctx.metadata(id).expect("span should have metadata");
+        let mut p = FieldPrinter::new(writer, metadata.level());
+        p.write_span_name(metadata.name());
+        attrs.record(&mut p);
+        p.write_span_id(id);
+        p.write_timestamp();
+    }
+
+    fn max_level_hint(&self) -> Option<tracing::metadata::LevelFilter> {
+        None
     }
 }
 
@@ -96,9 +110,18 @@ impl<W: Write> FieldPrinter<W> {
         Self { writer }
     }
 
+    fn write_span_name(&mut self, value: &str) {
+        write!(self.writer, " span_name=\"{}\"", quote_and_escape(value)).ok();
+    }
+
     fn write_source_info(&mut self, event: &tracing::Event<'_>) {
         let metadata = event.metadata();
-        write!(self.writer, " target=\"{}\"", metadata.target()).ok();
+        write!(
+            self.writer,
+            " target=\"{}\"",
+            quote_and_escape(metadata.target())
+        )
+        .ok();
 
         if let Some(module_path) = metadata.module_path() {
             if metadata.target() != module_path {
@@ -110,7 +133,7 @@ impl<W: Write> FieldPrinter<W> {
         }
     }
 
-    fn write_span_id(&mut self, id: Id) {
+    fn write_span_id(&mut self, id: &Id) {
         write!(self.writer, " span={}", id.into_u64()).ok();
     }
 
