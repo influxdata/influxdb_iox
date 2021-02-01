@@ -66,12 +66,11 @@ where
         let mut p = FieldPrinter::new(writer, event.metadata().level());
         // record fields
         event.record(&mut p);
-        // record source information
-        p.write_source_info(event);
-
         if let Some(span) = ctx.lookup_current() {
             p.write_span_id(span.id())
         }
+        // record source information
+        p.write_source_info(event);
         p.write_timestamp();
     }
 }

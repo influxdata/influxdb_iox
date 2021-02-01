@@ -9,7 +9,7 @@ use std::{
     io::{self, Cursor},
     sync::Mutex,
 };
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, span, trace, warn, Level};
 use tracing_subscriber::{fmt::MakeWriter, prelude::*};
 
 use lazy_static::lazy_static;
@@ -123,6 +123,30 @@ fn event_fields_structs() {
     assert_logs!(capture, expected);
 }
 
+#[test]
+fn event_spans() {
+    // Demonstrate the inclusion of span_id (as `span`)
+    let capture = CapturedWriter::new();
+    let span = span!(Level::INFO, "my_span", foo = "bar");
+    let enter = span.enter();
+    info!(shave = "mo yak!", "info message in span");
+    std::mem::drop(enter);
+
+    // It would be cool to figure out how to get the span id in the message
+    let expected = vec![
+        "level=info msg=\"info message in span\" shave=\"mo yak!\" span=1 target=\"logging\" location=\"logfmt/tests/logging.rs:132\" time=1612208181663260000",
+
+    ];
+
+    assert_logs!(capture, expected);
+
+    // It might be cool for documentation purposes, note that the messages do not
+    // have `my_span` or the `foo=bar` from the span itself
+    let log_string = capture.to_strings().join("\n");
+    assert!(!log_string.contains("foo"), "{}", log_string);
+    assert!(!log_string.contains("bar"), "{}", log_string);
+    assert!(!log_string.contains("my_span"), "{}", log_string);
+}
 // TODO: it might be nice to write some tests for time and location, but for now
 // just punt
 
