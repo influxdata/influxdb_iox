@@ -108,8 +108,7 @@ impl<C: PartitionChunk> ProviderBuilder<C> {
             table_name: table_name.as_ref(),
         })?;
 
-        // if the table was reported to exist, it should not be empty (eventually we
-        // should get the schema and table data separtely)
+        // if the table was reported to exist, it should not be empty
         if chunks.is_empty() {
             return InternalNoRowsInTable {
                 table_name: table_name.as_ref(),
@@ -128,7 +127,7 @@ impl<C: PartitionChunk> ProviderBuilder<C> {
 /// Implementation of a DataFusion TableProvider in terms of PartitionChunks
 ///
 /// This allows DataFusion to see data from Chunks as a single table, as well as
-/// push predicates down to chunks
+/// push predicates and selections down to chunks
 #[derive(Debug)]
 pub struct ChunkTableProvider<C: PartitionChunk> {
     table_name: Arc<String>,
