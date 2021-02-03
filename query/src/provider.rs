@@ -42,7 +42,7 @@ pub enum Error {
     ))]
     InternalNoChunks { table_name: String },
 
-    #[snafu(display("No rows found in table '{}'", table_name))]
+    #[snafu(display("Internal error: No rows found in table '{}'", table_name))]
     InternalNoRowsInTable { table_name: String },
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
