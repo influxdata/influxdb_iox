@@ -35,6 +35,3 @@ azure_storage = {git = "https://github.com/Azure/azure-sdk-for-rust.git", rev = 
 [dev-dependencies]
 tempfile = "3.1.0"
 dotenv = "0.15.0"
-
-[build-dependencies]
-dotenv = "0.15.0"
