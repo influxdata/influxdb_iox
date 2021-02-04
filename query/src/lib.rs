@@ -142,16 +142,16 @@ pub trait PartitionChunk: Debug + Send + Sync {
         selection: Selection<'_>,
     ) -> Result<Schema, Self::Error>;
 
-    /// Provides access to raw Chunk data as an asynchronous stream of
-    /// RecordBatches.
+    /// Provides access to raw `PartitionChunk` data as an
+    /// asynchronous stream of `RecordBatch`es.
     ///
     /// This is the analog of the `TableProvider` in DataFusion
     ///
-    /// The reason we can't simply use the TableProvider trait
+    /// The reason we can't simply use the `TableProvider` trait
     /// directly is that the data for a particular Table lives in
     /// several chunks within a partition, so there needs to be an
-    /// implementation of TableProvider that stitches together the
-    /// streams from several different Chunks.
+    /// implementation of `TableProvider` that stitches together the
+    /// streams from several different `PartitionChunks`.
     async fn read_filter(
         &self,
         table_name: &str,
@@ -168,6 +168,9 @@ pub trait DatabaseStore: Debug + Send + Sync {
 
     /// The type of error this DataBase store generates
     type Error: std::error::Error + Send + Sync + 'static;
+
+    /// List the database names.
+    async fn db_names_sorted(&self) -> Vec<String>;
 
     /// Retrieve the database specified by `name` returning None if no
     /// such database exists
