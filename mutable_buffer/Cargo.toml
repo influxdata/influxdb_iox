@@ -21,7 +21,6 @@ data_types = { path = "../data_types" }
 generated_types = { path = "../generated_types" }
 influxdb_line_protocol = { path = "../influxdb_line_protocol" }
 query = { path = "../query" }
-test_helpers = { path = "../test_helpers" }
 
 async-trait = "0.1"
 chrono = "0.4"

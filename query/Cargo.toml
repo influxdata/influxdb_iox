@@ -31,4 +31,6 @@ arrow_deps = { path = "../arrow_deps" }
 sqlparser = "0.6.1"
 influxdb_line_protocol = { path = "../influxdb_line_protocol" }
 data_types = { path = "../data_types" }
+
+[dev-dependencies]
 test_helpers = { path = "../test_helpers" }
