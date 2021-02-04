@@ -7,6 +7,8 @@ use std::collections::BTreeSet;
 
 use arrow_deps::datafusion::logical_plan::Expr;
 
+use crate::util::{make_range_expr, AndExprBuilder};
+
 /// Specifies a continuous range of nanosecond timestamps. Timestamp
 /// predicates are so common and critical to performance of timeseries
 /// databases in general, and IOx in particular, that they are handled
@@ -73,6 +75,38 @@ impl Predicate {
     /// Return true if this predicate has any general purpose predicates
     pub fn has_exprs(&self) -> bool {
         !self.exprs.is_empty()
+    }
+
+    /// Return a DataFusion `Expr` predicate representing the
+    /// combination of all predicate (`exprs`) and timestamp
+    /// restriction in this Predicate. Returns None if there are no
+    /// `Expr`'s restricting the data
+    pub fn filter_expr(&self) -> Option<Expr> {
+        let mut builder =
+            AndExprBuilder::default().append_opt(self.make_timestamp_predicate_expr());
+
+        for expr in &self.exprs {
+            builder = builder.append_expr(expr.clone());
+        }
+
+        builder.build()
+    }
+
+    /// Return true if results from this table should be included in
+    /// results
+    pub fn should_include_table(&self, table_name: &str) -> bool {
+        match &self.table_names {
+            None => true, // No table name restriction on predicate
+            Some(table_names) => table_names.contains(table_name),
+        }
+    }
+
+    /// Creates a DataFusion predicate for appliying a timestamp range:
+    ///
+    /// range.start <= time and time < range.end`
+    fn make_timestamp_predicate_expr(&self) -> Option<Expr> {
+        self.range
+            .map(|range| make_range_expr(range.start, range.end))
     }
 }
 

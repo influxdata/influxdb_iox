@@ -7,7 +7,6 @@ use arrow_deps::{
         logical_plan::{Expr, ExpressionVisitor, Operator, Recursion},
         optimizer::utils::expr_to_column_names,
         physical_plan::SendableRecordBatchStream,
-        prelude::*,
     },
 };
 
@@ -22,7 +21,7 @@ use data_types::{
 use query::{
     exec::stringset::StringSet,
     predicate::{Predicate, TimestampRange},
-    util::AndExprBuilder,
+    util::{make_range_expr, AndExprBuilder},
 };
 
 use crate::dictionary::{Dictionary, Error as DictionaryError};
@@ -33,6 +32,12 @@ use snafu::{OptionExt, ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
+    #[snafu(display("Error in {}: {}", source_module, source))]
+    PassThrough {
+        source_module: &'static str,
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
     #[snafu(display("Error writing table '{}': {}", table_name, source))]
     TableWrite {
         table_name: String,
@@ -67,6 +72,17 @@ pub enum Error {
         source: DictionaryError,
     },
 
+    #[snafu(display(
+        "Internal error: table {} not found in dictionary of chunk {}",
+        table_name,
+        chunk_id
+    ))]
+    InternalTableNotFoundInDictionary {
+        table_name: String,
+        chunk_id: u32,
+        source: DictionaryError,
+    },
+
     #[snafu(display("Table {} not found in chunk {}", table, chunk))]
     TableNotFoundInChunk { table: u32, chunk: u64 },
 
@@ -78,6 +94,22 @@ pub enum Error {
 
     #[snafu(display("Attempt to write table batch without a name"))]
     TableWriteWithoutName,
+
+    #[snafu(display("Column ID {} not found in dictionary of chunk {}", column_id, chunk))]
+    ColumnIdNotFoundInDictionary {
+        column_id: u32,
+        chunk: u64,
+        source: DictionaryError,
+    },
+}
+
+impl From<crate::table::Error> for Error {
+    fn from(e: crate::table::Error) -> Self {
+        Self::PassThrough {
+            source_module: "Table",
+            source: Box::new(e),
+        }
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -147,6 +179,9 @@ pub struct ChunkPredicate {
     /// as a filter using logical conjuction (aka are 'AND'ed
     /// together). Only rows that evaluate to TRUE for all these
     /// expressions should be returned.
+    ///
+    /// TODO these exprs should eventually be removed (when they are
+    /// all handled one layer up in the query layer)
     pub chunk_exprs: Vec<Expr>,
 
     /// If Some, then the table must contain all columns specified
@@ -193,17 +228,9 @@ impl ChunkPredicate {
     ///
     /// range.start <= time and time < range.end`
     fn make_timestamp_predicate_expr(&self) -> Option<Expr> {
-        self.range.map(|range| make_range_expr(&range))
+        self.range
+            .map(|range| make_range_expr(range.start, range.end))
     }
-}
-
-/// Creates expression like:
-/// range.low <= time && time < range.high
-fn make_range_expr(range: &TimestampRange) -> Expr {
-    let ts_low = lit(range.start).lt_eq(col(TIME_COLUMN_NAME));
-    let ts_high = col(TIME_COLUMN_NAME).lt(lit(range.end));
-
-    ts_low.and(ts_high)
 }
 
 impl Chunk {
@@ -285,6 +312,58 @@ impl Chunk {
                 }
             })
             .collect()
+    }
+
+    /// If the column names that matches the predicate can be found
+    /// from the predicate entirely using metadata, returns those
+    /// strings.
+    ///
+    /// If the predicate can not be evaluated entirely with
+    /// metadata, returns Ok(None)
+    pub fn column_names(
+        &self,
+        table_name: &str,
+        chunk_predicate: &ChunkPredicate,
+    ) -> Result<Option<BTreeSet<String>>> {
+        // No support for general purpose expressions
+        if !chunk_predicate.chunk_exprs.is_empty() {
+            return Ok(None);
+        }
+
+        let table_name_id = self.dictionary.lookup_value(table_name).context(
+            InternalTableNotFoundInDictionary {
+                table_name,
+                chunk_id: self.id(),
+            },
+        )?;
+
+        let mut chunk_column_ids = BTreeSet::new();
+
+        // Is this table in the chunk?
+        if let Some(table) = self.tables.values().find(|table| table.id == table_name_id) {
+            for (&column_id, column) in &table.columns {
+                if table.column_matches_predicate(&column, chunk_predicate)? {
+                    chunk_column_ids.insert(column_id);
+                }
+            }
+        }
+
+        let mut column_names = BTreeSet::new();
+        for &column_id in &chunk_column_ids {
+            let column_name =
+                self.dictionary
+                    .lookup_id(column_id)
+                    .context(ColumnIdNotFoundInDictionary {
+                        column_id,
+                        chunk: self.id,
+                    })?;
+
+            if !column_names.contains(column_name) {
+                column_names.insert(column_name.to_string());
+            }
+        }
+
+        Ok(Some(column_names))
     }
 
     /// Translates `predicate` into per-chunk ids that can be
@@ -536,8 +615,16 @@ impl query::PartitionChunk for Chunk {
         self.table_schema(table_name, selection)
     }
 
-    async fn has_table(&self, table_name: &str) -> bool {
+    fn has_table(&self, table_name: &str) -> bool {
         matches!(self.table(table_name), Ok(Some(_)))
+    }
+
+    async fn column_names(
+        &self,
+        _table_name: &str,
+        _predicate: &Predicate,
+    ) -> Result<Option<StringSet>, Self::Error> {
+        unimplemented!("This function is slated for removal")
     }
 }
 
@@ -577,23 +664,5 @@ impl ExpressionVisitor for SupportVisitor {
                 expr
             ))),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_make_range_expr() {
-        // Test that the generated predicate is correct
-
-        let range = TimestampRange::new(101, 202);
-
-        let ts_predicate_expr = make_range_expr(&range);
-        let expected_string = "Int64(101) LtEq #time And #time Lt Int64(202)";
-        let actual_string = format!("{:?}", ts_predicate_expr);
-
-        assert_eq!(actual_string, expected_string);
     }
 }
