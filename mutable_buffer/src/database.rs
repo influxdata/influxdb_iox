@@ -183,12 +183,18 @@ impl MutableBufferDb {
 
     /// The approximate size in memory of all data in the mutable buffer, in
     /// bytes
-    pub async fn size(&self) -> usize {
-        let partitions: Vec<_> = { self.partitions.read().await.values().cloned().collect() };
+    pub fn size(&self) -> usize {
+        let partitions = self
+            .partitions
+            .read()
+            .expect("lock poisoned")
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
 
         let mut size = 0;
         for p in partitions {
-            size += p.read().await.size();
+            size += p.read().expect("lock poisoned").size();
         }
 
         size
@@ -1695,7 +1701,7 @@ mod tests {
         let lines: Vec<_> = parse_lines(&lp_data).map(|l| l.unwrap()).collect();
         write_lines(&db, &lines).await;
 
-        assert_eq!(429, db.size().await);
+        assert_eq!(429, db.size());
     }
 
     /// Run the plan and gather the results in a order that can be compared
