@@ -37,6 +37,20 @@ impl ColumnSummary {
     }
 }
 
+/// Column name, statistics which encode type information
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+pub struct Column {
+    pub name: String,
+    pub stats: ColumnStats,
+}
+
+impl Column {
+    /// Returns the total number of rows in this column
+    pub fn count(&self) -> u32 {
+        self.stats.count()
+    }
+}
+
 /// Statistics and type information for a column.
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub enum Statistics {
