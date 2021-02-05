@@ -148,8 +148,8 @@ impl StringSetPlanBuilder {
             // only a known set of strings
             Ok(StringSetPlan::KnownOk(Arc::new(strings)))
         } else {
-            // Had at least one general plan, so need to use general purpose plan for
-
+            // Had at least one general plan, so need to use general
+            // purpose plan for the known strings
             if !strings.is_empty() {
                 let batch =
                     str_iter_to_batch(TABLE_NAMES_COLUMN_NAME, strings.into_iter().map(Some))
