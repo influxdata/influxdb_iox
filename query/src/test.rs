@@ -143,7 +143,10 @@ impl TestDatabase {
 
     /// Get all replicated writs to this database
     pub fn get_writes(&self) -> Vec<ReplicatedWrite> {
-        self.replicated_writes.lock().expect("mutex poisoned").clone()
+        self.replicated_writes
+            .lock()
+            .expect("mutex poisoned")
+            .clone()
     }
 
     /// Parse line protocol and add it as new lines to this
@@ -192,7 +195,11 @@ impl TestDatabase {
 
     /// Get the parameters from the last column name request
     pub fn get_column_names_request(&self) -> Option<ColumnNamesRequest> {
-        self.column_names_request.clone().lock().expect("mutex poisoned").take()
+        self.column_names_request
+            .clone()
+            .lock()
+            .expect("mutex poisoned")
+            .take()
     }
 
     /// Set the list of column values that will be returned on a call to
@@ -206,37 +213,65 @@ impl TestDatabase {
 
     /// Get the parameters from the last column name request
     pub fn get_column_values_request(&self) -> Option<ColumnValuesRequest> {
-        self.column_values_request.clone().lock().expect("mutex poisoned").take()
+        self.column_values_request
+            .clone()
+            .lock()
+            .expect("mutex poisoned")
+            .take()
     }
 
     /// Set the series that will be returned on a call to query_series
     pub fn set_query_series_values(&self, plan: SeriesSetPlans) {
-        *(self.query_series_values.clone().lock().expect("mutex poisoned")) = Some(plan);
+        *(self
+            .query_series_values
+            .clone()
+            .lock()
+            .expect("mutex poisoned")) = Some(plan);
     }
 
     /// Get the parameters from the last column name request
     pub fn get_query_series_request(&self) -> Option<QuerySeriesRequest> {
-        self.query_series_request.clone().lock().expect("mutex poisoned").take()
+        self.query_series_request
+            .clone()
+            .lock()
+            .expect("mutex poisoned")
+            .take()
     }
 
     /// Set the series that will be returned on a call to query_groups
     pub fn set_query_groups_values(&self, plan: SeriesSetPlans) {
-        *(self.query_groups_values.clone().lock().expect("mutex poisoned")) = Some(plan);
+        *(self
+            .query_groups_values
+            .clone()
+            .lock()
+            .expect("mutex poisoned")) = Some(plan);
     }
 
     /// Get the parameters from the last column name request
     pub fn get_query_groups_request(&self) -> Option<QueryGroupsRequest> {
-        self.query_groups_request.clone().lock().expect("mutex poisoned").take()
+        self.query_groups_request
+            .clone()
+            .lock()
+            .expect("mutex poisoned")
+            .take()
     }
 
     /// Set the FieldSet plan that will be returned
     pub fn set_field_colum_names_values(&self, plan: FieldListPlan) {
-        *(self.field_columns_value.clone().lock().expect("mutex poisoned")) = Some(plan);
+        *(self
+            .field_columns_value
+            .clone()
+            .lock()
+            .expect("mutex poisoned")) = Some(plan);
     }
 
     /// Get the parameters from the last column name request
     pub fn get_field_columns_request(&self) -> Option<FieldColumnsRequest> {
-        self.field_columns_request.clone().lock().expect("mutex poisoned").take()
+        self.field_columns_request
+            .clone()
+            .lock()
+            .expect("mutex poisoned")
+            .take()
     }
 }
 
@@ -290,7 +325,10 @@ impl Database for TestDatabase {
 
     /// Adds the replicated write to this database
     async fn store_replicated_write(&self, write: &ReplicatedWrite) -> Result<(), Self::Error> {
-        self.replicated_writes.lock().expect("mutex poisoned").push(write.clone());
+        self.replicated_writes
+            .lock()
+            .expect("mutex poisoned")
+            .push(write.clone());
         Ok(())
     }
 
@@ -301,7 +339,11 @@ impl Database for TestDatabase {
 
         let new_column_names_request = Some(ColumnNamesRequest { predicate });
 
-        *self.column_names_request.clone().lock().expect("mutex poisoned") = new_column_names_request;
+        *self
+            .column_names_request
+            .clone()
+            .lock()
+            .expect("mutex poisoned") = new_column_names_request;
 
         // pull out the saved columns
         let column_names = self
@@ -324,7 +366,11 @@ impl Database for TestDatabase {
 
         let field_columns_request = Some(FieldColumnsRequest { predicate });
 
-        *self.field_columns_request.clone().lock().expect("mutex poisoned") = field_columns_request;
+        *self
+            .field_columns_request
+            .clone()
+            .lock()
+            .expect("mutex poisoned") = field_columns_request;
 
         // pull out the saved columns
         self.field_columns_value
@@ -352,7 +398,11 @@ impl Database for TestDatabase {
             predicate,
         });
 
-        *self.column_values_request.clone().lock().expect("mutex poisoned") = new_column_values_request;
+        *self
+            .column_values_request
+            .clone()
+            .lock()
+            .expect("mutex poisoned") = new_column_values_request;
 
         // pull out the saved columns
         let column_values = self
@@ -374,7 +424,11 @@ impl Database for TestDatabase {
 
         let new_queries_series_request = Some(QuerySeriesRequest { predicate });
 
-        *self.query_series_request.clone().lock().expect("mutex poisoned") = new_queries_series_request;
+        *self
+            .query_series_request
+            .clone()
+            .lock()
+            .expect("mutex poisoned") = new_queries_series_request;
 
         self.query_series_values
             .clone()
@@ -396,7 +450,11 @@ impl Database for TestDatabase {
 
         let new_queries_groups_request = Some(QueryGroupsRequest { predicate, gby_agg });
 
-        *self.query_groups_request.clone().lock().expect("mutex poisoned") = new_queries_groups_request;
+        *self
+            .query_groups_request
+            .clone()
+            .lock()
+            .expect("mutex poisoned") = new_queries_groups_request;
 
         self.query_groups_values
             .clone()
