@@ -17,7 +17,7 @@ pub enum Error {
         source: arrow_deps::arrow::error::ArrowError,
     },
 
-    #[snafu(display("Internal creating a plan for stringset: {}", source))]
+    #[snafu(display("Internal error creating a plan for stringset: {}", source))]
     InternalPlanningStringSet {
         source: arrow_deps::datafusion::error::DataFusionError,
     },
@@ -33,13 +33,13 @@ pub enum StringSetPlan {
     /// The plan errored and we are delaying reporting the results
     KnownError(Box<dyn std::error::Error + Send + Sync + 'static>),
 
-    /// The results are known from metadta only without having to run
+    /// The results are known from metadata only without having to run
     /// an actual datafusion plan
     KnownOk(StringSetRef),
 
     /// A DataFusion plan(s) to execute. Each plan must produce
     /// RecordBatches with exactly one String column, though the
-    /// the values produced by the plan may be repeated
+    /// values produced by the plan may be repeated
     ///
     /// TODO: it would be cool to have a single datafusion LogicalPlan
     /// that merged all the results together. However, no such Union
@@ -66,7 +66,7 @@ impl<E> From<Result<StringSetRef, E>> for StringSetPlan
 where
     E: std::error::Error + Send + Sync + 'static,
 {
-    /// Create a StringSetPlan from a Result<StringSetRef> result, wrapping the
+    /// Create a `StringSetPlan` from a `Result<StringSetRef>`, wrapping the
     /// error type appropriately
     fn from(result: Result<StringSetRef, E>) -> Self {
         match result {
@@ -77,7 +77,7 @@ where
 }
 
 impl From<Vec<LogicalPlan>> for StringSetPlan {
-    /// Create a DataFusion LogicalPlan node, each if which must
+    /// Create a DataFusion LogicalPlan node, each of which must
     /// produce a single output Utf8 column. The output of each plan
     /// will be included into the final set.
     fn from(plans: Vec<LogicalPlan>) -> Self {
@@ -105,7 +105,7 @@ impl StringSetPlanBuilder {
         Self::default()
     }
 
-    /// Returns a reference to any strings alreay known to be in this
+    /// Returns a reference to any strings already known to be in this
     /// set
     pub fn known_strings(&self) -> &StringSet {
         &self.strings
