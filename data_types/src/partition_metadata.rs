@@ -41,7 +41,7 @@ impl ColumnSummary {
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub struct Column {
     pub name: String,
-    pub stats: ColumnStats,
+    pub stats: Statistics,
 }
 
 impl Column {
