@@ -7,7 +7,7 @@ use crate::{exec::Executor, group_by::GroupByAndAggregate, plan::stringset::Stri
 use crate::{
     exec::{
         stringset::{StringSet, StringSetRef},
-        FieldListPlan, SeriesSetPlans, StringSetPlan,
+        FieldListPlan, SeriesSetPlans,
     },
     Database, DatabaseStore, PartitionChunk, Predicate,
 };
