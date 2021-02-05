@@ -7,5 +7,6 @@
 
 pub mod influxrpc;
 pub mod scenarios;
+pub mod sql;
 pub mod table_schema;
 pub mod utils;

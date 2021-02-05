@@ -10,9 +10,6 @@ use query::{
 
 use super::scenarios::*;
 
-/// Creates and loads several database scenarios using the db_setup
-/// function.
-///
 /// runs table_names(predicate) and compares it to the expected
 /// output
 macro_rules! run_table_names_test_case {
