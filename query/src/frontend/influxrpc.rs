@@ -48,7 +48,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// specific queries, but also provides more generic access to the
 /// same underlying data via other frontends (e.g. SQL).
 ///
-/// The InfluxDB data model can can be thought of as a relational
+/// The InfluxDB data model can be thought of as a relational
 /// database table where each column has both a type as well as one of
 /// the following categories:
 ///

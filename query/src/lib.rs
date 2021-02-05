@@ -127,13 +127,13 @@ pub trait PartitionChunk: Debug + Send + Sync {
     /// Returns all table names from this chunk that have at least one
     /// row that matches the `predicate` and are not already in `known_tables`.
     ///
-    /// If the predicate can not be evaluated (e.g it has predicates
-    /// that can not be directly evaluated in the chunk), Noneis
+    /// If the predicate cannot be evaluated (e.g it has predicates
+    /// that cannot be directly evaluated in the chunk), `None` is
     /// returned.
     ///
-    /// known_tables is a list of table names already known to be in
+    /// `known_tables` is a list of table names already known to be in
     /// other chunks from the same partition. It may be empty or
-    /// contain table_names not in this chunk.
+    /// contain `table_names` not in this chunk.
     async fn table_names(
         &self,
         predicate: &Predicate,
