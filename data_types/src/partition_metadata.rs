@@ -24,9 +24,11 @@ impl PartitionSummary {
     pub fn from_table_summaries(key: impl Into<String>, mut summaries: Vec<TableSummary>) -> Self {
         summaries.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let mut tables = vec![];
+        let mut tables = Vec::with_capacity(summaries.len());
 
-        if let Some(mut table) = summaries.pop() {
+        let mut summaries = summaries.into_iter();
+
+        if let Some(mut table) = summaries.next() {
             for t in summaries {
                 if table.name != t.name {
                     tables.push(table);
@@ -143,7 +145,22 @@ impl ColumnSummary {
                     s.max = o.max.clone();
                 }
             }
-            _ => (),
+            (Statistics::U64(s), Statistics::U64(o)) => {
+                s.count += o.count;
+                if o.min < s.min {
+                    s.min = o.min;
+                }
+                if o.max > s.max {
+                    s.max = o.max;
+                }
+            }
+            // do catch alls for the specific types, that way if a new type gets added, the compiler
+            // will complain.
+            (Statistics::F64(_), _) => (),
+            (Statistics::I64(_), _) => (),
+            (Statistics::U64(_), _) => (),
+            (Statistics::Bool(_), _) => (),
+            (Statistics::String(_), _) => (),
         }
     }
 }
@@ -443,8 +460,19 @@ mod tests {
             columns: vec![int_col],
         };
 
-        let partition =
-            PartitionSummary::from_table_summaries("key", vec![table_a, table_b, table_a_2]);
+        let int_col = ColumnSummary {
+            name: "int".to_string(),
+            stats: Statistics::I64(StatValues::new(203)),
+        };
+        let table_b_2 = TableSummary {
+            name: "b".to_string(),
+            columns: vec![int_col],
+        };
+
+        let partition = PartitionSummary::from_table_summaries(
+            "key",
+            vec![table_b_2, table_a, table_b, table_a_2],
+        );
         let t = partition.table("a").unwrap();
         let col = t.column("string").unwrap();
         assert_eq!(
@@ -470,8 +498,8 @@ mod tests {
             col.stats,
             Statistics::I64(StatValues {
                 min: 10,
-                max: 10,
-                count: 1
+                max: 203,
+                count: 2
             })
         );
     }
@@ -508,5 +536,35 @@ mod tests {
         let mut b = bool_true;
         b.update_from(&bool_false);
         assert_eq!(b.stats, expected_stats);
+    }
+
+    #[test]
+    fn column_update_from_u64() {
+        let mut min = ColumnSummary {
+            name: "foo".to_string(),
+            stats: Statistics::U64(StatValues {
+                min: 5,
+                max: 23,
+                count: 1,
+            }),
+        };
+
+        let max = ColumnSummary {
+            name: "foo".to_string(),
+            stats: Statistics::U64(StatValues {
+                min: 6,
+                max: 506,
+                count: 43,
+            }),
+        };
+
+        min.update_from(&max);
+
+        let expected = Statistics::U64(StatValues {
+            min: 5,
+            max: 506,
+            count: 44,
+        });
+        assert_eq!(min.stats, expected);
     }
 }
