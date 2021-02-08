@@ -3,8 +3,13 @@ use std::num::NonZeroU32;
 use data_types::database_rules::DatabaseRules;
 use reqwest::{Method, Url};
 
-use crate::errors::{ClientError, CreateDatabaseError, Error, ServerErrorResponse};
-use data_types::{http::ListDatabasesResponse, DatabaseName};
+use crate::errors::{
+    ClientError, CreateDatabaseError, Error, ServerErrorResponse, WalMetadataError,
+};
+use data_types::{
+    http::{ListDatabasesResponse, WalMetadataQuery, WalMetadataResponse},
+    DatabaseName,
+};
 
 // TODO: move DatabaseRules / WriterId to the API client
 
@@ -138,6 +143,30 @@ impl Client {
         }
     }
 
+    /// Get metadata on a database's WAL
+    pub async fn get_wal_metadata(
+        &self,
+        database: impl AsRef<str>,
+        query: &WalMetadataQuery,
+    ) -> Result<WalMetadataResponse, WalMetadataError> {
+        let url = self
+            .db_url(database.as_ref())?
+            .join("wal/meta")
+            .expect("failed to construct URL");
+
+        let r = self
+            .http
+            .request(Method::GET, url)
+            .json(query)
+            .send()
+            .await?;
+
+        match r {
+            r if r.status() == 200 => Ok(r.json().await?),
+            r => Err(ServerErrorResponse::from_response(r).await.into()),
+        }
+    }
+
     /// Build the request path for relative `path`.
     ///
     /// # Safety
@@ -165,7 +194,7 @@ impl Client {
         let name = DatabaseName::new(database).map_err(|_| ClientError::InvalidDatabaseName)?;
 
         self.url_for(DB_PATH)
-            .join(name.as_ref())
+            .join(&format!("{}/", name))
             .map_err(|_| ClientError::InvalidDatabaseName)
     }
 }
@@ -176,6 +205,7 @@ mod tests {
     use rand::{distributions::Alphanumeric, thread_rng, Rng};
 
     use super::*;
+    use data_types::database_rules::{WalBufferConfig, WalBufferRollover};
 
     /// If `TEST_IOX_ENDPOINT` is set, load the value and return it to the
     /// caller.
@@ -290,6 +320,44 @@ mod tests {
             .expect("create database failed");
         let r = c.list_databases().await.expect("list databases failed");
         assert!(r.names.contains(&name));
+    }
+
+    #[tokio::test]
+    async fn test_wal_metadata_endpoint() {
+        let endpoint = maybe_skip_integration!();
+        let c = ClientBuilder::default().build(endpoint).unwrap();
+
+        c.set_writer_id(NonZeroU32::new(42).unwrap())
+            .await
+            .expect("set ID failed");
+
+        let db_name = rand_name();
+
+        c.create_database(
+            db_name.clone(),
+            &DatabaseRules {
+                wal_buffer_config: Some(WalBufferConfig {
+                    buffer_size: 1000,
+                    segment_size: 100,
+                    buffer_rollover: WalBufferRollover::DropOldSegment,
+                    store_segments: false,
+                    close_segment_after: None,
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create database failed");
+
+        let r = c
+            .get_wal_metadata(&db_name, &Default::default())
+            .await
+            .expect("get metadata failed");
+
+        assert_eq!(r.segments.len(), 1);
+        assert_eq!(r.segments[0].size, 0);
+        assert_eq!(r.segments[0].writers.len(), 0);
+        assert!(r.segments[0].persisted.is_none());
     }
 
     #[test]

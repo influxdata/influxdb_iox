@@ -32,6 +32,9 @@ pub use server_error_response::*;
 mod create_database;
 pub use create_database::*;
 
+mod wal_metadata;
+pub use wal_metadata::*;
+
 /// Constants used in API error codes.
 ///
 /// Expressing this as a enum prevents reuse of discriminants, and as they're
@@ -50,6 +53,9 @@ pub enum ApiErrorCode {
 
     /// The database referenced does not exist.
     DB_NOT_FOUND = 103,
+
+    /// The database referenced does not have a WAL
+    WAL_NOT_FOUND = 104,
 }
 
 impl From<ApiErrorCode> for u32 {
