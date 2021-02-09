@@ -122,7 +122,9 @@ impl StringSetPlanBuilder {
                 }
                 Err(ssref) => {
                     for s in ssref.iter() {
-                        self.strings.insert(s.clone());
+                        if !self.strings.contains(s) {
+                            self.strings.insert(s.clone());
+                        }
                     }
                 }
             },
