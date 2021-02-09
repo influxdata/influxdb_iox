@@ -47,6 +47,24 @@ async fn sql_select_from_cpu() {
 }
 
 #[tokio::test]
+async fn sql_select_from_cpu_with_projection() {
+    // expect that to get a subset of the columns and in the order specified
+    let expected = vec![
+        "+------+--------+",
+        "| user | region |",
+        "+------+--------+",
+        "| 23.2 | west   |",
+        "| 21   | west   |",
+        "+------+--------+",
+    ];
+    run_sql_test_case!(
+        TwoMeasurements {},
+        "SELECT user, region from cpu",
+        &expected
+    );
+}
+
+#[tokio::test]
 async fn sql_select_from_cpu_pred() {
     let expected = vec![
         "+--------+------+------+",
