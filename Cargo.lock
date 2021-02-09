@@ -3532,6 +3532,7 @@ version = "0.1.0"
 dependencies = [
  "dotenv",
  "env_logger 0.7.1",
+ "lazy_static",
  "tempfile",
  "tracing",
 ]
