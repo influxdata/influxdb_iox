@@ -32,7 +32,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub enum StringSetPlan {
     /// The results are known from metadata only without having to run
     /// an actual datafusion plan
-    KnownOk(StringSetRef),
+    Known(StringSetRef),
 
     /// A DataFusion plan(s) to execute. Each plan must produce
     /// RecordBatches with exactly one String column, though the
@@ -47,7 +47,7 @@ pub enum StringSetPlan {
 impl From<StringSetRef> for StringSetPlan {
     /// Create a StringSetPlan from a StringSetRef
     fn from(set: StringSetRef) -> Self {
-        Self::KnownOk(set)
+        Self::Known(set)
     }
 }
 
@@ -55,7 +55,7 @@ impl From<StringSet> for StringSetPlan {
     /// Create a StringSetPlan from a StringSet result, wrapping the error type
     /// appropriately
     fn from(set: StringSet) -> Self {
-        Self::KnownOk(StringSetRef::new(set))
+        Self::Known(StringSetRef::new(set))
     }
 }
 
@@ -95,7 +95,7 @@ impl StringSetPlanBuilder {
     /// passes on the plan
     pub fn append(mut self, other: StringSetPlan) -> Self {
         match other {
-            StringSetPlan::KnownOk(ssref) => match Arc::try_unwrap(ssref) {
+            StringSetPlan::Known(ssref) => match Arc::try_unwrap(ssref) {
                 Ok(mut ss) => {
                     self.strings.append(&mut ss);
                 }
@@ -120,7 +120,7 @@ impl StringSetPlanBuilder {
 
         if plans.is_empty() {
             // only a known set of strings
-            Ok(StringSetPlan::KnownOk(Arc::new(strings)))
+            Ok(StringSetPlan::Known(Arc::new(strings)))
         } else {
             // Had at least one general plan, so need to use general
             // purpose plan for the known strings
@@ -149,7 +149,7 @@ mod tests {
     fn test_builder_empty() {
         let plan = StringSetPlanBuilder::new().build().unwrap();
         let empty_ss = StringSet::new().into();
-        if let StringSetPlan::KnownOk(ss) = plan {
+        if let StringSetPlan::Known(ss) = plan {
             assert_eq!(ss, empty_ss)
         } else {
             panic!("unexpected type: {:?}", plan)
@@ -166,7 +166,7 @@ mod tests {
 
         let expected_ss = to_string_set(&["foo", "bar", "baz"]).into();
 
-        if let StringSetPlan::KnownOk(ss) = plan {
+        if let StringSetPlan::Known(ss) = plan {
             assert_eq!(ss, expected_ss)
         } else {
             panic!("unexpected type: {:?}", plan)

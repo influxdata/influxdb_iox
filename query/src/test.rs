@@ -354,7 +354,7 @@ impl Database for TestDatabase {
                 message: "No saved column_names in TestDatabase",
             })?;
 
-        Ok(StringSetPlan::KnownOk(column_names))
+        Ok(StringSetPlan::Known(column_names))
     }
 
     async fn field_column_names(&self, predicate: Predicate) -> Result<FieldListPlan, Self::Error> {
@@ -413,7 +413,7 @@ impl Database for TestDatabase {
                 message: "No saved column_values in TestDatabase",
             })?;
 
-        Ok(StringSetPlan::KnownOk(column_values))
+        Ok(StringSetPlan::Known(column_values))
     }
 
     async fn query_series(&self, predicate: Predicate) -> Result<SeriesSetPlans, Self::Error> {

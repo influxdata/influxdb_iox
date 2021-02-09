@@ -193,7 +193,7 @@ impl Executor {
     /// Executes this plan and returns the resulting set of strings
     pub async fn to_string_set(&self, plan: StringSetPlan) -> Result<StringSetRef> {
         match plan {
-            StringSetPlan::KnownOk(ss) => Ok(ss),
+            StringSetPlan::Known(ss) => Ok(ss),
             StringSetPlan::Plan(plans) => self
                 .run_logical_plans(plans)
                 .await?
@@ -414,7 +414,7 @@ mod tests {
     #[tokio::test]
     async fn executor_known_string_set_plan_ok() -> Result<()> {
         let expected_strings = to_set(&["Foo", "Bar"]);
-        let plan = StringSetPlan::KnownOk(expected_strings.clone());
+        let plan = StringSetPlan::Known(expected_strings.clone());
 
         let executor = Executor::default();
         let result_strings = executor.to_string_set(plan).await?;
