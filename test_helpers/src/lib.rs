@@ -6,13 +6,9 @@
     clippy::use_self
 )]
 
-use lazy_static::lazy_static;
 use std::{
     env, f64,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::{Arc, Once},
 };
 pub use tempfile;
 
@@ -87,20 +83,17 @@ pub fn tag_key_bytes_to_strings(bytes: Vec<u8>) -> String {
     }
 }
 
-lazy_static! {
-    static ref LOG_SETUP: AtomicBool = AtomicBool::new(false);
-}
+static LOG_SETUP: Once = Once::new();
 
 /// Enables debug logging. This function can be called more than once
 pub fn enable_logging() {
     // ensure the global has been initialized
-    let log_was_setup = LOG_SETUP.swap(true, Ordering::SeqCst);
-    if !log_was_setup {
+    LOG_SETUP.call_once(|| {
         // TODO honor any existing RUST_LOG level (and maybe not start
         // logging unless it is set??)
         std::env::set_var("RUST_LOG", "debug");
         env_logger::init();
-    }
+    })
 }
 
 #[macro_export]
