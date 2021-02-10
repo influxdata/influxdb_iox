@@ -142,7 +142,7 @@ pub struct MutableBufferConfig {
     /// Drop partitions to free up space in this order. Can be by the oldest
     /// created at time, the longest since the last write, or the min or max of
     /// some column.
-    pub partition_drop_order: PartitionDropRules,
+    pub partition_drop_order: PartitionSortRules,
     /// Attempt to persist partitions after they haven't received a write for
     /// this number of seconds. If not set, partitions won't be
     /// automatically persisted.
@@ -164,7 +164,7 @@ impl Default for MutableBufferConfig {
             buffer_size: DEFAULT_MUTABLE_BUFFER_SIZE,
             // keep taking writes and drop partitions on the floor
             reject_if_not_persisted: false,
-            partition_drop_order: PartitionDropRules {
+            partition_drop_order: PartitionSortRules {
                 order: Order::Desc,
                 sort: PartitionSort::CreatedAtTime,
             },
@@ -175,22 +175,22 @@ impl Default for MutableBufferConfig {
     }
 }
 
-/// This struct specifies the rules for the order in which to drop partitions
-/// from the mutable buffer after it exceeds its max size. The last partition in
-/// the list will be dropped, until enough space has been freed up to be below
-/// the max size.
+/// This struct specifies the rules for the order to sort partitions
+/// from the mutable buffer. This is used to determine which order to drop them
+/// in. The last partition in the list will be dropped, until enough space has
+/// been freed up to be below the max size.
 ///
 /// For example, to drop the partition that has been open longest:
 /// ```
-/// use data_types::database_rules::{PartitionDropRules, Order, PartitionSort};
+/// use data_types::database_rules::{PartitionSortRules, Order, PartitionSort};
 ///
-/// let rules = PartitionDropRules{
+/// let rules = PartitionSortRules{
 ///     order: Order::Desc,
 ///     sort: PartitionSort::CreatedAtTime,
 /// };
 /// ```
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
-pub struct PartitionDropRules {
+pub struct PartitionSortRules {
     /// Sort partitions by this order. Last will be dropped.
     pub order: Order,
     /// Sort by either a column value, or when the partition was opened, or when
