@@ -27,11 +27,6 @@ pub struct DatabaseRules {
     /// db
     #[serde(default)]
     pub partition_template: PartitionTemplate,
-    /// If `store_locally` is set to `true`, this server will store writes and
-    /// replicated writes in a local write buffer database. This is step #4
-    /// from the diagram.
-    #[serde(default)]
-    pub store_locally: bool,
     /// The set of host groups that data should be replicated to. Which host a
     /// write goes to within a host group is determined by consistent hashing of
     /// the partition key. We'd use this to create a host group per
@@ -116,6 +111,13 @@ impl DatabaseRules {
         default_time: &DateTime<Utc>,
     ) -> Result<String> {
         self.partition_template.partition_key(line, default_time)
+    }
+
+    pub fn new() -> Self {
+        Self {
+            mutable_buffer_config: MutableBufferConfig::default_option(),
+            ..Default::default()
+        }
     }
 }
 
