@@ -96,7 +96,8 @@ pub struct DatabaseRules {
     #[serde(default)]
     pub wal_buffer_config: Option<WalBufferConfig>,
 
-    /// When set this will collect writes into a queryable in-memory database
+    /// Unless explicitly disabled by setting this to None (or null in JSON),
+    /// writes will go into a queryable in-memory database
     /// called the Mutable Buffer. It is optimized to receive writes so they
     /// can be batched together later to the Read Buffer or to Parquet files
     /// in object storage.
@@ -167,7 +168,7 @@ impl Default for MutableBufferConfig {
                 order: Order::Desc,
                 sort: PartitionSort::CreatedAtTime,
             },
-            // rollover the chunk and persist the it after the partiton has been cold for
+            // rollover the chunk and persist it after the partition has been cold for
             // 15 minutes
             persist_after_cold_seconds: Some(DEFAULT_PERSIST_AFTER_COLD_SECONDS),
         }
