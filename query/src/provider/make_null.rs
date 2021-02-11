@@ -13,10 +13,13 @@ use std::iter::FromIterator;
 
 /// Creates a column of all NULL values of the specified type and size
 ///
-/// This seems like it is something that should be in Arrow but I could not find
-/// it.
+/// This should be replaced by a call to NullArray::new_with_type
 ///
-/// TODO: contribute it back upstream to Arrow
+/// We can't currently ue that call due to a bug in pretty printing:
+/// https://github.com/apache/arrow/pull/9468
+///
+/// Once that is merged and we have updated Arrow, this function should be
+/// replaced
 pub fn make_null_column(data_type: &DataType, num_rows: usize) -> ArrowResult<ArrayRef> {
     println!("Making null column: {:?}", data_type);
     match data_type {
