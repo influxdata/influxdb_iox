@@ -64,7 +64,7 @@ pub(crate) struct ChunkInfo<C>
 where
     C: PartitionChunk + 'static,
 {
-    /// The schmea of the table in just this chunk (the overall table
+    /// The schema of the table in just this chunk (the overall table
     /// schema may have more columns if this chunk doesn't have
     /// columns that are in other chunks)
     chunk_table_schema: Schema,
@@ -73,6 +73,7 @@ where
 
 // The #[derive(Clone)] clone was complaining about C not implementing
 // Clone, which didn't make sense
+// Tracked by https://github.com/rust-lang/rust/issues/26925
 impl<C> Clone for ChunkInfo<C>
 where
     C: PartitionChunk + 'static,

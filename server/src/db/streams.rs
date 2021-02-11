@@ -60,7 +60,10 @@ impl MutableBufferChunkStream {
     // gets the next batch, as needed
     fn next_batch(&mut self) -> ArrowResult<Option<RecordBatch>> {
         if self.data.is_none() {
-            // Want all the columns
+            // Want all the columns in the schema. Note we don't
+            // use `Selection::All` here because the mutable buffer chunk would interpret it
+            // as "all columns in the table in that chunk" rather than
+            // all columns this query needs
             let selected_cols = self
                 .schema
                 .fields()
