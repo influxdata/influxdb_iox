@@ -220,17 +220,16 @@ impl ObjectStoreApi for AmazonS3 {
                 Start => {}
             }
 
-            let resp = match self.client.list_objects_v2(list_request).await {
+            let resp = self
+                .client
+                .list_objects_v2(list_request)
+                .await
+                .context(UnableToListData {
+                    bucket: &self.bucket_name,
+                });
+            let resp = match resp {
                 Ok(resp) => resp,
-                Err(e) => {
-                    return Some((
-                        Err(Error::UnableToListData {
-                            source: e,
-                            bucket: self.bucket_name.clone(),
-                        }),
-                        state,
-                    ))
-                }
+                Err(e) => return Some((Err(e), state)),
             };
 
             let contents = resp.contents.unwrap_or_default();
@@ -304,15 +303,13 @@ impl AmazonS3 {
             list_request.continuation_token = Some(t.clone());
         }
 
-        let resp = match self.client.list_objects_v2(list_request).await {
-            Ok(resp) => resp,
-            Err(e) => {
-                return Err(Error::UnableToListData {
-                    source: e,
-                    bucket: self.bucket_name.clone(),
-                })
-            }
-        };
+        let resp = self
+            .client
+            .list_objects_v2(list_request)
+            .await
+            .context(UnableToListData {
+                bucket: &self.bucket_name,
+            })?;
 
         let contents = resp.contents.unwrap_or_default();
 
