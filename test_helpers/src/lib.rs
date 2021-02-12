@@ -95,7 +95,15 @@ pub fn start_logging() {
         if std::env::var("RUST_LOG").is_err() {
             std::env::set_var("RUST_LOG", "debug");
         }
-        env_logger::init();
+        // Configure the logger to write to stderr and install it
+        let output_stream = std::io::stderr;
+
+        use tracing_subscriber::{prelude::*, EnvFilter};
+
+        tracing_subscriber::registry()
+            .with(EnvFilter::from_default_env())
+            .with(tracing_subscriber::fmt::layer().with_writer(output_stream))
+            .init();
     })
 }
 

@@ -109,9 +109,9 @@ RUST_LOG=info cargo test --workspace
 ```
 
 Since this feature uses
-[`env_logger`](https://crates.io/crates/env_logger) internally, you
+[`EnvFilter`](https://docs.rs/tracing-subscriber/0.2.15/tracing_subscriber/filter/struct.EnvFilter.html) internally, you
 can use all the features of that crate. For example, to disable the
-(somewhat noisy) logs in sime h2 modules, you can use a value of
+(somewhat noisy) logs in some h2 modules, you can use a value of
 `RUST_LOG` such as:
 
 ```shell
