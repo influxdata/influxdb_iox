@@ -102,17 +102,17 @@ cargo test --workspace
 ### Enabling logging in tests
 
 To enable logging to stderr during a run of `cargo test` set the Rust
-`RUST_LOG` environment varable. For example, to see all INFO
-messages:
+`RUST_LOG` environment varable. For example, to see all INFO messages:
 
 ```shell
 RUST_LOG=info cargo test --workspace
 ```
 
-This uses [`env_logger`](https://crates.io/crates/env_logger)
-internally, so you can use all the features of that crate. For
-example, to disable the (somewhat noisy) h2 logs, you can use a
-value of `RUST_LOG` such as:
+Since this feature uses
+[`env_logger`](https://crates.io/crates/env_logger) internally, you
+can use all the features of that crate. For example, to disable the
+(somewhat noisy) logs in sime h2 modules, you can use a value of
+`RUST_LOG` such as:
 
 ```shell
 RUST_LOG=debug,hyper::proto::h1=info,h2=info cargo test --workspace
