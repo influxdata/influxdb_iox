@@ -32,12 +32,6 @@ use snafu::{OptionExt, ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Error in {}: {}", source_module, source))]
-    PassThrough {
-        source_module: &'static str,
-        source: Box<dyn std::error::Error + Send + Sync + 'static>,
-    },
-
     #[snafu(display("Error writing table '{}': {}", table_name, source))]
     TableWrite {
         table_name: String,
@@ -101,15 +95,6 @@ pub enum Error {
         chunk: u64,
         source: DictionaryError,
     },
-}
-
-impl From<crate::table::Error> for Error {
-    fn from(e: crate::table::Error) -> Self {
-        Self::PassThrough {
-            source_module: "Table",
-            source: Box::new(e),
-        }
-    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -342,7 +327,11 @@ impl Chunk {
         // Is this table in the chunk?
         if let Some(table) = self.tables.values().find(|table| table.id == table_name_id) {
             for (&column_id, column) in &table.columns {
-                if table.column_matches_predicate(&column, chunk_predicate)? {
+                let column_matches_predicate = table
+                    .column_matches_predicate(&column, chunk_predicate)
+                    .context(NamedTableError { table_name })?;
+
+                if column_matches_predicate {
                     chunk_column_ids.insert(column_id);
                 }
             }
