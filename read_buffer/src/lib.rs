@@ -7,6 +7,7 @@ pub(crate) mod column;
 pub(crate) mod row_group;
 mod schema;
 pub(crate) mod table;
+pub(crate) mod value;
 
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
@@ -776,9 +777,9 @@ mod test {
         },
         datatypes::DataType::{Boolean, Float64, Int64, UInt64},
     };
-
-    use column::Values;
     use data_types::schema::builder::SchemaBuilder;
+
+    use crate::value::Values;
 
     // helper to make the `database_update_chunk` test simpler to read.
     fn gen_recordbatch() -> RecordBatch {
@@ -1429,7 +1430,8 @@ mod test {
 /// It should not be imported into any non-testing or benchmarking crates.
 pub mod benchmarks {
     pub use crate::column::{
-        cmp::Operator, dictionary, fixed::Fixed, fixed_null::FixedNull, Column, RowIDs,
+        cmp::Operator, encoding::dictionary, encoding::fixed::Fixed,
+        encoding::fixed_null::FixedNull, Column, RowIDs,
     };
 
     pub use crate::row_group::{ColumnType, RowGroup};
