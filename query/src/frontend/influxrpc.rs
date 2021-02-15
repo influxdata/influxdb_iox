@@ -261,7 +261,7 @@ impl InfluxRPCPlanner {
                         need_full_plans
                             .entry(table_name)
                             .or_insert_with(Vec::new)
-                            .push(chunk.clone());
+                            .push(Arc::clone(&chunk));
                     }
                 }
             }
