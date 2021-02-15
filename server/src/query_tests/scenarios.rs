@@ -292,8 +292,6 @@ pub struct EndToEndTest {}
 #[async_trait]
 impl DBSetup for EndToEndTest {
     async fn make(&self) -> Vec<DBScenario> {
-        //let partition_key = "1970-01-01T00";
-
         let lp_data = "cpu_load_short,host=server01,region=us-west value=0.64 0000\n\
                        cpu_load_short,host=server01 value=27.99 1000\n\
                        cpu_load_short,host=server02,region=us-west value=3.89 2000\n\
@@ -313,7 +311,6 @@ impl DBSetup for EndToEndTest {
             scenario_name: "Data in open chunk of mutable buffer".into(),
             db,
         };
-        //        vec![scenario1, scenario2, scenario3, scenario4]
         vec![scenario1]
     }
 }
