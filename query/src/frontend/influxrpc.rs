@@ -280,7 +280,7 @@ impl InfluxRPCPlanner {
 
             for (table_name, chunks) in need_full_plans.into_iter() {
                 let plan = self
-                    .tag_column_names_plan(database, &table_name, &predicate, chunks)
+                    .tag_column_names_plan(&table_name, &predicate, chunks)
                     .await?;
 
                 if let Some(plan) = plan {
@@ -316,17 +316,14 @@ impl InfluxRPCPlanner {
     ///  Extension(PivotSchema)
     ///    Filter(predicate)
     ///      TableScan (of chunks)
-    async fn tag_column_names_plan<D>(
+    async fn tag_column_names_plan<C>(
         &self,
-        //  I needed an unused parameter with type D so that Rust
-        //  would let me call this function
-        _database: &D,
         table_name: &str,
         predicate: &Predicate,
-        chunks: Vec<Arc<<D as Database>::Chunk>>,
+        chunks: Vec<Arc<C>>,
     ) -> Result<Option<StringSetPlan>>
     where
-        D: Database + 'static,
+        C: PartitionChunk + 'static,
     {
         // Prepare the scan of the table
         let mut builder = ProviderBuilder::new(table_name);
