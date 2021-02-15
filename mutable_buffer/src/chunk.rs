@@ -71,11 +71,7 @@ pub enum Error {
         table_name,
         chunk_id
     ))]
-    InternalTableNotFoundInDictionary {
-        table_name: String,
-        chunk_id: u32,
-        source: DictionaryError,
-    },
+    InternalTableNotFoundInDictionary { table_name: String, chunk_id: u32 },
 
     #[snafu(display("Table {} not found in chunk {}", table, chunk))]
     TableNotFoundInChunk { table: u32, chunk: u64 },
@@ -315,12 +311,13 @@ impl Chunk {
             return Ok(None);
         }
 
-        let table_name_id = self.dictionary.lookup_value(table_name).context(
-            InternalTableNotFoundInDictionary {
-                table_name,
-                chunk_id: self.id(),
-            },
-        )?;
+        let table_name_id =
+            self.dictionary
+                .id(table_name)
+                .context(InternalTableNotFoundInDictionary {
+                    table_name,
+                    chunk_id: self.id(),
+                })?;
 
         let mut chunk_column_ids = BTreeSet::new();
 
