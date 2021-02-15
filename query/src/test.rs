@@ -461,7 +461,7 @@ impl TestChunk {
         self.with_tag_column(table_name, "dummy_col")
     }
 
-    /// Register an int tag column with the test chunk
+    /// Register an tag column with the test chunk
     pub fn with_tag_column(
         mut self,
         table_name: impl Into<String>,
