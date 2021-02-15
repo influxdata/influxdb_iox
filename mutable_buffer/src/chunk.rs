@@ -322,7 +322,7 @@ impl Chunk {
         let mut chunk_column_ids = BTreeSet::new();
 
         // Is this table in the chunk?
-        if let Some(table) = self.tables.values().find(|table| table.id == table_name_id) {
+        if let Some(table) = self.tables.get(&table_name_id) {
             for (&column_id, column) in &table.columns {
                 let column_matches_predicate = table
                     .column_matches_predicate(&column, chunk_predicate)
