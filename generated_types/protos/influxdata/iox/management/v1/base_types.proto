@@ -1,0 +1,27 @@
+syntax = "proto3";
+package influxdata.iox.management.v1;
+
+enum Order {
+  Asc = 0;
+  Desc = 1;
+}
+
+enum Aggregate {
+  Min = 0;
+  Max = 1;
+}
+
+enum ColumnType {
+  I64 = 0;
+  U64 = 1;
+  F64 = 2;
+  String = 3;
+  Bool = 4;
+}
+
+message HostGroup {
+  string id = 1;
+
+  repeated string hosts = 2;
+}
+

@@ -1,0 +1,9 @@
+syntax = "proto3";
+package influxdata.iox.management.v1;
+
+import "google/protobuf/empty.proto";
+import "influxdata/iox/management/v1/database_rules.proto";
+
+service Management {
+  rpc CreateDatabase(DatabaseRules) returns (google.protobuf.Empty);
+}

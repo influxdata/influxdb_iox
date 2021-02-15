@@ -11,6 +11,7 @@ use server::{ConnectionManager, Server};
 mod flight;
 mod storage;
 mod testing;
+mod management;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -34,6 +35,7 @@ where
         .add_service(testing::make_server())
         .add_service(storage::make_server(Arc::clone(&server)))
         .add_service(flight::make_server(server))
+        .add_service(management::make_server())
         .serve_with_incoming(stream)
         .await
         .context(ServerError {})

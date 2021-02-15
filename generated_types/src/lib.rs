@@ -26,6 +26,14 @@ mod pb {
                 }
             }
         }
+
+        pub mod iox {
+            pub mod management {
+                pub mod v1 {
+                    include!(concat!(env!("OUT_DIR"), "/influxdata.iox.management.v1.rs"));
+                }
+            }
+        }
     }
 
     pub mod com {
@@ -55,3 +63,4 @@ pub use pb::influxdata::platform::storage::*;
 pub use pb::wal::*;
 
 pub use google_types as google;
+pub use pb::influxdata;
