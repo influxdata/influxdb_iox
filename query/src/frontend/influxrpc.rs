@@ -18,7 +18,7 @@ use tracing::debug;
 use crate::{
     exec::{make_schema_pivot, stringset::StringSet},
     plan::stringset::{Error as StringSetError, StringSetPlan, StringSetPlanBuilder},
-    predicate::Predicate,
+    predicate::{Predicate, PredicateBuilder},
     provider::ProviderBuilder,
     util::schema_has_all_expr_columns,
     Database, PartitionChunk,
@@ -208,8 +208,13 @@ impl InfluxRPCPlanner {
                 None => {
                     // couldn't find table names with predicate, get all chunk tables,
                     // fall back to filtering ourself
+                    let table_name_predicate = if let Some(table_names) = &predicate.table_names {
+                        PredicateBuilder::new().tables(table_names).build()
+                    } else {
+                        Predicate::default()
+                    };
                     chunk
-                        .table_names(&Predicate::default(), &no_tables)
+                        .table_names(&table_name_predicate, &no_tables)
                         .await
                         .map_err(|e| Box::new(e) as _)
                         .context(InternalTableNamePlanForDefault)?
@@ -217,13 +222,6 @@ impl InfluxRPCPlanner {
                         .context(InternalTableNameCannotGetPlanForDefault)?
                 }
             };
-
-            // filter out any table names that we can rule out
-            // directly via the predicate (which may have been included
-            // if we couldn't answer table_names from only metadata)
-            let table_names = table_names
-                .into_iter()
-                .filter(|table_name| predicate.should_include_table(table_name));
 
             for table_name in table_names {
                 debug!(

@@ -553,7 +553,13 @@ impl PartitionChunk for TestChunk {
             .expect("mutex poisoned")
             .replace(predicate.clone());
 
-        let names = self.table_schemas.keys().cloned().collect();
+        // do basic filtering based on table name predicate.
+        let names = self
+            .table_schemas
+            .keys()
+            .filter(|table_name| predicate.should_include_table(&table_name))
+            .cloned()
+            .collect();
 
         Ok(Some(names))
     }

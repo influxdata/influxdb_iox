@@ -123,6 +123,10 @@ impl From<Predicate> for PredicateBuilder {
 }
 
 impl PredicateBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Sets the timestamp range
     pub fn timestamp_range(mut self, start: i64, end: i64) -> Self {
         // Without more thought, redefining the timestamp range would
@@ -167,8 +171,13 @@ impl PredicateBuilder {
         self.tables(vec![table.into()])
     }
 
-    /// Sets table name restrictions
-    pub fn tables(mut self, tables: Vec<String>) -> Self {
+    /// Sets table name restrictions from something that can iterate
+    /// over items that can be converted into `Strings`
+    pub fn tables<I, S>(mut self, tables: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
         // We need to distinguish predicates like `table_name In
         // (foo, bar)` and `table_name = foo and table_name = bar` in order to handle
         // this
@@ -177,7 +186,8 @@ impl PredicateBuilder {
             "Multiple table predicate specification not yet supported"
         );
 
-        let table_names = tables.into_iter().collect::<BTreeSet<_>>();
+        let table_names: BTreeSet<String> = tables.into_iter().map(|s| s.into()).collect();
+
         self.inner.table_names = Some(table_names);
         self
     }
