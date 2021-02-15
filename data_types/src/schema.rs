@@ -297,7 +297,7 @@ impl Schema {
     }
 
     /// Returns an iterator of (Option<InfluxColumnType>, &Field) for
-    /// all the columns of this schema,
+    /// all the columns of this schema, in order
     pub fn iter(&self) -> SchemaIter<'_> {
         SchemaIter {
             schema: self,
