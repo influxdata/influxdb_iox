@@ -138,13 +138,6 @@ pub trait PartitionChunk: Debug + Send + Sync {
     /// table that have at least one row that matches `predicate`, if
     /// the predicate can be evaluated entirely on the metadata of
     /// this Chunk.
-    ///
-    /// Returns None if a general plan must be executed instead.
-    ///
-    /// Note that the column names produced may be duplicated (e.g. if
-    /// the same table exists in multiple distinct chunks) and it is
-    /// the responsibility of the caller to deduplicate them if
-    /// desired.
     async fn column_names(
         &self,
         table_name: &str,
