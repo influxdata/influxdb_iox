@@ -214,7 +214,7 @@ impl InfluxRPCPlanner {
                         .map_err(|e| Box::new(e) as _)
                         .context(InternalTableNamePlanForDefault)?
                         // unwrap the Option
-                        .context(InternalTableNameCanNotGetPlanForDefault)?
+                        .context(InternalTableNameCannotGetPlanForDefault)?
                 }
             };
 
