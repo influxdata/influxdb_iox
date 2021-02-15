@@ -314,12 +314,12 @@ impl Chunk {
             .collect()
     }
 
-    /// If the column names that matches the predicate can be found
-    /// from the predicate entirely using metadata, returns those
+    /// If the column names that match the predicate can be found
+    /// from the predicate entirely using metadata, return those
     /// strings.
     ///
-    /// If the predicate can not be evaluated entirely with
-    /// metadata, returns Ok(None)
+    /// If the predicate cannot be evaluated entirely with
+    /// metadata, return `Ok(None)`.
     pub fn column_names(
         &self,
         table_name: &str,

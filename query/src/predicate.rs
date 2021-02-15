@@ -103,7 +103,7 @@ impl Predicate {
 
     /// Creates a DataFusion predicate for appliying a timestamp range:
     ///
-    /// range.start <= time and time < range.end`
+    /// `range.start <= time and time < range.end`
     fn make_timestamp_predicate_expr(&self) -> Option<Expr> {
         self.range
             .map(|range| make_range_expr(range.start, range.end))

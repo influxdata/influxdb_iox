@@ -50,7 +50,7 @@ pub enum Error {
     },
 
     #[snafu(display("gRPC planner could not get table_names with default predicate, which should always return values"))]
-    InternalTableNameCanNotGetPlanForDefault {},
+    InternalTableNameCannotGetPlanForDefault {},
 
     #[snafu(display("Unsupported predicate in gRPC table_names: {:?}", predicate))]
     UnsupportedPredicateForTableNames { predicate: Predicate },
@@ -162,9 +162,9 @@ impl InfluxRPCPlanner {
         Ok(plan)
     }
 
-    /// Returns a set of plans that produces the names of "tag" columns (as
-    /// defined in the InfluxDB Data model)) names in this database,
-    /// and have more than zero rows which pass the conditions
+    /// Returns a set of plans that produces the names of "tag" column (as
+    /// defined in the InfluxDB Data model) names in this database
+    /// that have more than zero rows which pass the conditions
     /// specified by `predicate`.
     pub async fn tag_column_names<D>(
         &self,
@@ -457,14 +457,14 @@ impl InfluxRPCPlanner {
     }
 }
 
-/// returns Ok if we support this predicate, Err otherwise.
+/// Returns `Ok` if we support this predicate, `Err` otherwise.
 ///
 /// Right now, the gRPC planner assumes that if all columns in an
 /// expression are not present, the expression can't evaluate to true
-/// (aka have rows match)
+/// (aka have rows match).
 ///
 /// This is not true for certain expressions (e.g. IS NULL for
-///  example), so so error here if we see one of those);
+///  example), so error here if we see one of those).
 
 fn check_predicate_support(expr: &Expr) -> Result<()> {
     let visitor = SupportVisitor {};

@@ -253,7 +253,7 @@ impl DBSetup for TwoMeasurementsManyNulls {
             .await
             .unwrap();
         let scenario3 = DBScenario {
-            scenario_name: "One data chunkin read buffer, one chunk of mutable buffer".into(),
+            scenario_name: "One data chunk in read buffer, one chunk of mutable buffer".into(),
             db,
         };
 
