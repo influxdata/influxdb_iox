@@ -377,9 +377,11 @@ impl InfluxRPCPlanner {
     ///
     /// The created plan looks like:
     ///
+    /// ```text
     ///  Extension(PivotSchema)
     ///    Filter(predicate)
     ///      TableScan (of chunks)
+    /// ```
     async fn tag_column_names_plan<C>(
         &self,
         table_name: &str,
@@ -437,9 +439,11 @@ impl InfluxRPCPlanner {
     ///
     /// The created plan looks like:
     ///
-    ///    Projection (select the field columns needed)
-    ///        Filter(predicate) [optional]
-    ///          InMemoryScan
+    /// ```text
+    ///  Projection (select the field columns needed)
+    ///      Filter(predicate) [optional]
+    ///        InMemoryScan
+    /// ```
     async fn field_columns_plan<C>(
         &self,
         table_name: &str,
@@ -486,8 +490,10 @@ impl InfluxRPCPlanner {
     ///
     /// The created plan looks like:
     ///
-    ///        Filter(predicate) [optional]
-    ///          InMemoryScan
+    /// ```text
+    ///   Filter(predicate) [optional]
+    ///     InMemoryScan
+    /// ```
     async fn scan_and_filter<C>(
         &self,
         table_name: &str,
