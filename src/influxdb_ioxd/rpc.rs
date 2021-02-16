@@ -6,7 +6,6 @@ use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 
 use data_types::error::ErrorLogger;
-use query::DatabaseStore;
 use server::{ConnectionManager, Server};
 
 mod flight;
@@ -20,11 +19,6 @@ pub enum Error {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-
-#[derive(Debug)]
-pub(crate) struct DatabaseStoreService<T: DatabaseStore> {
-    pub db_store: Arc<T>,
-}
 
 /// Instantiate a server listening on the specified address
 /// implementing the IOx, Storage, and Flight gRPC interfaces, the

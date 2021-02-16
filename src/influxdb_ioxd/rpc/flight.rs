@@ -10,15 +10,13 @@ use arrow_deps::{
     arrow,
     arrow_flight::{
         self,
-        flight_service_server::{FlightService, FlightServiceServer},
+        flight_service_server::{FlightService as Flight, FlightServiceServer as FlightServer},
         Action, ActionType, Criteria, Empty, FlightData, FlightDescriptor, FlightInfo,
         HandshakeRequest, HandshakeResponse, PutResult, SchemaResult, Ticket,
     },
     datafusion::physical_plan::collect,
 };
 use query::{frontend::sql::SQLQueryPlanner, DatabaseStore};
-
-use super::DatabaseStoreService;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -87,14 +85,20 @@ struct ReadInfo {
     sql_query: String,
 }
 
+/// Concrete implementation of the gRPC Arrow Flight Service API
+#[derive(Debug)]
+struct FlightService<T: DatabaseStore> {
+    pub db_store: Arc<T>,
+}
+
 pub fn make_server<T: DatabaseStore + 'static>(
     db_store: Arc<T>,
-) -> FlightServiceServer<impl FlightService> {
-    FlightServiceServer::new(DatabaseStoreService { db_store })
+) -> FlightServer<impl Flight> {
+    FlightServer::new(FlightService { db_store })
 }
 
 #[tonic::async_trait]
-impl<T> FlightService for DatabaseStoreService<T>
+impl<T> Flight for FlightService<T>
 where
     T: DatabaseStore + 'static,
 {

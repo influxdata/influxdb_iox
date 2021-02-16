@@ -3,13 +3,13 @@
 //! `query::DatabaseStore`
 
 use super::{
-    super::DatabaseStoreService,
     data::{
         fieldlist_to_measurement_fields_response, series_set_item_to_read_response,
         tag_keys_to_byte_vecs,
     },
     expr::{self, AddRPCNode, Loggable, SpecialTagKeys},
     input::GrpcInputs,
+    StorageService
 };
 use data_types::{error::ErrorLogger, names::org_and_bucket_to_database, DatabaseName};
 use generated_types::{
@@ -205,7 +205,7 @@ impl Error {
 
 /// Implementes the protobuf defined Storage service for a DatabaseStore
 #[tonic::async_trait]
-impl<T> Storage for DatabaseStoreService<T>
+impl<T> Storage for StorageService<T>
 where
     T: DatabaseStore + 'static,
 {

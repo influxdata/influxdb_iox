@@ -14,11 +14,16 @@ pub mod id;
 pub mod input;
 pub mod service;
 
-use super::DatabaseStoreService;
 use generated_types::storage_server::{Storage, StorageServer};
 use query::DatabaseStore;
 use std::sync::Arc;
 
+/// Concrete implementation of the gRPC InfluxDB Storage Service API
+#[derive(Debug)]
+struct StorageService<T: DatabaseStore> {
+    pub db_store: Arc<T>,
+}
+
 pub fn make_server<T: DatabaseStore + 'static>(db_store: Arc<T>) -> StorageServer<impl Storage> {
-    StorageServer::new(DatabaseStoreService { db_store })
+    StorageServer::new(StorageService { db_store })
 }
