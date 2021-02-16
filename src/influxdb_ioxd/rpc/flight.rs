@@ -91,9 +91,7 @@ struct FlightService<T: DatabaseStore> {
     pub db_store: Arc<T>,
 }
 
-pub fn make_server<T: DatabaseStore + 'static>(
-    db_store: Arc<T>,
-) -> FlightServer<impl Flight> {
+pub fn make_server<T: DatabaseStore + 'static>(db_store: Arc<T>) -> FlightServer<impl Flight> {
     FlightServer::new(FlightService { db_store })
 }
 

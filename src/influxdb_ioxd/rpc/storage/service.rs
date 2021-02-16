@@ -9,7 +9,7 @@ use super::{
     },
     expr::{self, AddRPCNode, Loggable, SpecialTagKeys},
     input::GrpcInputs,
-    StorageService
+    StorageService,
 };
 use data_types::{error::ErrorLogger, names::org_and_bucket_to_database, DatabaseName};
 use generated_types::{
