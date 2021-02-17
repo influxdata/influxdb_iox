@@ -119,18 +119,20 @@ message QueryConfig {
 
 message WalBufferConfig {
   enum Rollover {
+    ROLLOVER_UNKNOWN = 0;
+
     // Drop the old segment even though it hasn't been persisted. This part of
     // the WAl will be lost on this server.
-    DropOldSegment = 0;
+    ROLLOVER_DROP_OLD_SEGMENT = 1;
 
     // Drop the incoming write and fail silently. This favors making sure that
     // older WAL data will be backed up.
-    DropIncoming = 1;
+    ROLLOVER_DROP_INCOMING = 2;
 
     // Reject the incoming write and return an error. The client may retry the
     // request, which will succeed once the oldest segment has been
     // persisted to object storage.
-    ReturnError = 2;
+    ROLLOVER_RETURN_ERROR = 3;
   }
 
   // The size the WAL buffer should be limited to. Once the buffer gets to

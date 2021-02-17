@@ -1,8 +1,16 @@
-use influxdb_line_protocol::ParsedLine;
-
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
+
+use generated_types::{
+    google::{FieldViolation, FieldViolationExt},
+    influxdata::iox::management::v1 as pb,
+};
+use influxdb_line_protocol::ParsedLine;
+
+use crate::protobuf::{FromField, FromFieldOpt, FromFieldString, FromFieldVec};
+use crate::DatabaseName;
+use std::convert::{TryFrom, TryInto};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -22,7 +30,7 @@ pub struct DatabaseRules {
     /// The unencoded name of the database. This gets put in by the create
     /// database call, so an empty default is fine.
     #[serde(default)]
-    pub name: String,
+    pub name: String, // TODO: Use DatabaseName here
     /// Template that generates a partition key for each row inserted into the
     /// db
     #[serde(default)]
@@ -122,6 +130,46 @@ impl DatabaseRules {
     }
 }
 
+impl TryFrom<pb::DatabaseRules> for DatabaseRules {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::DatabaseRules) -> Result<Self, FieldViolation> {
+        DatabaseName::new(&proto.name).field("name")?;
+
+        let subscriptions = proto
+            .subscription_config
+            .map(|s| {
+                s.subscriptions
+                    .vec_field("subscriptionConfig.subscriptions")
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        let wal_buffer_config = proto.wal_buffer_config.optional("walBufferConfig")?;
+
+        let mutable_buffer_config = proto
+            .mutable_buffer_config
+            .optional("mutableBufferConfig")?;
+
+        let partition_template = proto.partition_template.optional("partitionTemplate")?.unwrap_or_default();
+
+        Ok(DatabaseRules {
+            name: proto.name,
+            partition_template,
+            replication: vec![],
+            replication_count: 0,
+            replication_queue_max_size: 0,
+            subscriptions,
+            query_local: false,
+            primary_query_group: None,
+            secondary_query_groups: vec![],
+            read_only_partitions: vec![],
+            wal_buffer_config,
+            mutable_buffer_config,
+        })
+    }
+}
+
 /// MutableBufferConfig defines the configuration for the in-memory database
 /// that is hot for writes as they arrive. Operators can define rules for
 /// evicting data once the mutable buffer passes a set memory threshold.
@@ -175,6 +223,30 @@ impl Default for MutableBufferConfig {
     }
 }
 
+impl TryFrom<pb::MutableBufferConfig> for MutableBufferConfig {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::MutableBufferConfig) -> Result<Self, FieldViolation> {
+        let partition_drop_order = proto
+            .partition_drop_order
+            .optional("partitionDropOrder")?
+            .unwrap_or_default();
+
+        let buffer_size = if proto.buffer_size == 0 {
+            DEFAULT_MUTABLE_BUFFER_SIZE
+        } else {
+            proto.buffer_size
+        };
+
+        Ok(MutableBufferConfig {
+            buffer_size,
+            reject_if_not_persisted: proto.reject_if_not_persisted,
+            partition_drop_order,
+            persist_after_cold_seconds: None,
+        })
+    }
+}
+
 /// This struct specifies the rules for the order to sort partitions
 /// from the mutable buffer. This is used to determine which order to drop them
 /// in. The last partition in the list will be dropped, until enough space has
@@ -189,13 +261,26 @@ impl Default for MutableBufferConfig {
 ///     sort: PartitionSort::CreatedAtTime,
 /// };
 /// ```
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct PartitionSortRules {
     /// Sort partitions by this order. Last will be dropped.
     pub order: Order,
     /// Sort by either a column value, or when the partition was opened, or when
     /// it last received a write.
     pub sort: PartitionSort,
+}
+
+impl TryFrom<pb::mutable_buffer_config::PartitionDropOrder> for PartitionSortRules {
+    type Error = FieldViolation;
+
+    fn try_from(
+        proto: pb::mutable_buffer_config::PartitionDropOrder,
+    ) -> Result<Self, FieldViolation> {
+        Ok(PartitionSortRules {
+            order: proto.order().scope("order")?,
+            sort: proto.sort.optional("sort")?.unwrap_or_default(),
+        })
+    }
 }
 
 /// What to sort the partition by.
@@ -220,11 +305,55 @@ pub enum PartitionSort {
     Column(String, ColumnType, ColumnValue),
 }
 
+impl Default for PartitionSort {
+    fn default() -> Self {
+        PartitionSort::LastWriteTime
+    }
+}
+
+impl TryFrom<pb::mutable_buffer_config::partition_drop_order::Sort> for PartitionSort {
+    type Error = FieldViolation;
+
+    fn try_from(
+        proto: pb::mutable_buffer_config::partition_drop_order::Sort,
+    ) -> Result<Self, FieldViolation> {
+        use pb::mutable_buffer_config::partition_drop_order::Sort;
+
+        Ok(match proto {
+            Sort::LastWriteTime(_) => PartitionSort::LastWriteTime,
+            Sort::CreatedAtTime(_) => PartitionSort::CreatedAtTime,
+            Sort::Column(column_sort) => {
+                let column_type = column_sort.column_type().scope("columnType")?;
+                let column_value = column_sort.column_value().scope("columnValue")?;
+                PartitionSort::Column(column_sort.column_name, column_type, column_value)
+            }
+        })
+    }
+}
+
 /// The sort order.
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub enum Order {
     Asc,
     Desc,
+}
+
+impl Default for Order {
+    fn default() -> Self {
+        Order::Asc
+    }
+}
+
+impl TryFrom<pb::Order> for Order {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::Order) -> Result<Self, FieldViolation> {
+        Ok(match proto {
+            pb::Order::Unknown => Order::default(),
+            pb::Order::Asc => Order::Asc,
+            pb::Order::Desc => Order::Desc,
+        })
+    }
 }
 
 /// Use columns of this type.
@@ -237,11 +366,40 @@ pub enum ColumnType {
     Bool,
 }
 
+impl TryFrom<pb::ColumnType> for ColumnType {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::ColumnType) -> Result<Self, FieldViolation> {
+        Ok(match proto {
+            pb::ColumnType::Unknown => return Err(FieldViolation::required("")),
+            pb::ColumnType::I64 => ColumnType::I64,
+            pb::ColumnType::U64 => ColumnType::U64,
+            pb::ColumnType::F64 => ColumnType::F64,
+            pb::ColumnType::String => ColumnType::String,
+            pb::ColumnType::Bool => ColumnType::Bool,
+        })
+    }
+}
+
 /// Use either the min or max summary statistic.
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub enum ColumnValue {
     Min,
     Max,
+}
+
+impl TryFrom<pb::Aggregate> for ColumnValue {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::Aggregate) -> Result<Self, FieldViolation> {
+        use pb::Aggregate;
+
+        Ok(match proto {
+            Aggregate::Unknown => return Err(FieldViolation::required("")),
+            Aggregate::Min => ColumnValue::Min,
+            Aggregate::Max => ColumnValue::Max,
+        })
+    }
 }
 
 /// WalBufferConfig defines the configuration for buffering data from the WAL in
@@ -279,6 +437,27 @@ pub struct WalBufferConfig {
     pub close_segment_after: Option<std::time::Duration>,
 }
 
+impl TryFrom<pb::WalBufferConfig> for WalBufferConfig {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::WalBufferConfig) -> Result<Self, FieldViolation> {
+        let buffer_rollover = proto.buffer_rollover().scope("bufferRollover")?;
+        let close_segment_after = proto
+            .close_segment_after
+            .map(TryInto::try_into)
+            .transpose()
+            .field("closeSegmentAfter")?;
+
+        Ok(WalBufferConfig {
+            buffer_size: proto.buffer_size,
+            segment_size: proto.segment_size,
+            buffer_rollover,
+            store_segments: proto.persist_segments,
+            close_segment_after,
+        })
+    }
+}
+
 /// WalBufferRollover defines the behavior of what should happen if a write
 /// comes in that would cause the buffer to exceed its max size AND the oldest
 /// segment can't be dropped because it has not yet been persisted.
@@ -294,6 +473,20 @@ pub enum WalBufferRollover {
     /// request, which will succeed once the oldest segment has been
     /// persisted to object storage.
     ReturnError,
+}
+
+impl TryFrom<pb::wal_buffer_config::Rollover> for WalBufferRollover {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::wal_buffer_config::Rollover) -> Result<Self, FieldViolation> {
+        use pb::wal_buffer_config::Rollover;
+        Ok(match proto {
+            Rollover::Unknown => return Err(FieldViolation::required("")),
+            Rollover::DropOldSegment => WalBufferRollover::DropOldSegment,
+            Rollover::DropIncoming => WalBufferRollover::DropIncoming,
+            Rollover::ReturnError => WalBufferRollover::ReturnError,
+        })
+    }
 }
 
 /// `PartitionTemplate` is used to compute the partition key of each row that
@@ -338,6 +531,15 @@ impl PartitionTemplate {
     }
 }
 
+impl TryFrom<pb::PartitionTemplate> for PartitionTemplate {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::PartitionTemplate) -> Result<Self, FieldViolation> {
+        let parts = proto.parts.vec_field("parts")?;
+        Ok(PartitionTemplate { parts })
+    }
+}
+
 /// `TemplatePart` specifies what part of a row should be used to compute this
 /// part of a partition key.
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
@@ -365,6 +567,36 @@ pub struct StrftimeColumn {
     format: String,
 }
 
+impl TryFrom<pb::partition_template::part::Part> for TemplatePart {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::partition_template::part::Part) -> Result<Self, FieldViolation> {
+        use pb::partition_template::part::{ColumnFormat, Part};
+
+        Ok(match proto {
+            Part::Table(_) => TemplatePart::Table,
+            Part::Column(column) => TemplatePart::Column(column),
+            Part::Regex(ColumnFormat { column, format }) => {
+                TemplatePart::RegexCapture(RegexCapture {
+                    column,
+                    regex: format,
+                })
+            }
+            Part::StrfTime(ColumnFormat { column, format }) => {
+                TemplatePart::StrftimeColumn(StrftimeColumn { column, format })
+            }
+        })
+    }
+}
+
+impl TryFrom<pb::partition_template::Part> for TemplatePart {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::partition_template::Part) -> Result<Self, FieldViolation> {
+        proto.part.required("part")
+    }
+}
+
 /// `PartitionId` is the object storage identifier for a specific partition. It
 /// should be a path that can be used against an object store to locate all the
 /// files and subdirectories for a partition. It takes the form of `/<writer
@@ -388,14 +620,43 @@ pub struct Subscription {
     pub matcher: Matcher,
 }
 
+impl TryFrom<pb::subscription_config::Subscription> for Subscription {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::subscription_config::Subscription) -> Result<Self, FieldViolation> {
+        Ok(Subscription {
+            name: proto.name.required("name")?,
+            host_group_id: proto.host_group_id.required("host_group_id")?,
+            matcher: proto.matcher.optional("matcher")?.unwrap_or_default(),
+        })
+    }
+}
+
 /// `Matcher` specifies the rule against the table name and/or a predicate
 /// against the row to determine if it matches the write rule.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Matcher {
     pub tables: MatchTables,
     // TODO: make this work with query::Predicate
     #[serde(skip_serializing_if = "Option::is_none")]
     pub predicate: Option<String>,
+}
+
+impl TryFrom<pb::Matcher> for Matcher {
+    type Error = FieldViolation;
+
+    fn try_from(proto: pb::Matcher) -> Result<Self, FieldViolation> {
+        let tables = match proto.table_matcher {
+            Some(pb::matcher::TableMatcher::Table(table)) => MatchTables::Table(table),
+            Some(pb::matcher::TableMatcher::Regex(regex)) => MatchTables::Regex(regex),
+            None => MatchTables::All,
+        };
+
+        Ok(Matcher {
+            tables,
+            predicate: Some(proto.predicate),
+        })
+    }
 }
 
 /// `MatchTables` looks at the table name of a row to determine if it should
@@ -407,6 +668,12 @@ pub enum MatchTables {
     All,
     Table(String),
     Regex(String),
+}
+
+impl Default for MatchTables {
+    fn default() -> Self {
+        MatchTables::All
+    }
 }
 
 pub type HostGroupId = String;
