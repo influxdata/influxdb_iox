@@ -50,9 +50,9 @@ where
         &self,
         _: Request<Empty>,
     ) -> Result<Response<GetWriterIdResponse>, Status> {
-        match self.server.require_id() {
-            Ok(id) => Ok(Response::new(GetWriterIdResponse { id })),
-            Err(e) => Err(default_error_handler(e)),
+        match self.server.require_id().ok() {
+            Some(id) => Ok(Response::new(GetWriterIdResponse { id })),
+            None => Err(NotFound::default())?,
         }
     }
 

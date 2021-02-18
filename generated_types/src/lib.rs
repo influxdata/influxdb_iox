@@ -52,15 +52,12 @@ mod pb {
             }
         }
     }
-
-    pub mod wal {
-        include!(concat!(env!("OUT_DIR"), "/wal_generated.rs"));
-    }
 }
+
+include!(concat!(env!("OUT_DIR"), "/wal_generated.rs"));
 
 pub use pb::com::github::influxdata::idpe::storage::read::*;
 pub use pb::influxdata::platform::storage::*;
-pub use pb::wal::*;
 
 pub use google_types as google;
 pub use pb::influxdata;

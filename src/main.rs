@@ -7,27 +7,29 @@
     clippy::clone_on_ref_ptr
 )]
 
-use clap::{crate_authors, crate_version, value_t, App, Arg, ArgMatches, SubCommand};
+use std::error::Error;
+
+use clap::{App, Arg, ArgMatches, crate_authors, crate_version, SubCommand, value_t};
 use dotenv::dotenv;
-use ingest::parquet::writer::CompressionLevel;
 use structopt::StructOpt;
 use tokio::runtime::Runtime;
 use tracing::{debug, error, info, warn};
 
+use commands::{config::Config, logging::LoggingLevel};
+use generated_types::influxdata::iox::management::v1::DatabaseRules;
+use influxdb_iox_client::ClientBuilder;
+use ingest::parquet::writer::CompressionLevel;
+
 mod commands {
     pub mod config;
     pub mod convert;
-    pub mod database;
     pub mod file_meta;
     mod input;
     pub mod logging;
-    pub mod operator;
     pub mod stats;
 }
 
 pub mod influxdb_ioxd;
-
-use commands::{config::Config, logging::LoggingLevel};
 
 enum ReturnCode {
     ConversionFailed = 1,
@@ -250,93 +252,33 @@ async fn dispatch_args(matches: ArgMatches<'_>) {
                 }
             }
         }
-        ("operator", Some(sub_matches)) => match sub_matches.subcommand() {
-            ("ping", Some(sub_matches)) => {
-                let url = sub_matches.value_of("address").unwrap();
-                let res = commands::operator::ping(url.to_string()).await;
 
-                match res {
-                    Ok(()) => println!("Ok"),
+        //TODO: Better CLI output system than Vec<String>
+        //TODO: Better error handling
+
+        ("database", Some(matches)) => {
+            if let (subcommand, Some(matches)) = matches.subcommand() {
+                match handle_database_command(subcommand, matches).await {
+                    Ok(data) => println!("{}", data.join(", ")),
                     Err(e) => {
-                        eprintln!("Failed to ping server: {}", e);
+                        eprintln!("Error: {}", e);
                         std::process::exit(1)
                     }
                 }
             }
-            ("set-writer", Some(sub_matches)) => {
-                let writer_id = sub_matches.value_of("ID").unwrap();
-                let url = sub_matches.value_of("address").unwrap();
-                let res = commands::operator::set_writer_id(url.to_string(), writer_id).await;
-
-                match res {
-                    Ok(()) => debug!("Set writer ID successfully"),
+        }
+        ("operator", Some(matches)) => {
+            if let (subcommand, Some(matches)) = matches.subcommand() {
+                match handle_operator_command(subcommand, matches).await {
+                    Ok(data) => println!("{}", data.join(", ")),
                     Err(e) => {
-                        eprintln!("Failed to set writer ID: {}", e);
+                        eprintln!("Error: {}", e);
                         std::process::exit(1)
                     }
                 }
             }
-            ("get-writer", Some(sub_matches)) => {
-                let url = sub_matches.value_of("address").unwrap();
-                let res = commands::operator::get_writer_id(url.to_string()).await;
+        }
 
-                match res {
-                    Ok(id) => {
-                        println!("Writer ID: {}", id);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to set writer ID: {}", e);
-                        std::process::exit(1)
-                    }
-                }
-            }
-            (_, _) => unreachable!(),
-        },
-        ("database", Some(sub_matches)) => match sub_matches.subcommand() {
-            ("create", Some(sub_matches)) => {
-                let database_name = sub_matches.value_of("NAME").unwrap();
-                let url = sub_matches.value_of("address").unwrap();
-                let res =
-                    commands::database::create_database(url.to_string(), database_name.to_string())
-                        .await;
-
-                match res {
-                    Ok(()) => debug!("Database created successfully"),
-                    Err(e) => {
-                        eprintln!("Database creation failed: {}", e);
-                        std::process::exit(1)
-                    }
-                }
-            }
-            ("show", Some(sub_matches)) => {
-                let database_name = sub_matches.value_of("NAME").unwrap();
-                let url = sub_matches.value_of("address").unwrap();
-                let res =
-                    commands::database::get_database(url.to_string(), database_name.to_string())
-                        .await;
-
-                match res {
-                    Ok(database) => println!("Database: {:?}", database),
-                    Err(e) => {
-                        eprintln!("Listing databases failed: {}", e);
-                        std::process::exit(1)
-                    }
-                }
-            }
-            ("list", Some(sub_matches)) => {
-                let url = sub_matches.value_of("address").unwrap();
-                let res = commands::database::list_databases(url.to_string()).await;
-
-                match res {
-                    Ok(databases) => println!("Databases: {}", databases.join(", ")),
-                    Err(e) => {
-                        eprintln!("Listing databases failed: {}", e);
-                        std::process::exit(1)
-                    }
-                }
-            }
-            (_, _) => unreachable!(),
-        },
         // Handle the case where the user explicitly specified the server command
         ("server", Some(sub_matches)) => {
             // Note don't set up basic logging here, different logging rules apply in server
@@ -359,6 +301,63 @@ async fn dispatch_args(matches: ArgMatches<'_>) {
                 std::process::exit(ReturnCode::ServerExitedAbnormally as _);
             }
         }
+    }
+}
+
+async fn handle_operator_command(
+    subcommand: &str,
+    matches: &ArgMatches<'_>,
+) -> Result<Vec<String>, Box<dyn Error>> {
+    let url = matches.value_of("address").unwrap();
+    let mut client = ClientBuilder::default().build(url).await?;
+
+    match subcommand {
+        "ping" => {
+            client.ping().await?;
+
+            Ok(vec!["Ok".to_string()])
+        }
+        "set-writer" => {
+            let writer_id = matches.value_of("ID").unwrap().parse()?;
+            client.update_writer_id(writer_id).await?;
+
+            Ok(vec!["Ok".to_string()])
+        }
+        "get-writer" => {
+            let id = client.get_writer_id().await?;
+
+            Ok(vec![format!("Writer ID: {}", id)])
+        }
+        _ => unreachable!(),
+    }
+}
+
+async fn handle_database_command(
+    subcommand: &str,
+    matches: &ArgMatches<'_>,
+) -> Result<Vec<String>, Box<dyn Error>> {
+    let url = matches.value_of("address").unwrap();
+    let mut client = ClientBuilder::default().build(url).await?;
+
+    match subcommand {
+        "create" => {
+            let database_name = matches.value_of("NAME").unwrap();
+            client.create_database(DatabaseRules{
+                name: database_name.to_string(),
+                ..Default::default()
+            }).await?;
+
+            Ok(vec!["Ok".to_string()])
+        }
+        "show" => {
+            let database_name = matches.value_of("NAME").unwrap();
+            let rules = client.get_database(database_name).await?;
+
+            // TODO: Do something better than this
+            Ok(vec![format!("{:?}", rules)])
+        }
+        "list" => Ok(client.list_databases().await?),
+        _ => unreachable!(),
     }
 }
 

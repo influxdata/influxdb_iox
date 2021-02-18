@@ -58,14 +58,14 @@ fn encode_status(code: tonic::Code, message: String, details: Option<Any>) -> to
     if let Some(details) = details {
         let mut buffer = BytesMut::new();
         let status = pb::google::rpc::Status {
-            code: tonic::Code::InvalidArgument as i32,
+            code: code as i32,
             message: message.clone(),
             details: vec![details],
         };
 
         if status.encode(&mut buffer).is_ok() {
             return tonic::Status::with_details(
-                tonic::Code::InvalidArgument,
+                code,
                 message,
                 buffer.freeze(),
             );
@@ -208,7 +208,7 @@ impl From<NotFound> for tonic::Status {
             not_found.resource_type, not_found.resource_name
         );
         encode_status(
-            tonic::Code::AlreadyExists,
+            tonic::Code::NotFound,
             message,
             encode_resource_info(
                 not_found.resource_type,

@@ -1,11 +1,11 @@
 use std::time::Duration;
 
-use reqwest::Url;
-
 use crate::Client;
 
 #[cfg(feature = "flight")]
 use crate::FlightClient;
+use generated_types::influxdata::iox::management::v1::management_client::ManagementClient;
+use tonic::transport::Endpoint;
 
 /// The default User-Agent header sent by the HTTP client.
 pub const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
@@ -20,7 +20,7 @@ pub const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PK
 /// let c = ClientBuilder::default()
 ///     .timeout(Duration::from_secs(42))
 ///     .user_agent("my_awesome_client")
-///     .build("http://127.0.0.1:8080/");
+///     .build("http://127.0.0.1:8082/");
 /// ```
 #[derive(Debug)]
 pub struct ClientBuilder {
@@ -41,35 +41,27 @@ impl std::default::Default for ClientBuilder {
 
 impl ClientBuilder {
     /// Construct the [`Client`] instance using the specified base URL.
-    pub fn build<T>(self, base_url: T) -> Result<Client, Box<dyn std::error::Error>>
+    pub async fn build<T>(self, dst: T) -> Result<Client, Box<dyn std::error::Error>>
     where
-        T: AsRef<str>,
+        T: Into<String>,
     {
-        let http = reqwest::ClientBuilder::new()
-            .user_agent(self.user_agent)
-            .gzip(true)
-            .referer(false)
-            .connect_timeout(self.connect_timeout)
-            .timeout(self.timeout)
-            .build()
-            .map_err(Box::new)?;
+        let endpoint = Endpoint::from_shared(dst.into())?
+            .user_agent(self.user_agent)?
+            .timeout(self.timeout);
 
-        // Construct a base URL.
-        //
-        // This MUST end in a trailing slash, otherwise the last portion of the
-        // path is interpreted as being a filename and removed when joining
-        // paths to it. This assumes the user is specifying a URL to the
-        // endpoint, and not a file path and as a result provides the same
-        // behaviour to the user with and without the slash (avoiding some
-        // confusion!)
-        let base: Url = format!("{}/", base_url.as_ref().trim_end_matches('/')).parse()?;
-        if base.cannot_be_a_base() {
-            // This is the case if the scheme and : delimiter are not followed
-            // by a / slash, as is typically the case of data: and mailto: URLs.
-            return Err(format!("endpoint URL {} is invalid", base).into());
-        }
+        // Manually construct connector to workaround https://github.com/hyperium/tonic/issues/498
+        let mut connector = hyper::client::HttpConnector::new();
+        connector.set_connect_timeout(Some(self.connect_timeout));
 
-        Ok(Client { http, base })
+        // Defaults from from tonic::channel::Endpoint
+        connector.enforce_http(false);
+        connector.set_nodelay(true);
+        connector.set_keepalive(None);
+
+        let channel = endpoint.connect_with_connector(connector).await?;
+
+        let client = ManagementClient::new(channel);
+        Ok(Client { client })
     }
 
     /// Set the `User-Agent` header sent by this client.
@@ -137,25 +129,5 @@ impl FlightClientBuilder {
         T::Error: Into<tonic::codegen::StdError>,
     {
         Ok(FlightClient::connect(flight_url).await.map_err(Box::new)?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_base_url() {
-        let c = ClientBuilder::default()
-            .build("http://127.0.0.1/proxy")
-            .unwrap();
-
-        assert_eq!(c.base.as_str(), "http://127.0.0.1/proxy/");
-
-        let c = ClientBuilder::default()
-            .build("http://127.0.0.1/proxy/")
-            .unwrap();
-
-        assert_eq!(c.base.as_str(), "http://127.0.0.1/proxy/");
     }
 }

@@ -1,13 +1,6 @@
 use std::num::NonZeroU32;
 
-use data_types::database_rules::DatabaseRules;
-use reqwest::{Method, Url};
-
-use crate::errors::{ClientError, CreateDatabaseError, Error, ServerErrorResponse};
-use data_types::{http::ListDatabasesResponse, DatabaseName};
-
-#[cfg(feature = "flight")]
-mod flight;
+use thiserror::Error;
 
 // can't combine these into one statement that uses `{}` because of this bug in
 // the `unreachable_pub` lint: https://github.com/rust-lang/rust/issues/64762
@@ -16,18 +9,49 @@ pub use flight::FlightClient;
 #[cfg(feature = "flight")]
 pub use flight::PerformQuery;
 
-// TODO: move DatabaseRules / WriterId to the API client
+use generated_types::google::protobuf::Empty;
+use generated_types::influxdata::iox::management::v1::*;
+
+#[cfg(feature = "flight")]
+mod flight;
+
+/// Errors returned by the management API
+#[derive(Debug, Error)]
+pub enum Error {
+    /// Writer ID is not set
+    #[error("Writer ID not set")]
+    NoWriterId,
+
+    /// Database already exists
+    #[error("Database not found")]
+    DatabaseNotFound,
+
+    /// Database already exists
+    #[error("Database already exists")]
+    DatabaseAlreadyExists,
+
+    /// Response contained no payload
+    #[error("Server returned an empty response")]
+    EmptyResponse,
+
+    /// Server returned an invalid argument error
+    #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
+    InvalidArgument(tonic::Status),
+
+    /// Client received an unexpected error from the server
+    #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
+    UnexpectedError(#[from] tonic::Status),
+}
 
 /// An IOx HTTP API client.
 ///
 /// ```no_run
 /// #[tokio::main]
 /// # async fn main() {
-/// use data_types::database_rules::DatabaseRules;
-/// use influxdb_iox_client::ClientBuilder;
+/// use influxdb_iox_client::{ClientBuilder, DatabaseRules};
 ///
 /// let client = ClientBuilder::default()
-///     .build("http://127.0.0.1:8080")
+///     .build("http://127.0.0.1:8082")
 ///     .unwrap();
 ///
 /// // Ping the IOx server
@@ -42,168 +66,77 @@ pub use flight::PerformQuery;
 /// ```
 #[derive(Debug, Clone)]
 pub struct Client {
-    pub(crate) http: reqwest::Client,
-
-    /// The base URL to which request paths are joined.
-    ///
-    /// A base path of:
-    ///
-    /// ```text
-    ///     https://www.influxdata.com/maybe-proxy/
-    /// ```
-    ///
-    /// Joined with a request path of `/a/reg/` would result in:
-    ///
-    /// ```text
-    ///     https://www.influxdata.com/maybe-proxy/a/req/
-    /// ```
-    ///
-    /// Paths joined to this `base` MUST be relative to be appended to the base
-    /// path. Absolute paths joined to `base` are still absolute.
-    pub(crate) base: Url,
-}
-
-impl std::default::Default for Client {
-    fn default() -> Self {
-        crate::ClientBuilder::default()
-            .build("http://127.0.0.1:8080")
-            .expect("default client builder is invalid")
-    }
+    pub(crate) client: management_client::ManagementClient<tonic::transport::Channel>,
 }
 
 impl Client {
     /// Ping the IOx server, checking for a HTTP 200 response.
-    pub async fn ping(&self) -> Result<(), Error> {
-        const PING_PATH: &str = "ping";
-
-        let r = self
-            .http
-            .request(Method::GET, self.url_for(PING_PATH))
-            .send()
-            .await?;
-
-        match r {
-            r if r.status() == 200 => Ok(()),
-            r => Err(ServerErrorResponse::from_response(r).await.into()),
-        }
-    }
-
-    /// Creates a new IOx database.
-    pub async fn create_database(
-        &self,
-        name: impl AsRef<str>,
-        rules: &DatabaseRules,
-    ) -> Result<(), CreateDatabaseError> {
-        let url = self.db_url(name.as_ref())?;
-
-        let r = self
-            .http
-            .request(Method::PUT, url)
-            .json(rules)
-            .send()
-            .await?;
-
-        // Filter out the good states, and convert all others into errors.
-        match r {
-            r if r.status() == 200 => Ok(()),
-            r => Err(ServerErrorResponse::from_response(r).await.into()),
-        }
+    pub async fn ping(&mut self) -> Result<(), Error> {
+        self.client.ping(Empty {}).await?;
+        Ok(())
     }
 
     /// Set the server's writer ID.
-    pub async fn set_writer_id(&self, id: NonZeroU32) -> Result<(), Error> {
-        const SET_WRITER_PATH: &str = "iox/api/v1/id";
-
-        let url = self.url_for(SET_WRITER_PATH);
-
-        // TODO: move this into a shared type
-        #[derive(serde::Serialize)]
-        struct WriterIdBody {
-            id: u32,
-        }
-
-        let r = self
-            .http
-            .request(Method::PUT, url)
-            .json(&WriterIdBody { id: id.get() })
-            .send()
+    pub async fn update_writer_id(&mut self, id: NonZeroU32) -> Result<(), Error> {
+        self.client
+            .update_writer_id(UpdateWriterIdRequest { id: id.into() })
             .await?;
-
-        match r {
-            r if r.status() == 200 => Ok(()),
-            r => Err(ServerErrorResponse::from_response(r).await.into()),
-        }
+        Ok(())
     }
 
     /// Get the server's writer ID.
-    pub async fn get_writer_id(&self) -> Result<u32, Error> {
-        const GET_WRITER_PATH: &str = "iox/api/v1/id";
+    pub async fn get_writer_id(&mut self) -> Result<u32, Error> {
+        let response = self.client.get_writer_id(Empty {}).await
+            .map_err(|status| match status.code() {
+                tonic::Code::NotFound => Error::NoWriterId,
+                _ => Error::UnexpectedError(status)
+            })?;
+        Ok(response.get_ref().id)
+    }
 
-        let url = self.url_for(GET_WRITER_PATH);
+    /// Creates a new IOx database.
+    pub async fn create_database(&mut self, rules: DatabaseRules) -> Result<(), Error> {
+        self.client
+            .create_database(CreateDatabaseRequest { rules: Some(rules) })
+            .await
+            .map_err(|status| match status.code() {
+                tonic::Code::AlreadyExists => Error::DatabaseAlreadyExists,
+                tonic::Code::FailedPrecondition => Error::NoWriterId,
+                tonic::Code::InvalidArgument => Error::InvalidArgument(status),
+                _ => Error::UnexpectedError(status)
+            })?;
 
-        // TODO: move this into a shared type
-        #[derive(serde::Deserialize)]
-        struct WriterIdBody {
-            id: u32,
-        }
-
-        let r = self.http.request(Method::GET, url).send().await?;
-
-        match r {
-            r if r.status() == 200 => Ok(r.json::<WriterIdBody>().await?.id),
-            r => Err(ServerErrorResponse::from_response(r).await.into()),
-        }
+        Ok(())
     }
 
     /// List databases.
-    pub async fn list_databases(&self) -> Result<ListDatabasesResponse, Error> {
-        const LIST_DATABASES_PATH: &str = "iox/api/v1/databases";
-        let url = self.url_for(LIST_DATABASES_PATH);
-
-        let r = self.http.request(Method::GET, url).send().await?;
-
-        match r {
-            r if r.status() == 200 => Ok(r.json::<ListDatabasesResponse>().await?),
-            r => Err(ServerErrorResponse::from_response(r).await.into()),
-        }
+    pub async fn list_databases(&mut self) -> Result<Vec<String>, Error> {
+        let response = self.client.list_databases(Empty {}).await?;
+        Ok(response.into_inner().names)
     }
 
-    /// Build the request path for relative `path`.
-    ///
-    /// # Safety
-    ///
-    /// Panics in debug builds if `path` contains an absolute path.
-    fn url_for(&self, path: &str) -> Url {
-        // In non-release builds, assert the path is not an absolute path.
-        //
-        // Paths should be relative so the full base path is used.
-        debug_assert_ne!(
-            path.chars().next().unwrap(),
-            '/',
-            "should not join absolute paths to base URL"
-        );
-        self.base
-            .join(path)
-            .expect("failed to construct request URL")
-    }
+    /// Get database configuration
+    pub async fn get_database(&mut self, name: impl Into<String>) -> Result<DatabaseRules, Error> {
+        let response = self
+            .client
+            .get_database(GetDatabaseRequest { name: name.into() })
+            .await
+            .map_err(|status| match status.code() {
+                tonic::Code::NotFound => Error::DatabaseNotFound,
+                tonic::Code::FailedPrecondition => Error::NoWriterId,
+                _ => Error::UnexpectedError(status)
+            })?;
 
-    fn db_url(&self, database: &str) -> Result<Url, ClientError> {
-        const DB_PATH: &str = "iox/api/v1/databases/";
-
-        // Perform validation in the client as URL parser silently drops invalid
-        // characters
-        let name = DatabaseName::new(database).map_err(|_| ClientError::InvalidDatabaseName)?;
-
-        self.url_for(DB_PATH)
-            .join(name.as_ref())
-            .map_err(|_| ClientError::InvalidDatabaseName)
+        let rules = response.into_inner().rules.ok_or(Error::EmptyResponse)?;
+        Ok(rules)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::ClientBuilder;
     use rand::{distributions::Alphanumeric, thread_rng, Rng};
+
+    use crate::ClientBuilder;
 
     use super::*;
 
@@ -234,7 +167,7 @@ mod tests {
     #[tokio::test]
     async fn test_ping() {
         let endpoint = maybe_skip_integration!();
-        let c = ClientBuilder::default().build(endpoint).unwrap();
+        let mut c = ClientBuilder::default().build(endpoint).await.unwrap();
         c.ping().await.expect("ping failed");
     }
 
@@ -243,9 +176,9 @@ mod tests {
         const TEST_ID: u32 = 42;
 
         let endpoint = maybe_skip_integration!();
-        let c = ClientBuilder::default().build(endpoint).unwrap();
+        let mut c = ClientBuilder::default().build(endpoint).await.unwrap();
 
-        c.set_writer_id(NonZeroU32::new(TEST_ID).unwrap())
+        c.update_writer_id(NonZeroU32::new(TEST_ID).unwrap())
             .await
             .expect("set ID failed");
 
@@ -257,13 +190,16 @@ mod tests {
     #[tokio::test]
     async fn test_create_database() {
         let endpoint = maybe_skip_integration!();
-        let c = ClientBuilder::default().build(endpoint).unwrap();
+        let mut c = ClientBuilder::default().build(endpoint).await.unwrap();
 
-        c.set_writer_id(NonZeroU32::new(42).unwrap())
+        c.update_writer_id(NonZeroU32::new(42).unwrap())
             .await
             .expect("set ID failed");
 
-        c.create_database(rand_name(), &DatabaseRules::new())
+        c.create_database(DatabaseRules{
+            name: rand_name(),
+            ..Default::default()
+        })
             .await
             .expect("create database failed");
     }
@@ -271,90 +207,73 @@ mod tests {
     #[tokio::test]
     async fn test_create_database_duplicate_name() {
         let endpoint = maybe_skip_integration!();
-        let c = ClientBuilder::default().build(endpoint).unwrap();
+        let mut c = ClientBuilder::default().build(endpoint).await.unwrap();
 
-        c.set_writer_id(NonZeroU32::new(42).unwrap())
+        c.update_writer_id(NonZeroU32::new(42).unwrap())
             .await
             .expect("set ID failed");
 
         let db_name = rand_name();
 
-        c.create_database(db_name.clone(), &DatabaseRules::new())
+        c.create_database(DatabaseRules{
+            name: db_name.clone(),
+            ..Default::default()
+        })
             .await
             .expect("create database failed");
 
         let err = c
-            .create_database(db_name, &DatabaseRules::new())
+            .create_database(DatabaseRules{
+                name: db_name,
+                ..Default::default()
+            })
             .await
             .expect_err("create database failed");
 
-        assert!(matches!(dbg!(err), CreateDatabaseError::AlreadyExists))
+        assert!(matches!(dbg!(err), Error::DatabaseAlreadyExists))
     }
 
     #[tokio::test]
     async fn test_create_database_invalid_name() {
         let endpoint = maybe_skip_integration!();
-        let c = ClientBuilder::default().build(endpoint).unwrap();
+        let mut c = ClientBuilder::default().build(endpoint).await.unwrap();
 
-        c.set_writer_id(NonZeroU32::new(42).unwrap())
+        c.update_writer_id(NonZeroU32::new(42).unwrap())
             .await
             .expect("set ID failed");
 
         let err = c
-            .create_database("my_example\ndb", &DatabaseRules::new())
+            .create_database(DatabaseRules{
+                name: "my_example\ndb".to_string(),
+                ..Default::default()
+            })
             .await
             .expect_err("expected request to fail");
 
         assert!(matches!(
             dbg!(err),
-            CreateDatabaseError::ClientError(ClientError::InvalidDatabaseName)
+            Error::InvalidArgument(_)
         ));
     }
 
     #[tokio::test]
     async fn test_list_databases() {
         let endpoint = maybe_skip_integration!();
-        let c = ClientBuilder::default().build(endpoint).unwrap();
+        let mut c = ClientBuilder::default().build(endpoint).await.unwrap();
 
-        c.set_writer_id(NonZeroU32::new(42).unwrap())
+        c.update_writer_id(NonZeroU32::new(42).unwrap())
             .await
             .expect("set ID failed");
 
         let name = rand_name();
-        c.create_database(&name, &DatabaseRules::default())
+        c.create_database(DatabaseRules{
+            name: name.clone(),
+            ..Default::default()
+        })
             .await
             .expect("create database failed");
-        let r = c.list_databases().await.expect("list databases failed");
-        assert!(r.names.contains(&name));
-    }
-
-    #[test]
-    fn test_default() {
-        // Ensures the Default impl does not panic
-        let c = Client::default();
-        assert_eq!(c.base.as_str(), "http://127.0.0.1:8080/");
-    }
-
-    #[test]
-    fn test_paths() {
-        let c = ClientBuilder::default()
-            .build("http://127.0.0.2:8081/proxy")
-            .unwrap();
-
-        assert_eq!(
-            c.url_for("bananas").as_str(),
-            "http://127.0.0.2:8081/proxy/bananas"
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "absolute paths")]
-    fn test_absolute_path_panics() {
-        let c = ClientBuilder::default()
-            .build("http://127.0.0.2:8081/proxy")
-            .unwrap();
-
-        c.url_for("/bananas");
+        let names = c.list_databases().await.expect("list databases failed");
+        assert!(names.contains(&name));
     }
 
     fn rand_name() -> String {
