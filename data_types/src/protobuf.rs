@@ -74,8 +74,9 @@ impl FromFieldString for String {
 /// An extension trait that adds the method `vec_field` to any Vec of a type
 /// implementing `TryInto<U, Error = FieldViolation>`
 pub(crate) trait FromFieldVec<T> {
-    /// Converts to a `Vec<U>`, short-circuiting on the first error and returning
-    /// a correctly scoped `FieldViolation` for where the error was encountered
+    /// Converts to a `Vec<U>`, short-circuiting on the first error and
+    /// returning a correctly scoped `FieldViolation` for where the error
+    /// was encountered
     fn vec_field(self, field: impl Into<String>) -> Result<T, FieldViolation>;
 }
 

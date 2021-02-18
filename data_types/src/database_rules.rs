@@ -151,7 +151,10 @@ impl TryFrom<pb::DatabaseRules> for DatabaseRules {
             .mutable_buffer_config
             .optional("mutableBufferConfig")?;
 
-        let partition_template = proto.partition_template.optional("partitionTemplate")?.unwrap_or_default();
+        let partition_template = proto
+            .partition_template
+            .optional("partitionTemplate")?
+            .unwrap_or_default();
 
         Ok(DatabaseRules {
             name: proto.name,

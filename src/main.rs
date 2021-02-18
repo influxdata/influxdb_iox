@@ -1,10 +1,10 @@
 //! Entrypoint of InfluxDB IOx binary
 #![deny(rust_2018_idioms)]
 #![warn(
-    missing_debug_implementations,
-    clippy::explicit_iter_loop,
-    clippy::use_self,
-    clippy::clone_on_ref_ptr
+missing_debug_implementations,
+clippy::explicit_iter_loop,
+clippy::use_self,
+clippy::clone_on_ref_ptr
 )]
 
 use clap::{crate_authors, crate_version, value_t, App, Arg, ArgMatches, SubCommand};
@@ -21,7 +21,9 @@ mod commands {
     mod input;
     pub mod logging;
     pub mod stats;
+    pub mod database;
 }
+
 pub mod influxdb_ioxd;
 
 use commands::{config::Config, logging::LoggingLevel};
@@ -60,6 +62,18 @@ Examples:
 "#;
     // load all environment variables from .env before doing anything
     load_dotenv();
+
+    let database_name = Arg::with_name("NAME")
+        .help("Database name")
+        .required(true)
+        .index(1);
+
+    let default_iox_address = std::env::var("IOX_ADDR").unwrap_or("http://127.0.0.1:8082".to_string());
+
+    let iox_address = Arg::with_name("address")
+        .help("Address of the IOx gRPC endpoint")
+        .long("address")
+        .default_value(&default_iox_address);
 
     let matches = App::new(help)
         .version(crate_version!())
@@ -122,7 +136,24 @@ Examples:
                         .help("Include detailed information per file")
                 ),
         )
-         .subcommand(
+        .subcommand(
+            SubCommand::with_name("database")
+                .about("Commands for interacting with IOx databases")
+                .subcommand(
+                    SubCommand::with_name("create")
+                        .about("Create a new database")
+                        .arg(iox_address.clone())
+                        .arg(database_name.clone())
+
+                )
+                .subcommand(
+                    SubCommand::with_name("show")
+                        .about("Show the database configuration")
+                        .arg(iox_address)
+                        .arg(database_name)
+                )
+        )
+        .subcommand(
             commands::config::Config::clap(),
         )
         .arg(Arg::with_name("verbose").short("v").long("verbose").multiple(true).help(
@@ -191,9 +222,32 @@ async fn dispatch_args(matches: ArgMatches<'_>) {
                 }
             }
         }
+        ("database", Some(sub_matches)) => match sub_matches.subcommand() {
+            ("create", Some(sub_matches)) => {
+                let database_name = sub_matches.value_of("NAME").unwrap();
+                let url = sub_matches.value_of("address").unwrap();
+                let res = commands::database::create_database(url.to_string(), database_name.to_string()).await;
+
+                match res {
+                    Ok(()) => debug!("Database created successfully"),
+                    Err(e) => {
+                        eprintln!("Database creation failed: {}", e);
+                        std::process::exit(1)
+                    }
+                }
+            }
+            ("show", Some(sub_matches)) => {
+                let database_name = sub_matches.value_of("NAME").unwrap();
+                let url = sub_matches.value_of("address").unwrap();
+                println!("Show {} - {}", database_name, url);
+
+                unimplemented!()
+            }
+            (_, _) => unreachable!(),
+        }
         // Handle the case where the user explicitly specified the server command
         ("server", Some(sub_matches)) => {
-            // Note don't set up basic logging here, different logging rules appy in server
+            // Note don't set up basic logging here, different logging rules apply in server
             // mode
             let res =
                 influxdb_ioxd::main(logging_level, Some(Config::from_clap(sub_matches))).await;
@@ -205,7 +259,7 @@ async fn dispatch_args(matches: ArgMatches<'_>) {
         }
         // handle the case where the user didn't specify a command
         (_, _) => {
-            // Note don't set up basic logging here, different logging rules appy in server
+            // Note don't set up basic logging here, different logging rules apply in server
             // mode
             let res = influxdb_ioxd::main(logging_level, None).await;
             if let Err(e) = res {
