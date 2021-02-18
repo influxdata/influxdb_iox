@@ -1,7 +1,10 @@
+use std::convert::{TryFrom, TryInto};
+
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 
+use generated_types::google::protobuf::Empty;
 use generated_types::{
     google::{FieldViolation, FieldViolationExt},
     influxdata::iox::management::v1 as pb,
@@ -10,7 +13,6 @@ use influxdb_line_protocol::ParsedLine;
 
 use crate::protobuf::{FromField, FromFieldOpt, FromFieldString, FromFieldVec};
 use crate::DatabaseName;
-use std::convert::{TryFrom, TryInto};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -130,6 +132,36 @@ impl DatabaseRules {
     }
 }
 
+impl From<DatabaseRules> for pb::DatabaseRules {
+    fn from(rules: DatabaseRules) -> Self {
+        let subscriptions: Vec<pb::subscription_config::Subscription> =
+            rules.subscriptions.into_iter().map(Into::into).collect();
+
+        let replication_config = pb::ReplicationConfig {
+            replications: rules.replication,
+            replication_count: rules.replication_count as _,
+            replication_queue_max_size: rules.replication_queue_max_size as _,
+        };
+
+        let query_config = pb::QueryConfig {
+            query_local: rules.query_local,
+            primary: rules.primary_query_group.unwrap_or_default(),
+            secondaries: rules.secondary_query_groups,
+            read_only_partitions: rules.read_only_partitions,
+        };
+
+        Self {
+            name: rules.name,
+            partition_template: Some(rules.partition_template.into()),
+            replication_config: Some(replication_config),
+            subscription_config: Some(pb::SubscriptionConfig { subscriptions }),
+            query_config: Some(query_config),
+            wal_buffer_config: rules.wal_buffer_config.map(Into::into),
+            mutable_buffer_config: rules.mutable_buffer_config.map(Into::into),
+        }
+    }
+}
+
 impl TryFrom<pb::DatabaseRules> for DatabaseRules {
     type Error = FieldViolation;
 
@@ -156,17 +188,20 @@ impl TryFrom<pb::DatabaseRules> for DatabaseRules {
             .optional("partitionTemplate")?
             .unwrap_or_default();
 
+        let query = proto.query_config.unwrap_or_default();
+        let replication = proto.replication_config.unwrap_or_default();
+
         Ok(DatabaseRules {
             name: proto.name,
             partition_template,
-            replication: vec![],
-            replication_count: 0,
-            replication_queue_max_size: 0,
+            replication: replication.replications,
+            replication_count: replication.replication_count as _,
+            replication_queue_max_size: replication.replication_queue_max_size as _,
             subscriptions,
-            query_local: false,
-            primary_query_group: None,
-            secondary_query_groups: vec![],
-            read_only_partitions: vec![],
+            query_local: query.query_local,
+            primary_query_group: query.primary.optional(),
+            secondary_query_groups: query.secondaries,
+            read_only_partitions: query.read_only_partitions,
             wal_buffer_config,
             mutable_buffer_config,
         })
@@ -226,6 +261,17 @@ impl Default for MutableBufferConfig {
     }
 }
 
+impl From<MutableBufferConfig> for pb::MutableBufferConfig {
+    fn from(config: MutableBufferConfig) -> Self {
+        Self {
+            buffer_size: config.buffer_size,
+            reject_if_not_persisted: config.reject_if_not_persisted,
+            partition_drop_order: Some(config.partition_drop_order.into()),
+            persist_after_cold_seconds: config.persist_after_cold_seconds.unwrap_or_default(),
+        }
+    }
+}
+
 impl TryFrom<pb::MutableBufferConfig> for MutableBufferConfig {
     type Error = FieldViolation;
 
@@ -273,6 +319,17 @@ pub struct PartitionSortRules {
     pub sort: PartitionSort,
 }
 
+impl From<PartitionSortRules> for pb::mutable_buffer_config::PartitionDropOrder {
+    fn from(ps: PartitionSortRules) -> Self {
+        let order: pb::Order = ps.order.into();
+
+        Self {
+            order: order as _,
+            sort: Some(ps.sort.into()),
+        }
+    }
+}
+
 impl TryFrom<pb::mutable_buffer_config::PartitionDropOrder> for PartitionSortRules {
     type Error = FieldViolation;
 
@@ -314,6 +371,27 @@ impl Default for PartitionSort {
     }
 }
 
+impl From<PartitionSort> for pb::mutable_buffer_config::partition_drop_order::Sort {
+    fn from(ps: PartitionSort) -> Self {
+        use pb::mutable_buffer_config::partition_drop_order::ColumnSort;
+
+        match ps {
+            PartitionSort::LastWriteTime => Self::LastWriteTime(Empty {}),
+            PartitionSort::CreatedAtTime => Self::CreatedAtTime(Empty {}),
+            PartitionSort::Column(column_name, column_type, column_value) => {
+                let column_type: pb::ColumnType = column_type.into();
+                let column_value: pb::Aggregate = column_value.into();
+
+                Self::Column(ColumnSort {
+                    column_name,
+                    column_type: column_type as _,
+                    column_value: column_value as _,
+                })
+            }
+        }
+    }
+}
+
 impl TryFrom<pb::mutable_buffer_config::partition_drop_order::Sort> for PartitionSort {
     type Error = FieldViolation;
 
@@ -326,9 +404,13 @@ impl TryFrom<pb::mutable_buffer_config::partition_drop_order::Sort> for Partitio
             Sort::LastWriteTime(_) => PartitionSort::LastWriteTime,
             Sort::CreatedAtTime(_) => PartitionSort::CreatedAtTime,
             Sort::Column(column_sort) => {
-                let column_type = column_sort.column_type().scope("columnType")?;
-                let column_value = column_sort.column_value().scope("columnValue")?;
-                PartitionSort::Column(column_sort.column_name, column_type, column_value)
+                let column_type = column_sort.column_type().scope("column.columnType")?;
+                let column_value = column_sort.column_value().scope("column.columnValue")?;
+                PartitionSort::Column(
+                    column_sort.column_name.required("column.column")?,
+                    column_type,
+                    column_value,
+                )
             }
         })
     }
@@ -344,6 +426,15 @@ pub enum Order {
 impl Default for Order {
     fn default() -> Self {
         Order::Asc
+    }
+}
+
+impl From<Order> for pb::Order {
+    fn from(o: Order) -> Self {
+        match o {
+            Order::Asc => pb::Order::Asc,
+            Order::Desc => pb::Order::Desc,
+        }
     }
 }
 
@@ -369,6 +460,18 @@ pub enum ColumnType {
     Bool,
 }
 
+impl From<ColumnType> for pb::ColumnType {
+    fn from(t: ColumnType) -> Self {
+        match t {
+            ColumnType::I64 => pb::ColumnType::I64,
+            ColumnType::U64 => pb::ColumnType::U64,
+            ColumnType::F64 => pb::ColumnType::F64,
+            ColumnType::String => pb::ColumnType::String,
+            ColumnType::Bool => pb::ColumnType::Bool,
+        }
+    }
+}
+
 impl TryFrom<pb::ColumnType> for ColumnType {
     type Error = FieldViolation;
 
@@ -389,6 +492,15 @@ impl TryFrom<pb::ColumnType> for ColumnType {
 pub enum ColumnValue {
     Min,
     Max,
+}
+
+impl From<ColumnValue> for pb::Aggregate {
+    fn from(v: ColumnValue) -> Self {
+        match v {
+            ColumnValue::Min => pb::Aggregate::Min,
+            ColumnValue::Max => pb::Aggregate::Max,
+        }
+    }
 }
 
 impl TryFrom<pb::Aggregate> for ColumnValue {
@@ -440,6 +552,20 @@ pub struct WalBufferConfig {
     pub close_segment_after: Option<std::time::Duration>,
 }
 
+impl From<WalBufferConfig> for pb::WalBufferConfig {
+    fn from(rollover: WalBufferConfig) -> Self {
+        let buffer_rollover: pb::wal_buffer_config::Rollover = rollover.buffer_rollover.into();
+
+        Self {
+            buffer_size: rollover.buffer_size,
+            segment_size: rollover.segment_size,
+            buffer_rollover: buffer_rollover as _,
+            persist_segments: rollover.store_segments,
+            close_segment_after: rollover.close_segment_after.map(Into::into),
+        }
+    }
+}
+
 impl TryFrom<pb::WalBufferConfig> for WalBufferConfig {
     type Error = FieldViolation;
 
@@ -476,6 +602,17 @@ pub enum WalBufferRollover {
     /// request, which will succeed once the oldest segment has been
     /// persisted to object storage.
     ReturnError,
+}
+
+impl From<WalBufferRollover> for pb::wal_buffer_config::Rollover {
+    fn from(rollover: WalBufferRollover) -> Self {
+        use pb::wal_buffer_config::Rollover;
+        match rollover {
+            WalBufferRollover::DropOldSegment => Rollover::DropOldSegment,
+            WalBufferRollover::DropIncoming => Rollover::DropIncoming,
+            WalBufferRollover::ReturnError => Rollover::ReturnError,
+        }
+    }
 }
 
 impl TryFrom<pb::wal_buffer_config::Rollover> for WalBufferRollover {
@@ -534,6 +671,14 @@ impl PartitionTemplate {
     }
 }
 
+impl From<PartitionTemplate> for pb::PartitionTemplate {
+    fn from(pt: PartitionTemplate) -> Self {
+        Self {
+            parts: pt.parts.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 impl TryFrom<pb::PartitionTemplate> for PartitionTemplate {
     type Error = FieldViolation;
 
@@ -570,6 +715,27 @@ pub struct StrftimeColumn {
     format: String,
 }
 
+impl From<TemplatePart> for pb::partition_template::part::Part {
+    fn from(part: TemplatePart) -> Self {
+        use pb::partition_template::part::{ColumnFormat, Part};
+
+        match part {
+            TemplatePart::Table => Part::Table(Empty {}),
+            TemplatePart::Column(column) => Part::Column(column),
+            TemplatePart::RegexCapture(RegexCapture { column, regex }) => {
+                Part::Regex(ColumnFormat {
+                    column,
+                    format: regex,
+                })
+            }
+            TemplatePart::StrftimeColumn(StrftimeColumn { column, format }) => {
+                Part::StrfTime(ColumnFormat { column, format })
+            }
+            TemplatePart::TimeFormat(format) => Part::Time(format),
+        }
+    }
+}
+
 impl TryFrom<pb::partition_template::part::Part> for TemplatePart {
     type Error = FieldViolation;
 
@@ -578,17 +744,29 @@ impl TryFrom<pb::partition_template::part::Part> for TemplatePart {
 
         Ok(match proto {
             Part::Table(_) => TemplatePart::Table,
-            Part::Column(column) => TemplatePart::Column(column),
+            Part::Column(column) => TemplatePart::Column(column.required("column")?),
             Part::Regex(ColumnFormat { column, format }) => {
                 TemplatePart::RegexCapture(RegexCapture {
-                    column,
-                    regex: format,
+                    column: column.required("regex.column")?,
+                    regex: format.required("regex.format")?,
                 })
             }
             Part::StrfTime(ColumnFormat { column, format }) => {
-                TemplatePart::StrftimeColumn(StrftimeColumn { column, format })
+                TemplatePart::StrftimeColumn(StrftimeColumn {
+                    column: column.required("strfTime.column")?,
+                    format: format.required("strfTime.format")?,
+                })
             }
+            Part::Time(format) => TemplatePart::TimeFormat(format.required("time")?),
         })
+    }
+}
+
+impl From<TemplatePart> for pb::partition_template::Part {
+    fn from(part: TemplatePart) -> Self {
+        Self {
+            part: Some(part.into()),
+        }
     }
 }
 
@@ -623,6 +801,16 @@ pub struct Subscription {
     pub matcher: Matcher,
 }
 
+impl From<Subscription> for pb::subscription_config::Subscription {
+    fn from(s: Subscription) -> Self {
+        Self {
+            name: s.name,
+            host_group_id: s.host_group_id,
+            matcher: Some(s.matcher.into()),
+        }
+    }
+}
+
 impl TryFrom<pb::subscription_config::Subscription> for Subscription {
     type Error = FieldViolation;
 
@@ -645,13 +833,32 @@ pub struct Matcher {
     pub predicate: Option<String>,
 }
 
+impl From<Matcher> for pb::Matcher {
+    fn from(m: Matcher) -> Self {
+        let table_matcher = match m.tables {
+            MatchTables::Table(table) => Some(pb::matcher::TableMatcher::Table(table)),
+            MatchTables::Regex(regex) => Some(pb::matcher::TableMatcher::Regex(regex)),
+            MatchTables::All => None,
+        };
+
+        Self {
+            predicate: m.predicate.unwrap_or_default(),
+            table_matcher,
+        }
+    }
+}
+
 impl TryFrom<pb::Matcher> for Matcher {
     type Error = FieldViolation;
 
     fn try_from(proto: pb::Matcher) -> Result<Self, FieldViolation> {
         let tables = match proto.table_matcher {
-            Some(pb::matcher::TableMatcher::Table(table)) => MatchTables::Table(table),
-            Some(pb::matcher::TableMatcher::Regex(regex)) => MatchTables::Regex(regex),
+            Some(pb::matcher::TableMatcher::Table(table)) => {
+                MatchTables::Table(table.required("tableMatcher.table")?)
+            }
+            Some(pb::matcher::TableMatcher::Regex(regex)) => {
+                MatchTables::Regex(regex.required("tableMatcher.regex")?)
+            }
             None => MatchTables::All,
         };
 
@@ -690,8 +897,9 @@ pub struct HostGroup {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use influxdb_line_protocol::parse_lines;
+
+    use super::*;
 
     type TestError = Box<dyn std::error::Error + Send + Sync + 'static>;
     type Result<T = (), E = TestError> = std::result::Result<T, E>;

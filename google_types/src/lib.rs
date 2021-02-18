@@ -26,6 +26,15 @@ mod pb {
                     ))
                 }
             }
+
+            impl From<std::time::Duration> for Duration {
+                fn from(value: std::time::Duration) -> Self {
+                    Self {
+                        seconds: value.as_secs() as _,
+                        nanos: value.subsec_nanos() as _,
+                    }
+                }
+            }
         }
 
         pub mod rpc {
@@ -142,14 +151,19 @@ pub struct AlreadyExists {
     pub description: String,
 }
 
-fn encode_already_exists(exists: AlreadyExists) -> Result<Any, prost::EncodeError> {
+fn encode_resource_info(
+    resource_type: String,
+    resource_name: String,
+    owner: String,
+    description: String,
+) -> Result<Any, prost::EncodeError> {
     let mut buffer = BytesMut::new();
 
     pb::google::rpc::ResourceInfo {
-        resource_type: exists.resource_type,
-        resource_name: exists.resource_name,
-        owner: exists.owner,
-        description: exists.description,
+        resource_type,
+        resource_name,
+        owner,
+        description,
     }
     .encode(&mut buffer)?;
 
@@ -168,7 +182,41 @@ impl From<AlreadyExists> for tonic::Status {
         encode_status(
             tonic::Code::AlreadyExists,
             message,
-            encode_already_exists(exists).ok(),
+            encode_resource_info(
+                exists.resource_type,
+                exists.resource_name,
+                exists.owner,
+                exists.description,
+            )
+            .ok(),
+        )
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct NotFound {
+    pub resource_type: String,
+    pub resource_name: String,
+    pub owner: String,
+    pub description: String,
+}
+
+impl From<NotFound> for tonic::Status {
+    fn from(not_found: NotFound) -> Self {
+        let message = format!(
+            "Resource {}/{} not found",
+            not_found.resource_type, not_found.resource_name
+        );
+        encode_status(
+            tonic::Code::AlreadyExists,
+            message,
+            encode_resource_info(
+                not_found.resource_type,
+                not_found.resource_name,
+                not_found.owner,
+                not_found.description,
+            )
+            .ok(),
         )
     }
 }

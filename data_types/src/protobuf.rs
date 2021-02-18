@@ -56,10 +56,19 @@ where
     }
 }
 
-/// An extension trait that adds the method `required` to any String
+/// An extension trait that adds the methods `optional` and `required` to any
+/// String
+///
+/// Prost will default string fields to empty, whereas IOx sometimes
+/// uses Option<String>, this helper aids mapping between them
+///
+/// TODO: Review mixed use of Option<String> and String in IOX
 pub(crate) trait FromFieldString {
     /// Returns a Ok if the String is not empty
     fn required(self, field: impl Into<String>) -> Result<String, FieldViolation>;
+
+    /// Wraps non-empty strings in Some(_), returns None for empty strings
+    fn optional(self) -> Option<String>;
 }
 
 impl FromFieldString for String {
@@ -68,6 +77,13 @@ impl FromFieldString for String {
             return Err(FieldViolation::required(field));
         }
         Ok(self)
+    }
+
+    fn optional(self) -> Option<String> {
+        if self.is_empty() {
+            return Some(self);
+        }
+        Some(self)
     }
 }
 

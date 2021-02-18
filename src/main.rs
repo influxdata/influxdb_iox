@@ -1,10 +1,10 @@
 //! Entrypoint of InfluxDB IOx binary
 #![deny(rust_2018_idioms)]
 #![warn(
-missing_debug_implementations,
-clippy::explicit_iter_loop,
-clippy::use_self,
-clippy::clone_on_ref_ptr
+    missing_debug_implementations,
+    clippy::explicit_iter_loop,
+    clippy::use_self,
+    clippy::clone_on_ref_ptr
 )]
 
 use clap::{crate_authors, crate_version, value_t, App, Arg, ArgMatches, SubCommand};
@@ -17,11 +17,12 @@ use tracing::{debug, error, info, warn};
 mod commands {
     pub mod config;
     pub mod convert;
+    pub mod database;
     pub mod file_meta;
     mod input;
     pub mod logging;
+    pub mod operator;
     pub mod stats;
-    pub mod database;
 }
 
 pub mod influxdb_ioxd;
@@ -68,12 +69,11 @@ Examples:
         .required(true)
         .index(1);
 
-    let default_iox_address = std::env::var("IOX_ADDR").unwrap_or("http://127.0.0.1:8082".to_string());
-
     let iox_address = Arg::with_name("address")
         .help("Address of the IOx gRPC endpoint")
         .long("address")
-        .default_value(&default_iox_address);
+        .env("IOX_ADDR")
+        .default_value("http://127.0.0.1:8082");
 
     let matches = App::new(help)
         .version(crate_version!())
@@ -137,6 +137,30 @@ Examples:
                 ),
         )
         .subcommand(
+            SubCommand::with_name("operator")
+                .about("Commands for operating an IOx server")
+                .subcommand(
+                    SubCommand::with_name("ping")
+                        .about("Check connectivity to server")
+                        .arg(iox_address.clone())
+                )
+
+                .subcommand(
+                    SubCommand::with_name("set-writer")
+                        .about("Set writer ID")
+                        .arg(iox_address.clone())
+                        .arg(Arg::with_name("ID")
+                            .required(true)
+                            .help("Writer ID")
+                        )
+                )
+                .subcommand(
+                    SubCommand::with_name("get-writer")
+                        .about("Get writer ID")
+                        .arg(iox_address.clone())
+                )
+        )
+        .subcommand(
             SubCommand::with_name("database")
                 .about("Commands for interacting with IOx databases")
                 .subcommand(
@@ -144,7 +168,11 @@ Examples:
                         .about("Create a new database")
                         .arg(iox_address.clone())
                         .arg(database_name.clone())
-
+                )
+                .subcommand(
+                    SubCommand::with_name("list")
+                        .about("List the configured databases")
+                        .arg(iox_address.clone())
                 )
                 .subcommand(
                     SubCommand::with_name("show")
@@ -222,11 +250,55 @@ async fn dispatch_args(matches: ArgMatches<'_>) {
                 }
             }
         }
+        ("operator", Some(sub_matches)) => match sub_matches.subcommand() {
+            ("ping", Some(sub_matches)) => {
+                let url = sub_matches.value_of("address").unwrap();
+                let res = commands::operator::ping(url.to_string()).await;
+
+                match res {
+                    Ok(()) => println!("Ok"),
+                    Err(e) => {
+                        eprintln!("Failed to ping server: {}", e);
+                        std::process::exit(1)
+                    }
+                }
+            }
+            ("set-writer", Some(sub_matches)) => {
+                let writer_id = sub_matches.value_of("ID").unwrap();
+                let url = sub_matches.value_of("address").unwrap();
+                let res = commands::operator::set_writer_id(url.to_string(), writer_id).await;
+
+                match res {
+                    Ok(()) => debug!("Set writer ID successfully"),
+                    Err(e) => {
+                        eprintln!("Failed to set writer ID: {}", e);
+                        std::process::exit(1)
+                    }
+                }
+            }
+            ("get-writer", Some(sub_matches)) => {
+                let url = sub_matches.value_of("address").unwrap();
+                let res = commands::operator::get_writer_id(url.to_string()).await;
+
+                match res {
+                    Ok(id) => {
+                        println!("Writer ID: {}", id);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to set writer ID: {}", e);
+                        std::process::exit(1)
+                    }
+                }
+            }
+            (_, _) => unreachable!(),
+        },
         ("database", Some(sub_matches)) => match sub_matches.subcommand() {
             ("create", Some(sub_matches)) => {
                 let database_name = sub_matches.value_of("NAME").unwrap();
                 let url = sub_matches.value_of("address").unwrap();
-                let res = commands::database::create_database(url.to_string(), database_name.to_string()).await;
+                let res =
+                    commands::database::create_database(url.to_string(), database_name.to_string())
+                        .await;
 
                 match res {
                     Ok(()) => debug!("Database created successfully"),
@@ -239,12 +311,32 @@ async fn dispatch_args(matches: ArgMatches<'_>) {
             ("show", Some(sub_matches)) => {
                 let database_name = sub_matches.value_of("NAME").unwrap();
                 let url = sub_matches.value_of("address").unwrap();
-                println!("Show {} - {}", database_name, url);
+                let res =
+                    commands::database::get_database(url.to_string(), database_name.to_string())
+                        .await;
 
-                unimplemented!()
+                match res {
+                    Ok(database) => println!("Database: {:?}", database),
+                    Err(e) => {
+                        eprintln!("Listing databases failed: {}", e);
+                        std::process::exit(1)
+                    }
+                }
+            }
+            ("list", Some(sub_matches)) => {
+                let url = sub_matches.value_of("address").unwrap();
+                let res = commands::database::list_databases(url.to_string()).await;
+
+                match res {
+                    Ok(databases) => println!("Databases: {}", databases.join(", ")),
+                    Err(e) => {
+                        eprintln!("Listing databases failed: {}", e);
+                        std::process::exit(1)
+                    }
+                }
             }
             (_, _) => unreachable!(),
-        }
+        },
         // Handle the case where the user explicitly specified the server command
         ("server", Some(sub_matches)) => {
             // Note don't set up basic logging here, different logging rules apply in server

@@ -22,8 +22,9 @@ message PartitionTemplate {
     oneof part {
       google.protobuf.Empty table = 1;
       string column = 2;
-      ColumnFormat regex = 3;
-      ColumnFormat strfTime = 4;
+      string time = 3;
+      ColumnFormat regex = 4;
+      ColumnFormat strfTime = 5;
     }
   }
 
