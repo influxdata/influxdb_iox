@@ -86,10 +86,13 @@ impl Client {
 
     /// Get the server's writer ID.
     pub async fn get_writer_id(&mut self) -> Result<u32, Error> {
-        let response = self.client.get_writer_id(Empty {}).await
+        let response = self
+            .client
+            .get_writer_id(Empty {})
+            .await
             .map_err(|status| match status.code() {
                 tonic::Code::NotFound => Error::NoWriterId,
-                _ => Error::UnexpectedError(status)
+                _ => Error::UnexpectedError(status),
             })?;
         Ok(response.get_ref().id)
     }
@@ -103,7 +106,7 @@ impl Client {
                 tonic::Code::AlreadyExists => Error::DatabaseAlreadyExists,
                 tonic::Code::FailedPrecondition => Error::NoWriterId,
                 tonic::Code::InvalidArgument => Error::InvalidArgument(status),
-                _ => Error::UnexpectedError(status)
+                _ => Error::UnexpectedError(status),
             })?;
 
         Ok(())
@@ -124,7 +127,7 @@ impl Client {
             .map_err(|status| match status.code() {
                 tonic::Code::NotFound => Error::DatabaseNotFound,
                 tonic::Code::FailedPrecondition => Error::NoWriterId,
-                _ => Error::UnexpectedError(status)
+                _ => Error::UnexpectedError(status),
             })?;
 
         let rules = response.into_inner().rules.ok_or(Error::EmptyResponse)?;
@@ -196,12 +199,12 @@ mod tests {
             .await
             .expect("set ID failed");
 
-        c.create_database(DatabaseRules{
+        c.create_database(DatabaseRules {
             name: rand_name(),
             ..Default::default()
         })
-            .await
-            .expect("create database failed");
+        .await
+        .expect("create database failed");
     }
 
     #[tokio::test]
@@ -215,15 +218,15 @@ mod tests {
 
         let db_name = rand_name();
 
-        c.create_database(DatabaseRules{
+        c.create_database(DatabaseRules {
             name: db_name.clone(),
             ..Default::default()
         })
-            .await
-            .expect("create database failed");
+        .await
+        .expect("create database failed");
 
         let err = c
-            .create_database(DatabaseRules{
+            .create_database(DatabaseRules {
                 name: db_name,
                 ..Default::default()
             })
@@ -243,17 +246,14 @@ mod tests {
             .expect("set ID failed");
 
         let err = c
-            .create_database(DatabaseRules{
+            .create_database(DatabaseRules {
                 name: "my_example\ndb".to_string(),
                 ..Default::default()
             })
             .await
             .expect_err("expected request to fail");
 
-        assert!(matches!(
-            dbg!(err),
-            Error::InvalidArgument(_)
-        ));
+        assert!(matches!(dbg!(err), Error::InvalidArgument(_)));
     }
 
     #[tokio::test]
@@ -266,12 +266,12 @@ mod tests {
             .expect("set ID failed");
 
         let name = rand_name();
-        c.create_database(DatabaseRules{
+        c.create_database(DatabaseRules {
             name: name.clone(),
             ..Default::default()
         })
-            .await
-            .expect("create database failed");
+        .await
+        .expect("create database failed");
         let names = c.list_databases().await.expect("list databases failed");
         assert!(names.contains(&name));
     }

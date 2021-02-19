@@ -64,11 +64,7 @@ fn encode_status(code: tonic::Code, message: String, details: Option<Any>) -> to
         };
 
         if status.encode(&mut buffer).is_ok() {
-            return tonic::Status::with_details(
-                code,
-                message,
-                buffer.freeze(),
-            );
+            return tonic::Status::with_details(code, message, buffer.freeze());
         }
     }
     tonic::Status::new(code, message)

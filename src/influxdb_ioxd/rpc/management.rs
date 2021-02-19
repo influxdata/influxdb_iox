@@ -52,7 +52,7 @@ where
     ) -> Result<Response<GetWriterIdResponse>, Status> {
         match self.server.require_id().ok() {
             Some(id) => Ok(Response::new(GetWriterIdResponse { id })),
-            None => Err(NotFound::default())?,
+            None => return Err(NotFound::default().into()),
         }
     }
 
@@ -82,11 +82,14 @@ where
             Some(rules) => Ok(Response::new(GetDatabaseResponse {
                 rules: Some(rules.into()),
             })),
-            None => Err(NotFound {
-                resource_type: "database".to_string(),
-                resource_name: name.to_string(),
-                ..Default::default()
-            })?,
+            None => {
+                return Err(NotFound {
+                    resource_type: "database".to_string(),
+                    resource_name: name.to_string(),
+                    ..Default::default()
+                }
+                .into())
+            }
         }
     }
 
@@ -97,7 +100,7 @@ where
         let rules: DatabaseRules = request
             .into_inner()
             .rules
-            .ok_or(FieldViolation::required(""))
+            .ok_or_else(|| FieldViolation::required(""))
             .and_then(TryInto::try_into)
             .map_err(|e| e.scope("rules"))?;
 
@@ -106,11 +109,14 @@ where
 
         match self.server.create_database(name, rules).await {
             Ok(_) => Ok(Response::new(Empty {})),
-            Err(Error::DatabaseAlreadyExists { db_name }) => Err(AlreadyExists {
-                resource_type: "database".to_string(),
-                resource_name: db_name,
-                ..Default::default()
-            })?,
+            Err(Error::DatabaseAlreadyExists { db_name }) => {
+                return Err(AlreadyExists {
+                    resource_type: "database".to_string(),
+                    resource_name: db_name,
+                    ..Default::default()
+                }
+                .into())
+            }
             Err(e) => Err(default_error_handler(e)),
         }
     }

@@ -191,7 +191,7 @@ impl TryFrom<pb::DatabaseRules> for DatabaseRules {
         let query = proto.query_config.unwrap_or_default();
         let replication = proto.replication_config.unwrap_or_default();
 
-        Ok(DatabaseRules {
+        Ok(Self {
             name: proto.name,
             partition_template,
             replication: replication.replications,
@@ -287,7 +287,7 @@ impl TryFrom<pb::MutableBufferConfig> for MutableBufferConfig {
             proto.buffer_size
         };
 
-        Ok(MutableBufferConfig {
+        Ok(Self {
             buffer_size,
             reject_if_not_persisted: proto.reject_if_not_persisted,
             partition_drop_order,
@@ -336,7 +336,7 @@ impl TryFrom<pb::mutable_buffer_config::PartitionDropOrder> for PartitionSortRul
     fn try_from(
         proto: pb::mutable_buffer_config::PartitionDropOrder,
     ) -> Result<Self, FieldViolation> {
-        Ok(PartitionSortRules {
+        Ok(Self {
             order: proto.order().scope("order")?,
             sort: proto.sort.optional("sort")?.unwrap_or_default(),
         })
@@ -367,7 +367,7 @@ pub enum PartitionSort {
 
 impl Default for PartitionSort {
     fn default() -> Self {
-        PartitionSort::LastWriteTime
+        Self::LastWriteTime
     }
 }
 
@@ -401,12 +401,12 @@ impl TryFrom<pb::mutable_buffer_config::partition_drop_order::Sort> for Partitio
         use pb::mutable_buffer_config::partition_drop_order::Sort;
 
         Ok(match proto {
-            Sort::LastWriteTime(_) => PartitionSort::LastWriteTime,
-            Sort::CreatedAtTime(_) => PartitionSort::CreatedAtTime,
+            Sort::LastWriteTime(_) => Self::LastWriteTime,
+            Sort::CreatedAtTime(_) => Self::CreatedAtTime,
             Sort::Column(column_sort) => {
                 let column_type = column_sort.column_type().scope("column.columnType")?;
                 let column_value = column_sort.column_value().scope("column.columnValue")?;
-                PartitionSort::Column(
+                Self::Column(
                     column_sort.column_name.required("column.column")?,
                     column_type,
                     column_value,
@@ -425,15 +425,15 @@ pub enum Order {
 
 impl Default for Order {
     fn default() -> Self {
-        Order::Asc
+        Self::Asc
     }
 }
 
 impl From<Order> for pb::Order {
     fn from(o: Order) -> Self {
         match o {
-            Order::Asc => pb::Order::Asc,
-            Order::Desc => pb::Order::Desc,
+            Order::Asc => Self::Asc,
+            Order::Desc => Self::Desc,
         }
     }
 }
@@ -443,9 +443,9 @@ impl TryFrom<pb::Order> for Order {
 
     fn try_from(proto: pb::Order) -> Result<Self, FieldViolation> {
         Ok(match proto {
-            pb::Order::Unknown => Order::default(),
-            pb::Order::Asc => Order::Asc,
-            pb::Order::Desc => Order::Desc,
+            pb::Order::Unknown => Self::default(),
+            pb::Order::Asc => Self::Asc,
+            pb::Order::Desc => Self::Desc,
         })
     }
 }
@@ -463,11 +463,11 @@ pub enum ColumnType {
 impl From<ColumnType> for pb::ColumnType {
     fn from(t: ColumnType) -> Self {
         match t {
-            ColumnType::I64 => pb::ColumnType::I64,
-            ColumnType::U64 => pb::ColumnType::U64,
-            ColumnType::F64 => pb::ColumnType::F64,
-            ColumnType::String => pb::ColumnType::String,
-            ColumnType::Bool => pb::ColumnType::Bool,
+            ColumnType::I64 => Self::I64,
+            ColumnType::U64 => Self::U64,
+            ColumnType::F64 => Self::F64,
+            ColumnType::String => Self::String,
+            ColumnType::Bool => Self::Bool,
         }
     }
 }
@@ -478,11 +478,11 @@ impl TryFrom<pb::ColumnType> for ColumnType {
     fn try_from(proto: pb::ColumnType) -> Result<Self, FieldViolation> {
         Ok(match proto {
             pb::ColumnType::Unknown => return Err(FieldViolation::required("")),
-            pb::ColumnType::I64 => ColumnType::I64,
-            pb::ColumnType::U64 => ColumnType::U64,
-            pb::ColumnType::F64 => ColumnType::F64,
-            pb::ColumnType::String => ColumnType::String,
-            pb::ColumnType::Bool => ColumnType::Bool,
+            pb::ColumnType::I64 => Self::I64,
+            pb::ColumnType::U64 => Self::U64,
+            pb::ColumnType::F64 => Self::F64,
+            pb::ColumnType::String => Self::String,
+            pb::ColumnType::Bool => Self::Bool,
         })
     }
 }
@@ -497,8 +497,8 @@ pub enum ColumnValue {
 impl From<ColumnValue> for pb::Aggregate {
     fn from(v: ColumnValue) -> Self {
         match v {
-            ColumnValue::Min => pb::Aggregate::Min,
-            ColumnValue::Max => pb::Aggregate::Max,
+            ColumnValue::Min => Self::Min,
+            ColumnValue::Max => Self::Max,
         }
     }
 }
@@ -511,8 +511,8 @@ impl TryFrom<pb::Aggregate> for ColumnValue {
 
         Ok(match proto {
             Aggregate::Unknown => return Err(FieldViolation::required("")),
-            Aggregate::Min => ColumnValue::Min,
-            Aggregate::Max => ColumnValue::Max,
+            Aggregate::Min => Self::Min,
+            Aggregate::Max => Self::Max,
         })
     }
 }
@@ -577,7 +577,7 @@ impl TryFrom<pb::WalBufferConfig> for WalBufferConfig {
             .transpose()
             .field("closeSegmentAfter")?;
 
-        Ok(WalBufferConfig {
+        Ok(Self {
             buffer_size: proto.buffer_size,
             segment_size: proto.segment_size,
             buffer_rollover,
@@ -606,11 +606,10 @@ pub enum WalBufferRollover {
 
 impl From<WalBufferRollover> for pb::wal_buffer_config::Rollover {
     fn from(rollover: WalBufferRollover) -> Self {
-        use pb::wal_buffer_config::Rollover;
         match rollover {
-            WalBufferRollover::DropOldSegment => Rollover::DropOldSegment,
-            WalBufferRollover::DropIncoming => Rollover::DropIncoming,
-            WalBufferRollover::ReturnError => Rollover::ReturnError,
+            WalBufferRollover::DropOldSegment => Self::DropOldSegment,
+            WalBufferRollover::DropIncoming => Self::DropIncoming,
+            WalBufferRollover::ReturnError => Self::ReturnError,
         }
     }
 }
@@ -622,9 +621,9 @@ impl TryFrom<pb::wal_buffer_config::Rollover> for WalBufferRollover {
         use pb::wal_buffer_config::Rollover;
         Ok(match proto {
             Rollover::Unknown => return Err(FieldViolation::required("")),
-            Rollover::DropOldSegment => WalBufferRollover::DropOldSegment,
-            Rollover::DropIncoming => WalBufferRollover::DropIncoming,
-            Rollover::ReturnError => WalBufferRollover::ReturnError,
+            Rollover::DropOldSegment => Self::DropOldSegment,
+            Rollover::DropIncoming => Self::DropIncoming,
+            Rollover::ReturnError => Self::ReturnError,
         })
     }
 }
@@ -684,7 +683,7 @@ impl TryFrom<pb::PartitionTemplate> for PartitionTemplate {
 
     fn try_from(proto: pb::PartitionTemplate) -> Result<Self, FieldViolation> {
         let parts = proto.parts.vec_field("parts")?;
-        Ok(PartitionTemplate { parts })
+        Ok(Self { parts })
     }
 }
 
@@ -717,21 +716,21 @@ pub struct StrftimeColumn {
 
 impl From<TemplatePart> for pb::partition_template::part::Part {
     fn from(part: TemplatePart) -> Self {
-        use pb::partition_template::part::{ColumnFormat, Part};
+        use pb::partition_template::part::ColumnFormat;
 
         match part {
-            TemplatePart::Table => Part::Table(Empty {}),
-            TemplatePart::Column(column) => Part::Column(column),
+            TemplatePart::Table => Self::Table(Empty {}),
+            TemplatePart::Column(column) => Self::Column(column),
             TemplatePart::RegexCapture(RegexCapture { column, regex }) => {
-                Part::Regex(ColumnFormat {
+                Self::Regex(ColumnFormat {
                     column,
                     format: regex,
                 })
             }
             TemplatePart::StrftimeColumn(StrftimeColumn { column, format }) => {
-                Part::StrfTime(ColumnFormat { column, format })
+                Self::StrfTime(ColumnFormat { column, format })
             }
-            TemplatePart::TimeFormat(format) => Part::Time(format),
+            TemplatePart::TimeFormat(format) => Self::Time(format),
         }
     }
 }
@@ -743,21 +742,19 @@ impl TryFrom<pb::partition_template::part::Part> for TemplatePart {
         use pb::partition_template::part::{ColumnFormat, Part};
 
         Ok(match proto {
-            Part::Table(_) => TemplatePart::Table,
-            Part::Column(column) => TemplatePart::Column(column.required("column")?),
-            Part::Regex(ColumnFormat { column, format }) => {
-                TemplatePart::RegexCapture(RegexCapture {
-                    column: column.required("regex.column")?,
-                    regex: format.required("regex.format")?,
-                })
-            }
+            Part::Table(_) => Self::Table,
+            Part::Column(column) => Self::Column(column.required("column")?),
+            Part::Regex(ColumnFormat { column, format }) => Self::RegexCapture(RegexCapture {
+                column: column.required("regex.column")?,
+                regex: format.required("regex.format")?,
+            }),
             Part::StrfTime(ColumnFormat { column, format }) => {
-                TemplatePart::StrftimeColumn(StrftimeColumn {
+                Self::StrftimeColumn(StrftimeColumn {
                     column: column.required("strfTime.column")?,
                     format: format.required("strfTime.format")?,
                 })
             }
-            Part::Time(format) => TemplatePart::TimeFormat(format.required("time")?),
+            Part::Time(format) => Self::TimeFormat(format.required("time")?),
         })
     }
 }
@@ -815,7 +812,7 @@ impl TryFrom<pb::subscription_config::Subscription> for Subscription {
     type Error = FieldViolation;
 
     fn try_from(proto: pb::subscription_config::Subscription) -> Result<Self, FieldViolation> {
-        Ok(Subscription {
+        Ok(Self {
             name: proto.name.required("name")?,
             host_group_id: proto.host_group_id.required("host_group_id")?,
             matcher: proto.matcher.optional("matcher")?.unwrap_or_default(),
@@ -862,7 +859,7 @@ impl TryFrom<pb::Matcher> for Matcher {
             None => MatchTables::All,
         };
 
-        Ok(Matcher {
+        Ok(Self {
             tables,
             predicate: Some(proto.predicate),
         })
@@ -882,7 +879,7 @@ pub enum MatchTables {
 
 impl Default for MatchTables {
     fn default() -> Self {
-        MatchTables::All
+        Self::All
     }
 }
 

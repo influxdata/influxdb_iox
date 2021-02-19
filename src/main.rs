@@ -9,7 +9,7 @@
 
 use std::error::Error;
 
-use clap::{App, Arg, ArgMatches, crate_authors, crate_version, SubCommand, value_t};
+use clap::{crate_authors, crate_version, value_t, App, Arg, ArgMatches, SubCommand};
 use dotenv::dotenv;
 use structopt::StructOpt;
 use tokio::runtime::Runtime;
@@ -255,7 +255,6 @@ async fn dispatch_args(matches: ArgMatches<'_>) {
 
         //TODO: Better CLI output system than Vec<String>
         //TODO: Better error handling
-
         ("database", Some(matches)) => {
             if let (subcommand, Some(matches)) = matches.subcommand() {
                 match handle_database_command(subcommand, matches).await {
@@ -342,10 +341,12 @@ async fn handle_database_command(
     match subcommand {
         "create" => {
             let database_name = matches.value_of("NAME").unwrap();
-            client.create_database(DatabaseRules{
-                name: database_name.to_string(),
-                ..Default::default()
-            }).await?;
+            client
+                .create_database(DatabaseRules {
+                    name: database_name.to_string(),
+                    ..Default::default()
+                })
+                .await?;
 
             Ok(vec!["Ok".to_string()])
         }
