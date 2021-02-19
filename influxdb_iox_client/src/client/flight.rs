@@ -22,7 +22,6 @@ use crate::errors::{GrpcError, GrpcQueryError};
 /// ```rust,no_run
 /// #[tokio::main]
 /// # async fn main() {
-/// use data_types::database_rules::DatabaseRules;
 /// use influxdb_iox_client::FlightClientBuilder;
 ///
 /// let mut client = FlightClientBuilder::default()

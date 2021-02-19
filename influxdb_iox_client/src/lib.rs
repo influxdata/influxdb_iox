@@ -22,3 +22,8 @@ pub use client::FlightClient;
 pub use client::PerformQuery;
 
 pub mod errors;
+
+/// Re-export generated_types
+pub mod generated_types {
+    pub use generated_types::influxdata::iox::management::v1::*;
+}

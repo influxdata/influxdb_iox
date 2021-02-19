@@ -48,10 +48,11 @@ pub enum Error {
 /// ```no_run
 /// #[tokio::main]
 /// # async fn main() {
-/// use influxdb_iox_client::{ClientBuilder, DatabaseRules};
+/// use influxdb_iox_client::{ClientBuilder, generated_types::DatabaseRules};
 ///
-/// let client = ClientBuilder::default()
+/// let mut client = ClientBuilder::default()
 ///     .build("http://127.0.0.1:8082")
+///     .await
 ///     .unwrap();
 ///
 /// // Ping the IOx server
@@ -59,7 +60,10 @@ pub enum Error {
 ///
 /// // Create a new database!
 /// client
-///     .create_database("bananas", &DatabaseRules::new())
+///     .create_database(DatabaseRules{
+///     name: "bananas".to_string(),
+///     ..Default::default()
+/// })
 ///     .await
 ///     .expect("failed to create database");
 /// # }
