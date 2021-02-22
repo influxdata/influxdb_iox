@@ -51,23 +51,39 @@ use prost::{
     Message,
 };
 use std::convert::{TryFrom, TryInto};
-use std::fmt::Display;
 use std::iter::FromIterator;
+use tonic::Status;
+use tracing::error;
 
-fn encode_status(code: tonic::Code, message: String, details: Option<Any>) -> tonic::Status {
-    if let Some(details) = details {
-        let mut buffer = BytesMut::new();
-        let status = pb::google::rpc::Status {
-            code: code as i32,
-            message: message.clone(),
-            details: vec![details],
-        };
+// A newtype struct to provide conversion into tonic::Status
+struct EncodeError(prost::EncodeError);
 
-        if status.encode(&mut buffer).is_ok() {
-            return tonic::Status::with_details(code, message, buffer.freeze());
-        }
+impl From<EncodeError> for tonic::Status {
+    fn from(error: EncodeError) -> Self {
+        error!(error=%error.0, "failed to serialise error response details");
+        tonic::Status::unknown(format!("failed to serialise server error: {}", error.0))
     }
-    tonic::Status::new(code, message)
+}
+
+impl From<prost::EncodeError> for EncodeError {
+    fn from(e: prost::EncodeError) -> Self {
+        Self(e)
+    }
+}
+
+fn encode_status(code: tonic::Code, message: String, details: Any) -> tonic::Status {
+    let mut buffer = BytesMut::new();
+
+    let status = pb::google::rpc::Status {
+        code: code as i32,
+        message: message.clone(),
+        details: vec![details],
+    };
+
+    match status.encode(&mut buffer) {
+        Ok(_) => tonic::Status::with_details(code, message, buffer.freeze()),
+        Err(e) => EncodeError(e).into(),
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -99,7 +115,7 @@ impl FieldViolation {
     }
 }
 
-fn encode_bad_request(violation: Vec<FieldViolation>) -> Result<Any, prost::EncodeError> {
+fn encode_bad_request(violation: Vec<FieldViolation>) -> Result<Any, EncodeError> {
     let mut buffer = BytesMut::new();
 
     pb::google::rpc::BadRequest {
@@ -122,11 +138,11 @@ fn encode_bad_request(violation: Vec<FieldViolation>) -> Result<Any, prost::Enco
 impl From<FieldViolation> for tonic::Status {
     fn from(f: FieldViolation) -> Self {
         let message = format!("Violation for field \"{}\": {}", f.field, f.description);
-        encode_status(
-            tonic::Code::InvalidArgument,
-            message,
-            encode_bad_request(vec![f]).ok(),
-        )
+
+        match encode_bad_request(vec![f]) {
+            Ok(details) => encode_status(tonic::Code::InvalidArgument, message, details),
+            Err(e) => e.into(),
+        }
     }
 }
 
@@ -152,7 +168,7 @@ fn encode_resource_info(
     resource_name: String,
     owner: String,
     description: String,
-) -> Result<Any, prost::EncodeError> {
+) -> Result<Any, EncodeError> {
     let mut buffer = BytesMut::new();
 
     pb::google::rpc::ResourceInfo {
@@ -175,17 +191,15 @@ impl From<AlreadyExists> for tonic::Status {
             "Resource {}/{} already exists",
             exists.resource_type, exists.resource_name
         );
-        encode_status(
-            tonic::Code::AlreadyExists,
-            message,
-            encode_resource_info(
-                exists.resource_type,
-                exists.resource_name,
-                exists.owner,
-                exists.description,
-            )
-            .ok(),
-        )
+        match encode_resource_info(
+            exists.resource_type,
+            exists.resource_name,
+            exists.owner,
+            exists.description,
+        ) {
+            Ok(details) => encode_status(tonic::Code::AlreadyExists, message, details),
+            Err(e) => e.into(),
+        }
     }
 }
 
@@ -203,17 +217,15 @@ impl From<NotFound> for tonic::Status {
             "Resource {}/{} not found",
             not_found.resource_type, not_found.resource_name
         );
-        encode_status(
-            tonic::Code::NotFound,
-            message,
-            encode_resource_info(
-                not_found.resource_type,
-                not_found.resource_name,
-                not_found.owner,
-                not_found.description,
-            )
-            .ok(),
-        )
+        match encode_resource_info(
+            not_found.resource_type,
+            not_found.resource_name,
+            not_found.owner,
+            not_found.description,
+        ) {
+            Ok(details) => encode_status(tonic::Code::NotFound, message, details),
+            Err(e) => e.into(),
+        }
     }
 }
 
@@ -224,9 +236,7 @@ pub struct PreconditionViolation {
     pub description: String,
 }
 
-fn encode_precondition_failure(
-    violations: Vec<PreconditionViolation>,
-) -> Result<Any, prost::EncodeError> {
+fn encode_precondition_failure(violations: Vec<PreconditionViolation>) -> Result<Any, EncodeError> {
     use pb::google::rpc::precondition_failure::Violation;
 
     let mut buffer = BytesMut::new();
@@ -255,11 +265,10 @@ impl From<PreconditionViolation> for tonic::Status {
             "Precondition violation {} - {}: {}",
             violation.subject, violation.category, violation.description
         );
-        encode_status(
-            tonic::Code::FailedPrecondition,
-            message,
-            encode_precondition_failure(vec![violation]).ok(),
-        )
+        match encode_precondition_failure(vec![violation]) {
+            Ok(details) => encode_status(tonic::Code::FailedPrecondition, message, details),
+            Err(e) => e.into(),
+        }
     }
 }
 
