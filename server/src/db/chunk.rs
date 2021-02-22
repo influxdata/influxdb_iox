@@ -355,4 +355,32 @@ impl PartitionChunk for DBChunk {
             }
         }
     }
+
+    async fn column_values(
+        &self,
+        table_name: &str,
+        column_name: &str,
+        predicate: &Predicate,
+    ) -> Result<Option<StringSet>, Self::Error> {
+        match self {
+            Self::MutableBuffer { chunk } => {
+                let chunk_predicate = chunk
+                    .compile_predicate(predicate)
+                    .context(MutableBufferChunk)?;
+
+                chunk
+                    .column_values(table_name, column_name, &chunk_predicate)
+                    .context(MutableBufferChunk)
+            }
+            Self::ReadBuffer { .. } => {
+                // TODO hook up read buffer API here when ready. Until
+                // now, fallback to using a full plan
+                // https://github.com/influxdata/influxdb_iox/issues/857
+                Ok(None)
+            }
+            Self::ParquetFile => {
+                unimplemented!("parquet file not implemented for column_values")
+            }
+        }
+    }
 }
