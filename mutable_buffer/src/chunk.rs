@@ -393,7 +393,7 @@ impl Chunk {
     ///
     /// If the predicate cannot be evaluated entirely with metadata,
     /// return `Ok(None)`.
-    pub fn column_values(
+    pub fn tag_column_values(
         &self,
         table_name: &str,
         column_name: &str,
