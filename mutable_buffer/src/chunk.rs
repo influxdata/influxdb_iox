@@ -24,10 +24,10 @@ use query::{
     util::{make_range_expr, AndExprBuilder},
 };
 
-use crate::table::Table;
 use crate::{
     column::Column,
     dictionary::{Dictionary, Error as DictionaryError},
+    table::Table,
 };
 use async_trait::async_trait;
 use snafu::{OptionExt, ResultExt, Snafu};
