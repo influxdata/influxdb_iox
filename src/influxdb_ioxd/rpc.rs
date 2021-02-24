@@ -33,9 +33,9 @@ where
     let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
 
     let services = [
-        "influxdata.platform.storage.IOxTesting",
-        "influxdata.platform.storage.Storage",
-        "arrow.flight.protocol.FlightService",
+        generated_types::STORAGE_SERVICE,
+        generated_types::IOX_TESTING_SERVICE,
+        generated_types::ARROW_SERVICE,
     ];
 
     for service in &services {

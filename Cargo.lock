@@ -1594,6 +1594,7 @@ dependencies = [
  "arrow_deps",
  "data_types",
  "futures-util",
+ "generated_types",
  "rand 0.8.3",
  "reqwest",
  "serde",
