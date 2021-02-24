@@ -364,13 +364,21 @@ impl PartitionChunk for DBChunk {
     ) -> Result<Option<StringSet>, Self::Error> {
         match self {
             Self::MutableBuffer { chunk } => {
+                use mutable_buffer::chunk::Error::UnsupportedColumnTypeForListingValues;
+
                 let chunk_predicate = chunk
                     .compile_predicate(predicate)
                     .context(MutableBufferChunk)?;
 
-                chunk
-                    .tag_column_values(table_name, column_name, &chunk_predicate)
-                    .context(MutableBufferChunk)
+                let values = chunk.tag_column_values(table_name, column_name, &chunk_predicate);
+
+                // if the mutable buffer doesn't support getting
+                // values for this kind of column, report back None
+                if let Err(UnsupportedColumnTypeForListingValues { .. }) = values {
+                    Ok(None)
+                } else {
+                    values.context(MutableBufferChunk)
+                }
             }
             Self::ReadBuffer { .. } => {
                 // TODO hook up read buffer API here when ready. Until

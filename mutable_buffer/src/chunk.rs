@@ -422,7 +422,8 @@ impl Chunk {
             .context(NamedTablePredicateCheck { table_name })?;
 
         if !could_match {
-            return Ok(None);
+            // No columns could match, return empty set
+            return Ok(Default::default());
         }
 
         let column_id =

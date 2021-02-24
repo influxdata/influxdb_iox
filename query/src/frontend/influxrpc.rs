@@ -17,7 +17,7 @@ use data_types::{
     schema::{InfluxColumnType, Schema},
     selection::Selection,
 };
-use snafu::{OptionExt, ResultExt, Snafu};
+use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use tracing::debug;
 
 use crate::{
