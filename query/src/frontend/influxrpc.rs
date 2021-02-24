@@ -337,7 +337,7 @@ impl InfluxRPCPlanner {
                     .await
                     .expect("to be able to get table schema");
 
-                // Skip this column if the tag_name is not a column in this table
+                // Skip this table if the tag_name is not a column in this table
                 let idx = if let Some(idx) = schema.find_index_of(tag_name) {
                     idx
                 } else {
