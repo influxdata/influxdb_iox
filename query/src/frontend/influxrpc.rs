@@ -346,20 +346,20 @@ impl InfluxRPCPlanner {
 
                 // Validate that this really is a Tag column
                 let (influx_column_type, field) = schema.field(idx);
-                if !matches!(influx_column_type, Some(InfluxColumnType::Tag)) {
-                    return InvalidTagColumn {
+                ensure!(
+                    matches!(influx_column_type, Some(InfluxColumnType::Tag)),
+                    InvalidTagColumn {
                         tag_name,
                         influx_column_type,
                     }
-                    .fail();
-                }
-                if field.data_type() != &DataType::Utf8 {
-                    return InternalInvalidTagType {
+                );
+                ensure!(
+                    field.data_type() == &DataType::Utf8,
+                    InternalInvalidTagType {
                         tag_name,
                         data_type: field.data_type().clone(),
                     }
-                    .fail();
-                }
+                );
 
                 // try and get the list of values directly from metadata
                 let maybe_values = chunk
