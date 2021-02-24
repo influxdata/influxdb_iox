@@ -13,7 +13,7 @@ use crate::query_tests::scenarios::*;
 /// runs tag_value(predicate) and compares it to the expected
 /// output
 macro_rules! run_tag_values_test_case {
-    ($DB_SETUP:expr, $TAG_NAME:expr ,$PREDICATE:expr,   $EXPECTED_VALUES:expr) => {
+    ($DB_SETUP:expr, $TAG_NAME:expr, $PREDICATE:expr, $EXPECTED_VALUES:expr) => {
         test_helpers::maybe_start_logging();
         let predicate = $PREDICATE;
         let tag_name = $TAG_NAME;
