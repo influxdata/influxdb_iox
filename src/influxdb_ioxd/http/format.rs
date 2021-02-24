@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 use snafu::{ResultExt, Snafu};
-use std::io::{BufWriter, Read, Seek, Write};
+use std::io::Write;
 
 use serde_json::Value;
 
@@ -28,14 +28,11 @@ pub enum Error {
     #[snafu(display("IO error during Json conversion: {}", source))]
     JsonWrite { source: std::io::Error },
 
-    #[snafu(display("Error creating temp file: {}", source))]
-    TempFileCreation { source: std::io::Error },
+    #[snafu(display("Error converting CSV output to UTF-8: {}", source))]
+    CsvUtf8 { source: std::string::FromUtf8Error },
 
-    #[snafu(display("Temp file error while {}: {}", note, source))]
-    TempFile {
-        note: String,
-        source: std::io::Error,
-    },
+    #[snafu(display("Error converting JSON output to UTF-8: {}", source))]
+    JsonUtf8 { source: std::string::FromUtf8Error },
 }
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -112,54 +109,29 @@ fn batches_to_pretty(batches: &[RecordBatch]) -> Result<String> {
 }
 
 fn batches_to_csv(batches: &[RecordBatch]) -> Result<String> {
-    let mut tmp = tempfile::tempfile().context(TempFileCreation)?;
+    let mut bytes = vec![];
 
-    let tmp_writer = BufWriter::new(tmp.try_clone().context(TempFile {
-        note: "cloning filehandle",
-    })?);
+    {
+        let mut writer = WriterBuilder::new().has_headers(true).build(&mut bytes);
 
-    let mut writer = WriterBuilder::new().has_headers(true).build(tmp_writer);
-
-    for batch in batches {
-        writer.write(batch).context(CsvArrow)?;
+        for batch in batches {
+            writer.write(batch).context(CsvArrow)?;
+        }
     }
-    // drop the write to ensure we have flushed all data
-    std::mem::drop(writer);
-
-    tmp.seek(std::io::SeekFrom::Start(0)).context(TempFile {
-        note: "seeking to start",
-    })?;
-
-    let mut csv = String::new();
-    tmp.read_to_string(&mut csv).context(TempFile {
-        note: "reading as string",
-    })?;
-
+    let csv = String::from_utf8(bytes).context(CsvUtf8)?;
     Ok(csv)
 }
 
 fn batches_to_json(batches: &[RecordBatch]) -> Result<String> {
-    let mut tmp = tempfile::tempfile().context(TempFileCreation)?;
+    let mut bytes = vec![];
 
-    let tmp_writer = BufWriter::new(tmp.try_clone().context(TempFile {
-        note: "cloning filehandle",
-    })?);
+    {
+        let mut writer = JsonArrayWriter::new(&mut bytes);
+        writer.write_batches(batches)?;
+        writer.finish()?;
+    }
 
-    let mut writer = JsonArrayWriter::new(tmp_writer);
-    writer.write_batches(batches)?;
-    writer.finish()?;
-
-    // drop the write to ensure we have flushed all data
-    std::mem::drop(writer);
-
-    tmp.seek(std::io::SeekFrom::Start(0)).context(TempFile {
-        note: "seeking to start",
-    })?;
-
-    let mut json = String::new();
-    tmp.read_to_string(&mut json).context(TempFile {
-        note: "reading as string",
-    })?;
+    let json = String::from_utf8(bytes).context(JsonUtf8)?;
 
     Ok(json)
 }
@@ -173,7 +145,7 @@ fn batches_to_json(batches: &[RecordBatch]) -> Result<String> {
 /// TODO contribute this back to arrow) alongside  (or maybe have it be an
 /// option)
 
-struct JsonArrayWriter<W>
+pub struct JsonArrayWriter<W>
 where
     W: Write,
 {
