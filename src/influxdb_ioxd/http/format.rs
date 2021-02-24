@@ -2,20 +2,31 @@
 
 use serde::Deserialize;
 use snafu::{ResultExt, Snafu};
-use std::io::{BufWriter, Read, Seek};
+use std::io::{BufWriter, Read, Seek, Write};
 
-use arrow_deps::arrow::{self, csv::WriterBuilder, error::ArrowError, record_batch::RecordBatch};
+use serde_json::Value;
+
+use arrow_deps::arrow::{
+    self, csv::WriterBuilder, error::ArrowError, json::writer::record_batches_to_json_rows,
+    record_batch::RecordBatch,
+};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Arrow pretty printing error {}", source))]
+    #[snafu(display("Arrow pretty printing error: {}", source))]
     PrettyArrow { source: ArrowError },
 
-    #[snafu(display("Arrow csv printing error {}", source))]
+    #[snafu(display("Arrow csv printing error: {}", source))]
     CsvArrow { source: ArrowError },
 
-    #[snafu(display("Arrow json printing error {}", source))]
+    #[snafu(display("Arrow json printing error: {}", source))]
     JsonArrow { source: ArrowError },
+
+    #[snafu(display("Json conversion error: {}", source))]
+    JsonConversion { source: serde_json::Error },
+
+    #[snafu(display("IO error during Json conversion: {}", source))]
+    JsonWrite { source: std::io::Error },
 
     #[snafu(display("Error creating temp file: {}", source))]
     TempFileCreation { source: std::io::Error },
@@ -80,10 +91,12 @@ impl QueryOutputFormat {
     ///
     /// JSON:
     ///
-    /// Example:
+    /// Example (newline added for clarity):
     /// ```text
-    /// {"bottom_degrees":50.4,"location":"santa_monica","state":"CA","surface_degrees":65.2,"time":1568756160}
-    /// {"location":"Boston","state":"MA","surface_degrees":50.2,"time":1568756160}
+    /// [
+    ///  {"bottom_degrees":50.4,"location":"santa_monica","state":"CA","surface_degrees":65.2,"time":1568756160},
+    ///  {"location":"Boston","state":"MA","surface_degrees":50.2,"time":1568756160}
+    /// ]
     /// ```
     pub fn format(&self, batches: &[RecordBatch]) -> Result<String> {
         match self {
@@ -125,6 +138,67 @@ fn batches_to_csv(batches: &[RecordBatch]) -> Result<String> {
     Ok(csv)
 }
 
+/// Writes out well formed JSON arays in a streaming fashion
+///
+/// [{"foo": "bar"}, {"foo": "baz"}]
+///
+/// This is based on the arrow JSON writer (json::writer::Writer)
+///
+/// TODO contribute this back to arrow) alongside  (or maybe have it be an
+/// option)
+
+struct JsonArrayWriter<W>
+where
+    W: Write,
+{
+    started: bool,
+    finished: bool,
+    writer: W,
+}
+
+impl<W> JsonArrayWriter<W>
+where
+    W: Write,
+{
+    fn new(writer: W) -> Self {
+        Self {
+            writer,
+            started: false,
+            finished: false,
+        }
+    }
+
+    pub fn write_row(&mut self, row: &Value) -> Result<()> {
+        if !self.started {
+            self.writer.write_all(b"[").context(JsonWrite)?;
+            self.started = true;
+        } else {
+            self.writer.write_all(b",").context(JsonWrite)?;
+        }
+        self.writer
+            .write_all(&serde_json::to_vec(row).context(JsonConversion)?)
+            .context(JsonWrite)?;
+        Ok(())
+    }
+
+    pub fn write_batches(&mut self, batches: &[RecordBatch]) -> Result<()> {
+        for row in record_batches_to_json_rows(batches) {
+            self.write_row(&Value::Object(row))?;
+        }
+        Ok(())
+    }
+
+    /// tell the writer there are is no more data to come so it can
+    /// write the final `'['`
+    pub fn finish(&mut self) -> Result<()> {
+        if self.started && !self.finished {
+            self.writer.write_all(b"]").context(JsonWrite)?;
+            self.finished = true;
+        }
+        Ok(())
+    }
+}
+
 fn batches_to_json(batches: &[RecordBatch]) -> Result<String> {
     let mut tmp = tempfile::tempfile().context(TempFileCreation)?;
 
@@ -132,8 +206,9 @@ fn batches_to_json(batches: &[RecordBatch]) -> Result<String> {
         note: "cloning filehandle",
     })?);
 
-    let mut writer = arrow::json::Writer::new(tmp_writer);
-    writer.write_batches(batches).context(JsonArrow)?;
+    let mut writer = JsonArrayWriter::new(tmp_writer);
+    writer.write_batches(batches)?;
+    writer.finish()?;
 
     // drop the write to ensure we have flushed all data
     std::mem::drop(writer);

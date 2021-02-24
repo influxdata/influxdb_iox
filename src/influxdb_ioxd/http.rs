@@ -996,9 +996,7 @@ mod tests {
         assert_eq!(get_content_type(&response), "application/json");
 
         // Note two json records: one record on each line
-        let res = r#"{"bottom_degrees":50.4,"location":"santa_monica","state":"CA","surface_degrees":65.2,"time":1568756160}
-{"location":"Boston","state":"MA","surface_degrees":50.2,"time":1568756160}
-"#;
+        let res = r#"[{"bottom_degrees":50.4,"location":"santa_monica","state":"CA","surface_degrees":65.2,"time":1568756160},{"location":"Boston","state":"MA","surface_degrees":50.2,"time":1568756160}]"#;
         check_response("query", response, StatusCode::OK, res).await;
 
         Ok(())
