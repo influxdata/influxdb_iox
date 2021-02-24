@@ -142,10 +142,8 @@ fn batches_to_json(batches: &[RecordBatch]) -> Result<String> {
 ///
 /// This is based on the arrow JSON writer (json::writer::Writer)
 ///
-/// TODO contribute this back to arrow) alongside  (or maybe have it be an
-/// option)
-
-pub struct JsonArrayWriter<W>
+/// TODO contribute this back to arrow: https://issues.apache.org/jira/browse/ARROW-11773
+struct JsonArrayWriter<W>
 where
     W: Write,
 {
@@ -167,7 +165,8 @@ where
     }
 
     /// Consume self and return the inner writer
-    pub fn to_inner(self) -> W {
+    #[cfg(test)]
+    pub fn into_inner(self) -> W {
         self.writer
     }
 
@@ -212,7 +211,7 @@ mod tests {
     fn json_writer_empty() {
         let mut writer = JsonArrayWriter::new(vec![] as Vec<u8>);
         writer.finish().unwrap();
-        assert_eq!(String::from_utf8(writer.to_inner()).unwrap(), "");
+        assert_eq!(String::from_utf8(writer.into_inner()).unwrap(), "");
     }
 
     #[test]
@@ -222,7 +221,7 @@ mod tests {
         writer.write_row(&v).unwrap();
         writer.finish().unwrap();
         assert_eq!(
-            String::from_utf8(writer.to_inner()).unwrap(),
+            String::from_utf8(writer.into_inner()).unwrap(),
             r#"[{"an":"object"}]"#
         );
     }
@@ -236,7 +235,7 @@ mod tests {
         writer.write_row(&v).unwrap();
         writer.finish().unwrap();
         assert_eq!(
-            String::from_utf8(writer.to_inner()).unwrap(),
+            String::from_utf8(writer.into_inner()).unwrap(),
             r#"[{"an":"object"},{"another":"object"}]"#
         );
     }
