@@ -71,8 +71,8 @@ impl QueryOutputFormat {
 }
 
 impl QueryOutputFormat {
-    /// Format the [`RecordBatch`]es into a String in one of the following
-    /// formats:
+    /// Format the [`RecordBatch`]es into a String in one of the
+    /// following formats:
     ///
     /// Pretty:
     /// ```text
@@ -91,7 +91,7 @@ impl QueryOutputFormat {
     ///
     /// JSON:
     ///
-    /// Example (newline added for clarity):
+    /// Example (newline + whitespace added for clarity):
     /// ```text
     /// [
     ///  {"bottom_degrees":50.4,"location":"santa_monica","state":"CA","surface_degrees":65.2,"time":1568756160},
@@ -138,6 +138,32 @@ fn batches_to_csv(batches: &[RecordBatch]) -> Result<String> {
     Ok(csv)
 }
 
+fn batches_to_json(batches: &[RecordBatch]) -> Result<String> {
+    let mut tmp = tempfile::tempfile().context(TempFileCreation)?;
+
+    let tmp_writer = BufWriter::new(tmp.try_clone().context(TempFile {
+        note: "cloning filehandle",
+    })?);
+
+    let mut writer = JsonArrayWriter::new(tmp_writer);
+    writer.write_batches(batches)?;
+    writer.finish()?;
+
+    // drop the write to ensure we have flushed all data
+    std::mem::drop(writer);
+
+    tmp.seek(std::io::SeekFrom::Start(0)).context(TempFile {
+        note: "seeking to start",
+    })?;
+
+    let mut json = String::new();
+    tmp.read_to_string(&mut json).context(TempFile {
+        note: "reading as string",
+    })?;
+
+    Ok(json)
+}
+
 /// Writes out well formed JSON arays in a streaming fashion
 ///
 /// [{"foo": "bar"}, {"foo": "baz"}]
@@ -166,6 +192,11 @@ where
             started: false,
             finished: false,
         }
+    }
+
+    /// Consume self and return the inner writer
+    pub fn to_inner(self) -> W {
+        self.writer
     }
 
     pub fn write_row(&mut self, row: &Value) -> Result<()> {
@@ -199,28 +230,42 @@ where
     }
 }
 
-fn batches_to_json(batches: &[RecordBatch]) -> Result<String> {
-    let mut tmp = tempfile::tempfile().context(TempFileCreation)?;
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
 
-    let tmp_writer = BufWriter::new(tmp.try_clone().context(TempFile {
-        note: "cloning filehandle",
-    })?);
+    use super::*;
 
-    let mut writer = JsonArrayWriter::new(tmp_writer);
-    writer.write_batches(batches)?;
-    writer.finish()?;
+    #[test]
+    fn json_writer_empty() {
+        let mut writer = JsonArrayWriter::new(vec![] as Vec<u8>);
+        writer.finish().unwrap();
+        assert_eq!(String::from_utf8(writer.to_inner()).unwrap(), "");
+    }
 
-    // drop the write to ensure we have flushed all data
-    std::mem::drop(writer);
+    #[test]
+    fn json_writer_one_row() {
+        let mut writer = JsonArrayWriter::new(vec![] as Vec<u8>);
+        let v = json!({ "an": "object" });
+        writer.write_row(&v).unwrap();
+        writer.finish().unwrap();
+        assert_eq!(
+            String::from_utf8(writer.to_inner()).unwrap(),
+            r#"[{"an":"object"}]"#
+        );
+    }
 
-    tmp.seek(std::io::SeekFrom::Start(0)).context(TempFile {
-        note: "seeking to start",
-    })?;
-
-    let mut json = String::new();
-    tmp.read_to_string(&mut json).context(TempFile {
-        note: "reading as string",
-    })?;
-
-    Ok(json)
+    #[test]
+    fn json_writer_two_rows() {
+        let mut writer = JsonArrayWriter::new(vec![] as Vec<u8>);
+        let v = json!({ "an": "object" });
+        writer.write_row(&v).unwrap();
+        let v = json!({ "another": "object" });
+        writer.write_row(&v).unwrap();
+        writer.finish().unwrap();
+        assert_eq!(
+            String::from_utf8(writer.to_inner()).unwrap(),
+            r#"[{"an":"object"},{"another":"object"}]"#
+        );
+    }
 }
