@@ -26,7 +26,7 @@ use server::{ConnectionManager, Server as AppServer};
 // External crates
 use bytes::{Bytes, BytesMut};
 use futures::{self, StreamExt};
-use http::header::CONTENT_ENCODING;
+use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use hyper::{Body, Method, Request, Response, StatusCode};
 use routerify::{prelude::*, Middleware, RequestInfo, Router, RouterError, RouterService};
 use serde::{Deserialize, Serialize};
@@ -158,6 +158,9 @@ pub enum ApplicationError {
     #[snafu(display("Database {} does not have a WAL", name))]
     WALNotFound { name: String },
 
+    #[snafu(display("Internal error creating HTTP response:  {}", source))]
+    CreatingResponse { source: http::Error },
+
     #[snafu(display(
         "Error formatting results of SQL query '{}' using '{:?}': {}",
         q,
@@ -199,6 +202,7 @@ impl ApplicationError {
             Self::DatabaseNameError { .. } => self.bad_request(),
             Self::DatabaseNotFound { .. } => self.not_found(),
             Self::WALNotFound { .. } => self.not_found(),
+            Self::CreatingResponse { .. } => self.internal_error(),
             Self::FormattingResult { .. } => self.internal_error(),
         }
     }
@@ -478,7 +482,14 @@ async fn query<M: ConnectionManager + Send + Sync + Debug + 'static>(
         .format(&batches)
         .context(FormattingResult { q, format })?;
 
-    Ok(Response::new(Body::from(results.into_bytes())))
+    let body = Body::from(results.into_bytes());
+
+    let response = Response::builder()
+        .header(CONTENT_TYPE, format.content_type())
+        .body(body)
+        .context(CreatingResponse)?;
+
+    Ok(response)
 }
 
 #[tracing::instrument(level = "debug")]
@@ -775,7 +786,6 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use arrow_deps::{arrow::record_batch::RecordBatch, assert_table_eq};
-    use http::header;
     use query::exec::Executor;
     use reqwest::{Client, Response};
 
@@ -907,6 +917,8 @@ mod tests {
             .send()
             .await;
 
+        assert_eq!(get_content_type(&response), "text/plain");
+
         let res = "+----------------+--------------+-------+-----------------+------------+\n\
                    | bottom_degrees | location     | state | surface_degrees | time       |\n\
                    +----------------+--------------+-------+-----------------+------------+\n\
@@ -922,6 +934,8 @@ mod tests {
             ))
             .send()
             .await;
+        assert_eq!(get_content_type(&response), "text/plain");
+
         check_response("query", response, StatusCode::OK, res).await;
 
         Ok(())
@@ -939,6 +953,8 @@ mod tests {
             ))
             .send()
             .await;
+
+        assert_eq!(get_content_type(&response), "text/csv");
 
         let res = "bottom_degrees,location,state,surface_degrees,time\n\
                    50.4,santa_monica,CA,65.2,1568756160\n";
@@ -976,6 +992,8 @@ mod tests {
             ))
             .send()
             .await;
+
+        assert_eq!(get_content_type(&response), "application/json");
 
         // Note two json records: one record on each line
         let res = r#"{"bottom_degrees":50.4,"location":"santa_monica","state":"CA","surface_degrees":65.2,"time":1568756160}
@@ -1018,7 +1036,7 @@ mod tests {
                 "{}/api/v2/write?bucket={}&org={}",
                 server_url, bucket_name, org_name
             ))
-            .header(header::CONTENT_ENCODING, "gzip")
+            .header(CONTENT_ENCODING, "gzip")
             .body(gzip_str(lp_data))
             .send()
             .await;
@@ -1270,6 +1288,19 @@ mod tests {
 
         // Requesting segments from future - expect no results
         assert_eq!(r4.segments.len(), 0);
+    }
+
+    fn get_content_type(response: &Result<Response, reqwest::Error>) -> String {
+        if let Ok(response) = response {
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .map(|v| v.to_str().unwrap())
+                .unwrap_or("")
+                .to_string()
+        } else {
+            "".to_string()
+        }
     }
 
     /// checks a http response against expected results

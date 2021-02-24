@@ -49,6 +49,17 @@ impl Default for QueryOutputFormat {
 }
 
 impl QueryOutputFormat {
+    /// Return the content type of the relevant format
+    pub fn content_type(&self) -> &'static str {
+        match self {
+            Self::Pretty => "text/plain",
+            Self::CSV => "text/csv",
+            Self::JSON => "application/json",
+        }
+    }
+}
+
+impl QueryOutputFormat {
     /// Format the [`RecordBatch`]es into a String in one of the following
     /// formats:
     ///
