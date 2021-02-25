@@ -325,7 +325,7 @@ impl PartitionChunk for DBChunk {
                     .context(MutableBufferChunk)?;
 
                 chunk
-                    .column_names(table_name, &chunk_predicate)
+                    .column_names(table_name, &chunk_predicate, columns)
                     .context(MutableBufferChunk)
             }
             Self::ReadBuffer {
