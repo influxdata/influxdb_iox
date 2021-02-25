@@ -199,6 +199,8 @@ impl InfluxRPCPlanner {
                     "finding columns in table"
                 );
 
+                ///////////////////
+                // Nga
                 // get only tag columns
                 let schema = chunk
                     .table_schema(&table_name, Selection::All)
@@ -214,14 +216,19 @@ impl InfluxRPCPlanner {
                         }
                     })
                     .collect::<Vec<&str>>();
+
+                println!("NGA: column_names: {:?}", column_names);
                 let selection = Selection::Some(&column_names);
 
                 // filter the columns further from the predicate
                 let maybe_names = chunk
                     .column_names(&table_name, &predicate, selection)
+                    //.column_names(&table_name, &predicate, Selection::All) // Nga: to be removed
                     .await
                     .map_err(|e| Box::new(e) as _)
                     .context(FindingColumnNames)?;
+                
+                println!("NGA: maybe_names: {:?}", maybe_names);
 
                 match maybe_names {
                     Some(mut names) => {
@@ -242,6 +249,55 @@ impl InfluxRPCPlanner {
                             .push(Arc::clone(&chunk));
                     }
                 }
+                println!("NGA: known_columns: {:?}", known_columns);
+                
+
+                //////////////////
+                // NGA: To be removed
+                //try and get the list of columns directly from metadata
+                // let maybe_names = chunk
+                //     //.column_names(&table_name, &predicate)
+                //     .column_names(&table_name, &predicate, Selection::All)
+                //     .await
+                //     .map_err(|e| Box::new(e) as _)
+                //     .context(FindingColumnNames)?;
+                // println!("NGA: maybe_names: {:?}", maybe_names);
+
+                // match maybe_names {
+                //     Some(names) => {
+                //         debug!(names=?names, chunk_id = chunk.id(), "column names found from metadata");
+
+                //         // can restrict the output to only the tag columns
+                //         let schema = chunk
+                //             .table_schema(&table_name, Selection::All)
+                //             .await
+                //             .expect("to be able to get table schema");
+                //         let mut names = self.restrict_to_tags(&schema, names);
+                //         debug!(names=?names, chunk_id = chunk.id(), "column names found from metadata");
+
+                //         known_columns.append(&mut names);
+                //         println!("NGA: known_columns: {:?}", known_columns);
+                //     }
+                //     None => {
+                //         debug!(
+                //             table_name = table_name.as_str(),
+                //             chunk_id = chunk.id(),
+                //             "column names need full plan"
+                //         );
+                //         // can't get columns only from metadata, need
+                //         // a general purpose plan
+                //         need_full_plans
+                //             .entry(table_name)
+                //             .or_insert_with(Vec::new)
+                //             .push(Arc::clone(&chunk));
+                //     }
+                // }
+                // // Nga: make it fail to see what in there
+                // let mut s: BTreeSet<String> = BTreeSet::<String>::new();
+                // s.insert(String::from("NGA"));
+                // known_columns.append(&mut s);
+                // println!("NGA: known_columns: {:?}", known_columns);
+                /////////////////
             }
         }
 
@@ -363,7 +419,7 @@ impl InfluxRPCPlanner {
         Ok(table_names)
     }
 
-/* Nga: to be removed because no longer needed
+// Nga: to be removed because no longer needed
     /// removes any columns from Names that are not "Tag"s in the Influx Data
     /// Model
     fn restrict_to_tags(&self, schema: &Schema, names: BTreeSet<String>) -> BTreeSet<String> {
@@ -375,7 +431,7 @@ impl InfluxRPCPlanner {
             })
             .collect()
     }
-*/ 
+
 
     /// Creates a DataFusion LogicalPlan that returns column *names* as a
     /// single column of Strings for a specific table

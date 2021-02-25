@@ -523,7 +523,7 @@ impl TestChunk {
             schema
                 .iter()
                 .map(|(_, field)| field.name().to_string())
-                //.filter(|col| columns.contains(&col.as_str()))
+                .filter(|col| columns.contains(&col.as_str()))
                 .collect::<StringSet>()
         });
 
@@ -614,21 +614,19 @@ impl PartitionChunk for TestChunk {
         // save the predicate
         self.predicate.lock().replace(predicate.clone());
 
-        /* nga
-        let column_names = self.table_schemas.get(table_name).map(|schema| {
-            schema
-                .iter()
-                .map(|(_, field)| field.name().to_string())   
-                .collect::<StringSet>()
-        });
-        */
-
-        // Nga Todo: only return columns specified in selection
+        // NGA: to be removed
+        // let column_names = self.table_schemas.get(table_name).map(|schema| {
+        //     schema
+        //         .iter()
+        //         .map(|(_, field)| field.name().to_string())   
+        //         .collect::<StringSet>()
+        // });
+        
+        // only return columns specified in selection
         let column_names = match selection {
             Selection::All => self.all_column_names(table_name), 
             Selection::Some(cols) => self.specific_column_names_selection(table_name, cols) 
         };
-
         Ok(column_names)
     }
 }

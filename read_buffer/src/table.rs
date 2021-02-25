@@ -464,6 +464,19 @@ impl Table {
         }
 
         dst
+        // Nga to discuss with Edd: Now even if the input parameter "columns" 
+        // only include Tag columns (e.g ["city", "county", "state"]),
+        // this function seems return more columns (e.g. "city", "county", "state", "temp", "time"}). 
+        // The "temp" and "time" are added.
+        // Let us talk and see what is the right behavior. If you always want
+        // to keep extra columns such as "temp", "time", I will have to remove them in the
+        // frontend's function tag_keys to have the plan work correctly. But
+        // if I understand correctly, the whole point of pushing "columns: Selection<'_>"
+        // down until here is to let us only consider those pushed down columns. 
+
+        // The reason it works before my changes because the tag_keys function filters all but 
+        // Tag columns after this function is invoked. With my changes, I made the filter happen
+        // before this function because I assume this function only returns subset of the input parameter "columns"
     }
 
     /// Returns the distinct set of tag values (column values) for each provided
