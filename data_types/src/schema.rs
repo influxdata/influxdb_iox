@@ -298,10 +298,32 @@ impl Schema {
 
     /// Returns an iterator of (Option<InfluxColumnType>, &Field) for
     /// all the columns of this schema, in order
-    pub fn iter(&self) -> SchemaIter<'_> {
-        SchemaIter {
-            schema: self,
-            idx: 0,
+    pub fn iter(&self) -> SchemaIter<'_, AllColumns> {
+        SchemaIter::new(self)
+    }
+
+    /// Returns an iterator of `&Field` for all the tag columns of
+    /// this schema, in order
+    pub fn tags_iter(&self) -> ArrowFieldIter<'_, TagColumns> {
+        ArrowFieldIter {
+            inner: SchemaIter::new(self),
+        }
+    }
+
+    /// Returns an iterator of `&Field` for all the field columns of
+    /// this schema, in order
+    pub fn fields_iter(&self) -> ArrowFieldIter<'_, FieldColumns> {
+        ArrowFieldIter {
+            inner: SchemaIter::new(self),
+        }
+    }
+
+    /// Returns an iterator of `&Field` for all the timestamp columns
+    /// of this schema, in order. At the time of writing there should
+    /// be only one or 0 such columns
+    pub fn time_iter(&self) -> ArrowFieldIter<'_, TimeColumns> {
+        ArrowFieldIter {
+            inner: SchemaIter::new(self),
         }
     }
 
@@ -567,29 +589,130 @@ impl From<&InfluxColumnType> for ArrowDataType {
     }
 }
 
-/// Thing that implements iterator over a Schema's columns.
-pub struct SchemaIter<'a> {
-    schema: &'a Schema,
-    idx: usize,
+/// Trait for things that can filter for specific types of columns
+/// while iterating
+pub trait ColumnFilter: Default {
+    /// Return true if this column should be included in the results
+    fn passes(&self, _influx_column_type: Option<InfluxColumnType>, _field: &ArrowField) -> bool {
+        true
+    }
 }
 
-impl<'a> fmt::Debug for SchemaIter<'a> {
+#[derive(Default, Debug)]
+/// Return all columns
+pub struct AllColumns {}
+impl ColumnFilter for AllColumns {}
+
+#[derive(Default, Debug)]
+/// Return all Tag columns
+pub struct TagColumns {}
+impl ColumnFilter for TagColumns {
+    fn passes(&self, influx_column_type: Option<InfluxColumnType>, _field: &ArrowField) -> bool {
+        matches!(influx_column_type, Some(InfluxColumnType::Tag))
+    }
+}
+
+#[derive(Default, Debug)]
+/// Return all Field columns
+pub struct FieldColumns {}
+impl ColumnFilter for FieldColumns {
+    fn passes(&self, influx_column_type: Option<InfluxColumnType>, _field: &ArrowField) -> bool {
+        matches!(influx_column_type, Some(InfluxColumnType::Field(_)))
+    }
+}
+
+#[derive(Default, Debug)]
+/// Return all(?) timestamp columns
+pub struct TimeColumns {}
+impl ColumnFilter for TimeColumns {
+    fn passes(&self, influx_column_type: Option<InfluxColumnType>, _field: &ArrowField) -> bool {
+        matches!(influx_column_type, Some(InfluxColumnType::Timestamp))
+    }
+}
+
+/// Thing that iterates over fields of a specific type
+#[derive(Debug)]
+pub struct ArrowFieldIter<'a, F>
+where
+    F: ColumnFilter,
+{
+    inner: SchemaIter<'a, F>,
+}
+
+impl<'a, F> Iterator for ArrowFieldIter<'a, F>
+where
+    F: ColumnFilter,
+{
+    type Item = &'a ArrowField;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // discard the field type
+        self.inner.next().map(|(_, field)| field)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+/// Thing that implements iterator over a Schema's columns.
+pub struct SchemaIter<'a, F>
+where
+    F: ColumnFilter,
+{
+    schema: &'a Schema,
+    idx: usize,
+    filter: F,
+}
+
+impl<'a, F> fmt::Debug for SchemaIter<'a, F>
+where
+    F: ColumnFilter,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "SchemaIter<{}>", self.idx)
     }
 }
 
-impl<'a> Iterator for SchemaIter<'a> {
-    type Item = (Option<InfluxColumnType>, &'a ArrowField);
+impl<'a, F> SchemaIter<'a, F>
+where
+    F: ColumnFilter,
+{
+    fn new(schema: &'a Schema) -> Self {
+        Self {
+            schema,
+            idx: 0,
+            filter: F::default(),
+        }
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
+    /// return the next index to try in the schema, or None if we have reached
+    /// the end
+    fn next_idx(&mut self) -> Option<usize> {
         if self.idx < self.schema.len() {
-            let ret = self.schema.field(self.idx);
+            let idx = self.idx;
             self.idx += 1;
-            Some(ret)
+            Some(idx)
         } else {
             None
         }
+    }
+}
+
+impl<'a, F> Iterator for SchemaIter<'a, F>
+where
+    F: ColumnFilter,
+{
+    type Item = (Option<InfluxColumnType>, &'a ArrowField);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(idx) = self.next_idx() {
+            let (influx_colum_type, field) = self.schema.field(idx);
+            if self.filter.passes(influx_colum_type, field) {
+                return Some((influx_colum_type, field));
+            }
+        }
+        None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -829,15 +952,47 @@ mod test {
         }
     }
 
+    /// Build an empty iterator
+    fn empty_schema() -> Schema {
+        SchemaBuilder::new().build().unwrap()
+    }
+
+    #[test]
+    fn test_iter_empty() {
+        assert_eq!(empty_schema().iter().count(), 0);
+    }
+
+    #[test]
+    fn test_tags_iter_empty() {
+        assert_eq!(empty_schema().tags_iter().count(), 0);
+    }
+
+    #[test]
+    fn test_fields_iter_empty() {
+        assert_eq!(empty_schema().fields_iter().count(), 0);
+    }
+
+    #[test]
+    fn test_time_iter_empty() {
+        assert_eq!(empty_schema().time_iter().count(), 0);
+    }
+
+    /// Build a schema for testing iterators
+    fn iter_schema() -> Schema {
+        SchemaBuilder::new()
+            .influx_field("field1", Float)
+            .tag("tag1")
+            .timestamp()
+            .influx_field("field2", String)
+            .influx_field("field3", String)
+            .tag("tag2")
+            .build()
+            .unwrap()
+    }
+
     #[test]
     fn test_iter() {
-        let schema = SchemaBuilder::new()
-            .influx_field("the_field", String)
-            .tag("the_tag")
-            .timestamp()
-            .measurement("the_measurement")
-            .build()
-            .unwrap();
+        let schema = iter_schema();
 
         // test schema iterator and field accessor match up
         for (i, (iter_col_type, iter_field)) in schema.iter().enumerate() {
@@ -845,7 +1000,40 @@ mod test {
             assert_eq!(iter_col_type, col_type);
             assert_eq!(iter_field, field);
         }
-        assert_eq!(schema.iter().count(), 3);
+        assert_eq!(schema.iter().count(), 6);
+    }
+
+    #[test]
+    fn test_tags_iter() {
+        let schema = iter_schema();
+
+        let mut iter = schema.tags_iter();
+        assert_eq!(iter.next().unwrap().name(), "tag1");
+        assert_eq!(iter.next().unwrap().name(), "tag2");
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_fields_iter() {
+        let schema = iter_schema();
+
+        let mut iter = schema.fields_iter();
+        assert_eq!(iter.next().unwrap().name(), "field1");
+        assert_eq!(iter.next().unwrap().name(), "field2");
+        assert_eq!(iter.next().unwrap().name(), "field3");
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_time_iter() {
+        let schema = iter_schema();
+
+        let mut iter = schema.time_iter();
+        assert_eq!(iter.next().unwrap().name(), "time");
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next(), None);
     }
 
     #[test]
