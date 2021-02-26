@@ -298,33 +298,45 @@ impl Schema {
 
     /// Returns an iterator of (Option<InfluxColumnType>, &Field) for
     /// all the columns of this schema, in order
-    pub fn iter(&self) -> SchemaIter<'_, AllColumns> {
+    pub fn iter(&self) -> SchemaIter<'_> {
         SchemaIter::new(self)
     }
 
     /// Returns an iterator of `&Field` for all the tag columns of
     /// this schema, in order
-    pub fn tags_iter(&self) -> ArrowFieldIter<'_, TagColumns> {
-        ArrowFieldIter {
-            inner: SchemaIter::new(self),
-        }
+    pub fn tags_iter(&self) -> impl Iterator<Item = &ArrowField> {
+        self.iter().filter_map(|(influx_column_type, field)| {
+            if matches!(influx_column_type, Some(InfluxColumnType::Tag)) {
+                Some(field)
+            } else {
+                None
+            }
+        })
     }
 
     /// Returns an iterator of `&Field` for all the field columns of
     /// this schema, in order
-    pub fn fields_iter(&self) -> ArrowFieldIter<'_, FieldColumns> {
-        ArrowFieldIter {
-            inner: SchemaIter::new(self),
-        }
+    pub fn fields_iter(&self) -> impl Iterator<Item = &ArrowField> {
+        self.iter().filter_map(|(influx_column_type, field)| {
+            if matches!(influx_column_type, Some(InfluxColumnType::Field(_))) {
+                Some(field)
+            } else {
+                None
+            }
+        })
     }
 
     /// Returns an iterator of `&Field` for all the timestamp columns
     /// of this schema, in order. At the time of writing there should
     /// be only one or 0 such columns
-    pub fn time_iter(&self) -> ArrowFieldIter<'_, TimeColumns> {
-        ArrowFieldIter {
-            inner: SchemaIter::new(self),
-        }
+    pub fn time_iter(&self) -> impl Iterator<Item = &ArrowField> {
+        self.iter().filter_map(|(influx_column_type, field)| {
+            if matches!(influx_column_type, Some(InfluxColumnType::Timestamp)) {
+                Some(field)
+            } else {
+                None
+            }
+        })
     }
 
     /// Merges any new columns from new_schema, consuming self. If the
@@ -589,130 +601,35 @@ impl From<&InfluxColumnType> for ArrowDataType {
     }
 }
 
-/// Trait for things that can filter for specific types of columns
-/// while iterating
-pub trait ColumnFilter: Default {
-    /// Return true if this column should be included in the results
-    fn passes(&self, _influx_column_type: Option<InfluxColumnType>, _field: &ArrowField) -> bool {
-        true
-    }
-}
-
-#[derive(Default, Debug)]
-/// Return all columns
-pub struct AllColumns {}
-impl ColumnFilter for AllColumns {}
-
-#[derive(Default, Debug)]
-/// Return all Tag columns
-pub struct TagColumns {}
-impl ColumnFilter for TagColumns {
-    fn passes(&self, influx_column_type: Option<InfluxColumnType>, _field: &ArrowField) -> bool {
-        matches!(influx_column_type, Some(InfluxColumnType::Tag))
-    }
-}
-
-#[derive(Default, Debug)]
-/// Return all Field columns
-pub struct FieldColumns {}
-impl ColumnFilter for FieldColumns {
-    fn passes(&self, influx_column_type: Option<InfluxColumnType>, _field: &ArrowField) -> bool {
-        matches!(influx_column_type, Some(InfluxColumnType::Field(_)))
-    }
-}
-
-#[derive(Default, Debug)]
-/// Return all(?) timestamp columns
-pub struct TimeColumns {}
-impl ColumnFilter for TimeColumns {
-    fn passes(&self, influx_column_type: Option<InfluxColumnType>, _field: &ArrowField) -> bool {
-        matches!(influx_column_type, Some(InfluxColumnType::Timestamp))
-    }
-}
-
-/// Thing that iterates over fields of a specific type
-#[derive(Debug)]
-pub struct ArrowFieldIter<'a, F>
-where
-    F: ColumnFilter,
-{
-    inner: SchemaIter<'a, F>,
-}
-
-impl<'a, F> Iterator for ArrowFieldIter<'a, F>
-where
-    F: ColumnFilter,
-{
-    type Item = &'a ArrowField;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // discard the field type
-        self.inner.next().map(|(_, field)| field)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
 /// Thing that implements iterator over a Schema's columns.
-pub struct SchemaIter<'a, F>
-where
-    F: ColumnFilter,
-{
+pub struct SchemaIter<'a> {
     schema: &'a Schema,
     idx: usize,
-    filter: F,
 }
 
-impl<'a, F> fmt::Debug for SchemaIter<'a, F>
-where
-    F: ColumnFilter,
-{
+impl<'a> SchemaIter<'a> {
+    fn new(schema: &'a Schema) -> Self {
+        Self { schema, idx: 0 }
+    }
+}
+
+impl<'a> fmt::Debug for SchemaIter<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "SchemaIter<{}>", self.idx)
     }
 }
 
-impl<'a, F> SchemaIter<'a, F>
-where
-    F: ColumnFilter,
-{
-    fn new(schema: &'a Schema) -> Self {
-        Self {
-            schema,
-            idx: 0,
-            filter: F::default(),
-        }
-    }
-
-    /// return the next index to try in the schema, or None if we have reached
-    /// the end
-    fn next_idx(&mut self) -> Option<usize> {
-        if self.idx < self.schema.len() {
-            let idx = self.idx;
-            self.idx += 1;
-            Some(idx)
-        } else {
-            None
-        }
-    }
-}
-
-impl<'a, F> Iterator for SchemaIter<'a, F>
-where
-    F: ColumnFilter,
-{
+impl<'a> Iterator for SchemaIter<'a> {
     type Item = (Option<InfluxColumnType>, &'a ArrowField);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(idx) = self.next_idx() {
-            let (influx_column_type, field) = self.schema.field(idx);
-            if self.filter.passes(influx_column_type, field) {
-                return Some((influx_column_type, field));
-            }
+        if self.idx < self.schema.len() {
+            let ret = self.schema.field(self.idx);
+            self.idx += 1;
+            Some(ret)
+        } else {
+            None
         }
-        None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
