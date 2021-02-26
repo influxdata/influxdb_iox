@@ -199,7 +199,7 @@ impl InfluxRPCPlanner {
                     "finding columns in table"
                 );
 
-                // get only tag columns
+                // get only tag columns from metadata
                 let schema = chunk
                     .table_schema(&table_name, Selection::All)
                     .await

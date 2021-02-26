@@ -338,7 +338,7 @@ impl Chunk {
         // Only return subset of these selection_cols if not all_cols
         let mut all_cols = true;
         let selection_cols = match selection {
-            Selection::All => &[""],   // All columns case so selection_cols won't be used but it needs to get initialized
+            Selection::All => &[""], 
             Selection::Some(cols) => {
                 all_cols = false;
                 cols
