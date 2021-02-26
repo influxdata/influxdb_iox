@@ -707,9 +707,9 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(idx) = self.next_idx() {
-            let (influx_colum_type, field) = self.schema.field(idx);
-            if self.filter.passes(influx_colum_type, field) {
-                return Some((influx_colum_type, field));
+            let (influx_column_type, field) = self.schema.field(idx);
+            if self.filter.passes(influx_column_type, field) {
+                return Some((influx_column_type, field));
             }
         }
         None
