@@ -319,6 +319,7 @@ async fn test_read_filter_data_pred_unsupported_in_scan() {
 
     // These predicates can't be pushed down into chunks, but they can
     // be evaluated by the general purpose DataFusion plan
+    // https://github.com/influxdata/influxdb_iox/issues/883
     // (STATE = 'CA') OR (READING > 0)
     let predicate = PredicateBuilder::default()
         .add_expr(col("state").eq(lit("CA")).or(col("reading").gt(lit(0))))

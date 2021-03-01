@@ -490,7 +490,7 @@ impl InfluxRPCPlanner {
         Ok(field_list_plan)
     }
 
-    /// Returns a plan that finds all rows rows which pass the
+    /// Returns a plan that finds all rows which pass the
     /// conditions specified by `predicate` in the form of logical
     /// time series.
     ///
@@ -505,7 +505,7 @@ impl InfluxRPCPlanner {
     ///
     /// The  tag_columns are ordered by name.
     ///
-    /// The data is sorted on tag_col1, tag_col2, ...) so that all
+    /// The data is sorted on (tag_col1, tag_col2, ...) so that all
     /// rows for a particular series (groups where all tags are the
     /// same) occur together in the plan
 
@@ -530,7 +530,7 @@ impl InfluxRPCPlanner {
         }
 
         // now, build up plans for each table
-        let mut ss_plans = vec![];
+        let mut ss_plans = Vec::with_capacity(table_chunks.len());
         for (table_name, chunks) in table_chunks {
             let ss_plan = self
                 .read_filter_plan(table_name, &predicate, chunks)
