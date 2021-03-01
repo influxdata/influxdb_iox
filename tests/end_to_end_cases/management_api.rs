@@ -24,7 +24,7 @@ async fn test_set_get_writer_id(client: &mut Client) {
 
     let got = client.get_writer_id().await.expect("get ID failed");
 
-    assert_eq!(got, TEST_ID);
+    assert_eq!(got.get(), TEST_ID);
 }
 
 async fn test_create_database_duplicate_name(client: &mut Client) {

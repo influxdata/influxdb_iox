@@ -406,10 +406,10 @@ impl TestServer {
                         match health.check_storage().await {
                             Ok(_) => {
                                 println!("Storage service is running");
+                                return;
                             }
                             Err(e) => {
                                 println!("Error checking storage service status: {}", e);
-                                continue;
                             }
                         }
                     }

@@ -9,6 +9,10 @@ pub type Connection = tonic::transport::Channel;
 
 /// The default User-Agent header sent by the HTTP client.
 pub const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+/// The default connection timeout
+pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
+/// The default request timeout
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Errors returned by the ConnectionBuilder
 #[derive(Debug, Error)]
@@ -55,8 +59,8 @@ impl std::default::Default for Builder {
     fn default() -> Self {
         Self {
             user_agent: USER_AGENT.into(),
-            connect_timeout: Duration::from_secs(1),
-            timeout: Duration::from_secs(30),
+            connect_timeout: DEFAULT_CONNECT_TIMEOUT,
+            timeout: DEFAULT_TIMEOUT,
         }
     }
 }

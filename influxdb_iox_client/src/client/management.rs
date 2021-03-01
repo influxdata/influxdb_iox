@@ -5,6 +5,7 @@ use thiserror::Error;
 use self::generated_types::{management_service_client::ManagementServiceClient, *};
 
 use crate::connection::Connection;
+use std::convert::TryInto;
 
 /// Re-export generated_types
 pub mod generated_types {
@@ -91,7 +92,7 @@ impl Client {
     }
 
     /// Get the server's writer ID.
-    pub async fn get_writer_id(&mut self) -> Result<u32, Error> {
+    pub async fn get_writer_id(&mut self) -> Result<NonZeroU32, Error> {
         let response = self
             .inner
             .get_writer_id(GetWriterIdRequest {})
@@ -100,7 +101,14 @@ impl Client {
                 tonic::Code::NotFound => Error::NoWriterId,
                 _ => Error::UnexpectedError(status),
             })?;
-        Ok(response.get_ref().id)
+
+        let id = response
+            .get_ref()
+            .id
+            .try_into()
+            .map_err(|_| Error::NoWriterId)?;
+
+        Ok(id)
     }
 
     /// Creates a new IOx database.
