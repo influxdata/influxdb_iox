@@ -30,7 +30,7 @@ where
     RecordBatch::try_new(schema, columns)
 }
 
-/// Traits to help creating DataFuson expressions from strings
+/// Traits to help creating DataFusion expressions from strings
 pub trait IntoExpr {
     /// Creates a DataFusion expr
     fn into_expr(&self) -> Expr;
