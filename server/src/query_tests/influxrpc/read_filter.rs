@@ -246,7 +246,6 @@ async fn test_read_filter_data_filter() {
     run_read_filter_test_case!(TwoMeasurementsMultiSeries {}, predicate, expected_results);
 }
 
-
 #[tokio::test]
 async fn test_read_filter_data_pred_refers_to_non_existent_column() {
     let predicate = PredicateBuilder::default()
