@@ -64,7 +64,7 @@ Examples:
     influxdb_iox stats out.parquet
 "#
 )]
-struct Opt {
+struct Config {
     #[structopt(short, long, parse(from_occurrences))]
     verbose: u64,
 
@@ -108,18 +108,18 @@ fn main() -> Result<(), std::io::Error> {
     // load all environment variables from .env before doing anything
     load_dotenv();
 
-    let opt = Opt::from_args();
+    let config = Config::from_args();
 
     // Logging level is determined via:
     // 1. If RUST_LOG environment variable is set, use that value
     // 2. if `-vv` (multiple instances of verbose), use DEFAULT_DEBUG_LOG_LEVEL
     // 2. if `-v` (single instances of verbose), use DEFAULT_VERBOSE_LOG_LEVEL
     // 3. Otherwise use DEFAULT_LOG_LEVEL
-    let logging_level = LoggingLevel::new(opt.verbose);
+    let logging_level = LoggingLevel::new(config.verbose);
 
-    let tokio_runtime = get_runtime(opt.num_threads)?;
+    let tokio_runtime = get_runtime(config.num_threads)?;
     tokio_runtime.block_on(async move {
-        match opt.command {
+        match config.command {
             Some(Command::Convert {
                 input,
                 output,
