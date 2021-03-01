@@ -246,30 +246,6 @@ async fn test_read_filter_data_filter() {
     run_read_filter_test_case!(TwoMeasurementsMultiSeries {}, predicate, expected_results);
 }
 
-//     let plans = db
-//         .query_series(predicate)
-//         .await
-//         .expect("Created query_series plan successfully");
-
-//     let results = run_and_gather_results(plans).await;
-
-//     assert_eq!(results.len(), 1);
-
-//     let series_set0 = results[0].as_ref().expect("Correctly converted");
-//     assert_eq!(*series_set0.table_name, "h2o");
-//     assert_eq!(
-//         series_set0.tags,
-//         str_pair_vec_to_vec(&[("city", "LA"), ("state", "CA")])
-//     );
-//     assert_eq!(
-//         series_set0.field_indexes,
-//         FieldIndexes::from_timestamp_and_value_indexes(3, &[2])
-//     );
-//     assert_eq!(series_set0.start_row, 0);
-//     assert_eq!(series_set0.num_rows, 1); // only has one row!
-
-//     Ok(())
-// }
 
 #[tokio::test]
 async fn test_read_filter_data_pred_refers_to_non_existent_column() {
