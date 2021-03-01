@@ -664,9 +664,9 @@ impl RLE {
     /// increasing set.
     pub fn distinct_values<'a>(
         &'a self,
-        row_ids: &[u32],
-        mut dst: BTreeSet<Option<&'a String>>,
-    ) -> BTreeSet<Option<&'a String>> {
+        row_ids: impl Iterator<Item = u32>,
+        mut dst: BTreeSet<Option<&'a str>>,
+    ) -> BTreeSet<Option<&'a str>> {
         // TODO(edd): Perf... We can improve on this if we know the column is
         // totally ordered.
         dst.clear();
@@ -689,11 +689,7 @@ impl RLE {
 
         let mut i = 1;
         'by_row: for row_id in row_ids {
-            if row_id >= &self.num_rows {
-                return dst; // rows beyond the column size
-            }
-
-            while curr_logical_row_id + curr_entry_rl <= *row_id {
+            while curr_logical_row_id + curr_entry_rl <= row_id {
                 // this encoded entry does not cover the row we need.
                 // move on to next entry
                 curr_logical_row_id += curr_entry_rl;
@@ -788,37 +784,19 @@ impl RLE {
     /// differ from the provided set of values.
     ///
     /// Informally, this method provides an efficient way of answering "is it
-    /// worth spending time reading this column for values or do I already have
-    /// all the values in a set".
+    /// worth spending time reading this column for distinct values that are not
+    /// present in the provided set?".
     ///
     /// More formally, this method returns the relative complement of this
-    /// column's values in the provided set of values.
-    ///
-    /// This method would be useful when the same column is being read across
-    /// many segments, and one wants to determine to the total distinct set of
-    /// values. By exposing the current result set to each column (as an
-    /// argument to `contains_other_values`) columns can be short-circuited when
-    /// they only contain values that have already been discovered.
-    pub fn contains_other_values(&self, values: &BTreeSet<Option<&String>>) -> bool {
-        let mut encoded_values = self.index_entries.len();
-        if !self.contains_null {
-            encoded_values -= 1; // this column doesn't encode NULL
-        }
-
-        if encoded_values > values.len() {
+    /// column's dictionary in the provided set of values.
+    pub fn has_other_non_null_values(&self, values: &BTreeSet<String>) -> bool {
+        if self.cardinality() as usize > values.len() {
             return true;
         }
 
-        for key in self.entry_index.keys() {
-            if !values.contains(&Some(key)) {
-                return true;
-            }
-        }
-
-        if self.contains_null && !values.contains(&None) {
-            return true;
-        }
-        false
+        // If any of the distinct values in this column are not present in
+        // `values` then return `true`.
+        self.entry_index.keys().any(|entry| !values.contains(entry))
     }
 
     /// Determines if the column contains at least one non-null value.

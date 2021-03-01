@@ -119,6 +119,7 @@ pub trait PartitionChunk: Debug + Send + Sync {
         &self,
         table_name: &str,
         predicate: &Predicate,
+        columns: Selection<'_>,
     ) -> Result<Option<StringSet>, Self::Error>;
 
     /// Return a set of Strings containing the distinct values in the
