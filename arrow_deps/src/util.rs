@@ -32,7 +32,7 @@ where
 
 /// Traits to help creating DataFuson expressions from strings
 pub trait IntoExpr {
-    /// Creates a DataFuson expr
+    /// Creates a DataFusion expr
     fn into_expr(&self) -> Expr;
 
     /// creates a DataFusion SortExpr
