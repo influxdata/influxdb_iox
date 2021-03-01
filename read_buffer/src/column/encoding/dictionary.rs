@@ -237,9 +237,9 @@ impl Encoding {
     /// increasing set.
     fn distinct_values<'a>(
         &'a self,
-        row_ids: &[u32],
-        dst: BTreeSet<Option<&'a String>>,
-    ) -> BTreeSet<Option<&'a String>> {
+        row_ids: impl Iterator<Item = u32>,
+        dst: BTreeSet<Option<&'a str>>,
+    ) -> BTreeSet<Option<&'a str>> {
         match self {
             Encoding::RLE(enc) => enc.distinct_values(row_ids, dst),
             Encoding::Plain(enc) => enc.distinct_values(row_ids, dst),
@@ -281,21 +281,15 @@ impl Encoding {
     /// differ from the provided set of values.
     ///
     /// Informally, this method provides an efficient way of answering "is it
-    /// worth spending time reading this column for values or do I already have
-    /// all the values in a set".
+    /// worth spending time reading this column for distinct values that are not
+    /// present in the provided set?".
     ///
     /// More formally, this method returns the relative complement of this
-    /// column's values in the provided set of values.
-    ///
-    /// This method would be useful when the same column is being read across
-    /// many segments, and one wants to determine to the total distinct set of
-    /// values. By exposing the current result set to each column (as an
-    /// argument to `contains_other_values`) columns can be short-circuited when
-    /// they only contain values that have already been discovered.
-    fn contains_other_values(&self, values: &BTreeSet<Option<&String>>) -> bool {
+    /// column's dictionary in the provided set of values.
+    fn has_other_non_null_values(&self, values: &BTreeSet<String>) -> bool {
         match self {
-            Encoding::RLE(enc) => enc.contains_other_values(values),
-            Encoding::Plain(enc) => enc.contains_other_values(values),
+            Encoding::RLE(enc) => enc.has_other_non_null_values(values),
+            Encoding::Plain(enc) => enc.has_other_non_null_values(values),
         }
     }
 
@@ -1031,89 +1025,100 @@ mod test {
 
     #[test]
     fn distinct_values() {
-        let mut enc = Encoding::RLE(RLE::default());
-        enc.push_additional(Some("east".to_string()), 100);
+        let encodings = vec![
+            Encoding::RLE(RLE::default()),
+            Encoding::Plain(Plain::default()),
+        ];
 
-        let values = enc.distinct_values((0..100).collect::<Vec<_>>().as_slice(), BTreeSet::new());
+        for enc in encodings {
+            _distinct_values(enc);
+        }
+    }
+
+    fn _distinct_values(mut enc: Encoding) {
+        let name = enc.debug_name();
+
+        enc.push_additional(Some("east".to_string()), 3);
+
+        let values = enc.distinct_values((0..3).collect::<Vec<_>>().into_iter(), BTreeSet::new());
         assert_eq!(
             values,
-            vec![Some(&"east".to_string())]
-                .into_iter()
-                .collect::<BTreeSet<_>>()
+            vec![Some("east")].into_iter().collect::<BTreeSet<_>>(),
+            "{}",
+            name,
         );
 
-        enc = Encoding::RLE(RLE::default());
-        enc.push_additional(Some("east".to_string()), 3); // 0, 1, 2
         enc.push_additional(Some("north".to_string()), 1); // 3
         enc.push_additional(Some("east".to_string()), 5); // 4, 5, 6, 7, 8
         enc.push_additional(Some("south".to_string()), 2); // 9, 10
         enc.push_none(); // 11
 
-        let values = enc.distinct_values((0..12).collect::<Vec<_>>().as_slice(), BTreeSet::new());
+        let values = enc.distinct_values((0..12).collect::<Vec<_>>().into_iter(), BTreeSet::new());
         assert_eq!(
             values,
-            vec![
-                None,
-                Some(&"east".to_string()),
-                Some(&"north".to_string()),
-                Some(&"south".to_string()),
-            ]
-            .into_iter()
-            .collect::<BTreeSet<_>>()
-        );
-
-        let values = enc.distinct_values((0..4).collect::<Vec<_>>().as_slice(), BTreeSet::new());
-        assert_eq!(
-            values,
-            vec![Some(&"east".to_string()), Some(&"north".to_string()),]
+            vec![None, Some("east"), Some("north"), Some("south"),]
                 .into_iter()
-                .collect::<BTreeSet<_>>()
+                .collect::<BTreeSet<_>>(),
+            "{}",
+            name,
         );
 
-        let values = enc.distinct_values(&[3, 10], BTreeSet::new());
+        let values = enc.distinct_values((0..4).collect::<Vec<_>>().into_iter(), BTreeSet::new());
         assert_eq!(
             values,
-            vec![Some(&"north".to_string()), Some(&"south".to_string()),]
+            vec![Some("east"), Some("north"),]
                 .into_iter()
-                .collect::<BTreeSet<_>>()
+                .collect::<BTreeSet<_>>(),
+            "{}",
+            name,
         );
 
-        let values = enc.distinct_values(&[100], BTreeSet::new());
-        assert!(values.is_empty());
+        let values = enc.distinct_values(vec![3, 10].into_iter(), BTreeSet::new());
+        assert_eq!(
+            values,
+            vec![Some("north"), Some("south"),]
+                .into_iter()
+                .collect::<BTreeSet<_>>(),
+            "{}",
+            name,
+        );
     }
 
     #[test]
-    fn contains_other_values() {
-        let mut enc = Encoding::RLE(RLE::default());
-        enc.push_additional(Some("east".to_string()), 3); // 0, 1, 2
-        enc.push_additional(Some("north".to_string()), 1); // 3
-        enc.push_additional(Some("east".to_string()), 5); // 4, 5, 6, 7, 8
-        enc.push_additional(Some("south".to_string()), 2); // 9, 10
+    fn has_other_non_null_values() {
+        let encodings = vec![
+            Encoding::RLE(RLE::default()),
+            Encoding::Plain(Plain::default()),
+        ];
+
+        for enc in encodings {
+            _has_other_non_null_values(enc);
+        }
+    }
+
+    fn _has_other_non_null_values(mut enc: Encoding) {
+        enc.push_additional(Some("east".to_owned()), 3); // 0, 1, 2
+        enc.push_additional(Some("north".to_owned()), 1); // 3
+        enc.push_additional(Some("east".to_owned()), 5); // 4, 5, 6, 7, 8
+        enc.push_additional(Some("south".to_owned()), 2); // 9, 10
         enc.push_none(); // 11
 
-        let east = &"east".to_string();
-        let north = &"north".to_string();
-        let south = &"south".to_string();
-
         let mut others = BTreeSet::new();
-        others.insert(Some(east));
-        others.insert(Some(north));
+        others.insert("east".to_owned());
+        others.insert("north".to_owned());
 
-        assert!(enc.contains_other_values(&others));
+        assert!(enc.has_other_non_null_values(&others));
 
-        let f1 = "foo".to_string();
-        others.insert(Some(&f1));
-        assert!(enc.contains_other_values(&others));
+        others.insert("foo".to_owned());
+        assert!(enc.has_other_non_null_values(&others));
 
-        others.insert(Some(&south));
-        others.insert(None);
-        assert!(!enc.contains_other_values(&others));
+        others.insert("south".to_owned());
+        assert!(!enc.has_other_non_null_values(&others));
 
-        let f2 = "bar".to_string();
-        others.insert(Some(&f2));
-        assert!(!enc.contains_other_values(&others));
+        others.insert("bar".to_owned());
+        assert!(!enc.has_other_non_null_values(&others));
 
-        assert!(enc.contains_other_values(&BTreeSet::new()));
+        assert!(enc.has_other_non_null_values(&BTreeSet::new()));
     }
 
     #[test]
