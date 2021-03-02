@@ -4,7 +4,7 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 
 use generated_types::google::protobuf::Empty;
 use generated_types::{google::protobuf::Duration, influxdata::iox::management::v1::*};
-use influxdb_iox_client::management::{Client, Error};
+use influxdb_iox_client::management::{Client, CreateDatabaseError};
 
 pub async fn test(client: &mut Client) {
     test_set_get_writer_id(client).await;
@@ -46,7 +46,10 @@ async fn test_create_database_duplicate_name(client: &mut Client) {
         .await
         .expect_err("create database failed");
 
-    assert!(matches!(dbg!(err), Error::DatabaseAlreadyExists))
+    assert!(matches!(
+        dbg!(err),
+        CreateDatabaseError::DatabaseAlreadyExists
+    ))
 }
 
 async fn test_create_database_invalid_name(client: &mut Client) {
@@ -58,7 +61,7 @@ async fn test_create_database_invalid_name(client: &mut Client) {
         .await
         .expect_err("expected request to fail");
 
-    assert!(matches!(dbg!(err), Error::InvalidArgument(_)));
+    assert!(matches!(dbg!(err), CreateDatabaseError::InvalidArgument(_)));
 }
 
 async fn test_list_databases(client: &mut Client) {

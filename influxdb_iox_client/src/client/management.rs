@@ -12,24 +12,36 @@ pub mod generated_types {
     pub use generated_types::influxdata::iox::management::v1::*;
 }
 
-/// Errors returned by the management API
+/// Errors returned by Client::update_writer_id
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum UpdateWriterIdError {
+    /// Client received an unexpected error from the server
+    #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
+    ServerError(tonic::Status),
+}
+
+/// Errors returned by Client::get_writer_id
+#[derive(Debug, Error)]
+pub enum GetWriterIdError {
+    /// Writer ID is not set
+    #[error("Writer ID not set")]
+    NoWriterId,
+
+    /// Client received an unexpected error from the server
+    #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
+    ServerError(tonic::Status),
+}
+
+/// Errors returned by Client::create_database
+#[derive(Debug, Error)]
+pub enum CreateDatabaseError {
     /// Writer ID is not set
     #[error("Writer ID not set")]
     NoWriterId,
 
     /// Database already exists
-    #[error("Database not found")]
-    DatabaseNotFound,
-
-    /// Database already exists
     #[error("Database already exists")]
     DatabaseAlreadyExists,
-
-    /// Response contained no payload
-    #[error("Server returned an empty response")]
-    EmptyResponse,
 
     /// Server returned an invalid argument error
     #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
@@ -37,11 +49,36 @@ pub enum Error {
 
     /// Client received an unexpected error from the server
     #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
-    UnexpectedError(#[from] tonic::Status),
+    ServerError(tonic::Status),
 }
 
-/// Result type for the management client
-pub type Result<T, E = Error> = std::result::Result<T, E>;
+/// Errors returned by Client::list_databases
+#[derive(Debug, Error)]
+pub enum ListDatabaseError {
+    /// Client received an unexpected error from the server
+    #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
+    ServerError(tonic::Status),
+}
+
+/// Errors returned by Client::get_database
+#[derive(Debug, Error)]
+pub enum GetDatabaseError {
+    /// Writer ID is not set
+    #[error("Writer ID not set")]
+    NoWriterId,
+
+    /// Database not found
+    #[error("Database not found")]
+    DatabaseNotFound,
+
+    /// Response contained no payload
+    #[error("Server returned an empty response")]
+    EmptyResponse,
+
+    /// Client received an unexpected error from the server
+    #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
+    ServerError(tonic::Status),
+}
 
 /// An IOx Management API client.
 ///
@@ -84,67 +121,81 @@ impl Client {
     }
 
     /// Set the server's writer ID.
-    pub async fn update_writer_id(&mut self, id: NonZeroU32) -> Result<(), Error> {
+    pub async fn update_writer_id(&mut self, id: NonZeroU32) -> Result<(), UpdateWriterIdError> {
         self.inner
             .update_writer_id(UpdateWriterIdRequest { id: id.into() })
-            .await?;
+            .await
+            .map_err(UpdateWriterIdError::ServerError)?;
         Ok(())
     }
 
     /// Get the server's writer ID.
-    pub async fn get_writer_id(&mut self) -> Result<NonZeroU32, Error> {
+    pub async fn get_writer_id(&mut self) -> Result<NonZeroU32, GetWriterIdError> {
         let response = self
             .inner
             .get_writer_id(GetWriterIdRequest {})
             .await
             .map_err(|status| match status.code() {
-                tonic::Code::NotFound => Error::NoWriterId,
-                _ => Error::UnexpectedError(status),
+                tonic::Code::NotFound => GetWriterIdError::NoWriterId,
+                _ => GetWriterIdError::ServerError(status),
             })?;
 
         let id = response
             .get_ref()
             .id
             .try_into()
-            .map_err(|_| Error::NoWriterId)?;
+            .map_err(|_| GetWriterIdError::NoWriterId)?;
 
         Ok(id)
     }
 
     /// Creates a new IOx database.
-    pub async fn create_database(&mut self, rules: DatabaseRules) -> Result<(), Error> {
+    pub async fn create_database(
+        &mut self,
+        rules: DatabaseRules,
+    ) -> Result<(), CreateDatabaseError> {
         self.inner
             .create_database(CreateDatabaseRequest { rules: Some(rules) })
             .await
             .map_err(|status| match status.code() {
-                tonic::Code::AlreadyExists => Error::DatabaseAlreadyExists,
-                tonic::Code::FailedPrecondition => Error::NoWriterId,
-                tonic::Code::InvalidArgument => Error::InvalidArgument(status),
-                _ => Error::UnexpectedError(status),
+                tonic::Code::AlreadyExists => CreateDatabaseError::DatabaseAlreadyExists,
+                tonic::Code::FailedPrecondition => CreateDatabaseError::NoWriterId,
+                tonic::Code::InvalidArgument => CreateDatabaseError::InvalidArgument(status),
+                _ => CreateDatabaseError::ServerError(status),
             })?;
 
         Ok(())
     }
 
     /// List databases.
-    pub async fn list_databases(&mut self) -> Result<Vec<String>, Error> {
-        let response = self.inner.list_databases(ListDatabasesRequest {}).await?;
+    pub async fn list_databases(&mut self) -> Result<Vec<String>, ListDatabaseError> {
+        let response = self
+            .inner
+            .list_databases(ListDatabasesRequest {})
+            .await
+            .map_err(ListDatabaseError::ServerError)?;
         Ok(response.into_inner().names)
     }
 
     /// Get database configuration
-    pub async fn get_database(&mut self, name: impl Into<String>) -> Result<DatabaseRules, Error> {
+    pub async fn get_database(
+        &mut self,
+        name: impl Into<String>,
+    ) -> Result<DatabaseRules, GetDatabaseError> {
         let response = self
             .inner
             .get_database(GetDatabaseRequest { name: name.into() })
             .await
             .map_err(|status| match status.code() {
-                tonic::Code::NotFound => Error::DatabaseNotFound,
-                tonic::Code::FailedPrecondition => Error::NoWriterId,
-                _ => Error::UnexpectedError(status),
+                tonic::Code::NotFound => GetDatabaseError::DatabaseNotFound,
+                tonic::Code::FailedPrecondition => GetDatabaseError::NoWriterId,
+                _ => GetDatabaseError::ServerError(status),
             })?;
 
-        let rules = response.into_inner().rules.ok_or(Error::EmptyResponse)?;
+        let rules = response
+            .into_inner()
+            .rules
+            .ok_or(GetDatabaseError::EmptyResponse)?;
         Ok(rules)
     }
 }
