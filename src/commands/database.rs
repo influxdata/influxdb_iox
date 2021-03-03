@@ -77,7 +77,7 @@ pub async fn command(url: String, config: Config) -> Result<()> {
             if let Some(name) = get.name {
                 let database = client.get_database(name).await?;
                 // TOOD: Do something better than this
-                println!("{:?}", database);
+                println!("{:#?}", database);
             } else {
                 let databases = client.list_databases().await?;
                 println!("{}", databases.join(", "))
