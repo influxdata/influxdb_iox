@@ -8,7 +8,10 @@ use tracing::debug;
 
 use std::sync::Arc;
 
-use super::{pred::{to_mutable_buffer_predicate, to_read_buffer_predicate}, streams::{MutableBufferChunkStream, ReadFilterResultsStream}};
+use super::{
+    pred::{to_mutable_buffer_predicate, to_read_buffer_predicate},
+    streams::{MutableBufferChunkStream, ReadFilterResultsStream},
+};
 
 use async_trait::async_trait;
 
