@@ -3,6 +3,7 @@
 
 use std::convert::TryFrom;
 
+use mutable_buffer::chunk::{Chunk, ChunkPredicate};
 use query::predicate::Predicate;
 use snafu::Snafu;
 
@@ -14,6 +15,8 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// Converts a [`query::Predicate`] into [`read_buffer::Predicate`],
+/// suitable for evaluating on the ReadBuffer.
 pub fn to_read_buffer_predicate(predicate: &Predicate) -> Result<read_buffer::Predicate> {
     // Try to convert non-time column expressions into binary expressions
     // that are compatible with the read buffer.
@@ -39,6 +42,13 @@ pub fn to_read_buffer_predicate(predicate: &Predicate) -> Result<read_buffer::Pr
         }),
     }
 }
+
+/// Converts a [`query::Predicate`] into [`ChunkPredicate`],
+/// suitable for evaluating on the MutableBuffer.
+pub fn to_mutable_buffer_predicate(chunk: impl AsRef<Chunk>, predicate: &Predicate) -> Result<ChunkPredicate> {
+    todo!()
+}
+
 
 #[cfg(test)]
 pub mod test {
