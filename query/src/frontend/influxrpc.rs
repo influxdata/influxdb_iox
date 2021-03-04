@@ -1343,8 +1343,7 @@ fn reorder_prefix<'a>(
     // Note that this is an O(N^2) algorithm. We are assuming the
     // number of tag columns is reasonably small
 
-    // map from prefix_column[idx] -> index in tag_columns
-    let prefix_map = prefix_columns
+    let mut new_tag_columns = prefix_columns
         .iter()
         .map(|pc| {
             let found_location = tag_columns
@@ -1352,7 +1351,7 @@ fn reorder_prefix<'a>(
                 .enumerate()
                 .find(|(_, c)| pc.as_ref() == c as &str);
 
-            if let Some((index, _)) = found_location {
+            if let Some((index, &tag_column)) = found_location {
                 if tag_used_set[index] {
                     DuplicateGroupColumn {
                         column_name: pc.as_ref(),
@@ -1360,7 +1359,7 @@ fn reorder_prefix<'a>(
                     .fail()
                 } else {
                     tag_used_set[index] = true;
-                    Ok(index)
+                    Ok(tag_column)
                 }
             } else {
                 GroupColumnNotFound {
@@ -1371,11 +1370,6 @@ fn reorder_prefix<'a>(
             }
         })
         .collect::<Result<Vec<_>>>()?;
-
-    let mut new_tag_columns = prefix_map
-        .iter()
-        .map(|&i| tag_columns[i])
-        .collect::<Vec<_>>();
 
     new_tag_columns.extend(tag_columns.into_iter().enumerate().filter_map(|(i, c)| {
         // already used in prefix
