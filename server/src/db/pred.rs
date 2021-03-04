@@ -58,7 +58,6 @@ pub fn to_mutable_buffer_predicate(
     chunk: impl AsRef<Chunk>,
     predicate: &Predicate,
 ) -> Result<ChunkPredicate> {
-    // TODO proper errors here
     let predicate = chunk
         .as_ref()
         .predicate_builder()?
