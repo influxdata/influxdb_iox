@@ -947,6 +947,9 @@ impl InfluxRPCPlanner {
     /// ORDER BY
     ///   group_key1, group_key2, remaining tags
     ///
+    /// Note the columns are the same but in a different order 
+    /// for GROUP BY / ORDER BY
+    ///
     /// Equivalent to this SQL query for 'selector' functions: first, last, min,
     /// max as they can have different values of the timestamp column
     ///
@@ -1334,7 +1337,7 @@ fn reorder_prefix<'a>(
     prefix_columns: &[impl AsRef<str>],
     tag_columns: Vec<&'a str>,
 ) -> Result<Vec<&'a str>> {
-    // tag_used_set[i[ is true if we have used the value in tag_columns[i]
+    // tag_used_set[i] is true if we have used the value in tag_columns[i]
     let mut tag_used_set = vec![false; tag_columns.len()];
 
     // Note that this is an O(N^2) algorithm. We are assuming the
