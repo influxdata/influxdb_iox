@@ -947,7 +947,7 @@ impl InfluxRPCPlanner {
     /// ORDER BY
     ///   group_key1, group_key2, remaining tags
     ///
-    /// Note the columns are the same but in a different order 
+    /// Note the columns are the same but in a different order
     /// for GROUP BY / ORDER BY
     ///
     /// Equivalent to this SQL query for 'selector' functions: first, last, min,
