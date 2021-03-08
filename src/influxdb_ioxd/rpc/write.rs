@@ -42,7 +42,7 @@ where
         self.server
             .write_lines(&db_name, &lines)
             .await
-            .map_err(|e| default_error_handler(e))?;
+            .map_err(default_error_handler)?;
 
         let lines_written = lp_line_count as u64;
         Ok(Response::new(WriteDataResponse { lines_written }))
