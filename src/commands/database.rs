@@ -6,7 +6,7 @@ use influxdb_iox_client::{
     management::{
         self, generated_types::*, CreateDatabaseError, GetDatabaseError, ListDatabaseError,
     },
-    write::{self, WriteDataError},
+    write::{self, WriteError},
 };
 use structopt::StructOpt;
 use thiserror::Error;
@@ -32,7 +32,7 @@ pub enum Error {
     },
 
     #[error("Error writing: {0}")]
-    WriteError(#[from] WriteDataError),
+    WriteError(#[from] WriteError),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

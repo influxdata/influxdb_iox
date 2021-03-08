@@ -11,7 +11,7 @@ pub mod generated_types {
 
 /// Errors returned by Client::write_data
 #[derive(Debug, Error)]
-pub enum WriteDataError {
+pub enum WriteError {
     /// Client received an unexpected error from the server
     #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
     ServerError(tonic::Status),
@@ -63,14 +63,14 @@ impl Client {
         &mut self,
         name: impl Into<String>,
         lp_data: impl Into<String>,
-    ) -> Result<usize, WriteDataError> {
+    ) -> Result<usize, WriteError> {
         let name = name.into();
         let lp_data = lp_data.into();
         let response = self
             .inner
-            .write(WriteDataRequest { name, lp_data })
+            .write(WriteRequest { name, lp_data })
             .await
-            .map_err(WriteDataError::ServerError)?;
+            .map_err(WriteError::ServerError)?;
 
         Ok(response.into_inner().lines_written as usize)
     }

@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 
 use influxdb_iox_client::management::{self, generated_types::DatabaseRules};
-use influxdb_iox_client::write::{self, WriteDataError};
+use influxdb_iox_client::write::{self, WriteError};
 use test_helpers::assert_contains;
 
 use super::util::rand_name;
@@ -55,7 +55,7 @@ async fn test_write(management_client: &mut management::Client, write_client: &m
         err.to_string(),
         r#"Client specified an invalid argument: Violation for field "lp_data": Invalid Line Protocol: A generic parsing error occurred"#
     );
-    assert!(matches!(dbg!(err), WriteDataError::ServerError(_)));
+    assert!(matches!(dbg!(err), WriteError::ServerError(_)));
 
     // ---- test non existent database ----
     let err = write_client
@@ -67,5 +67,5 @@ async fn test_write(management_client: &mut management::Client, write_client: &m
         err.to_string(),
         r#"Unexpected server error: Some requested entity was not found: Resource database/Non_existent_database not found"#
     );
-    assert!(matches!(dbg!(err), WriteDataError::ServerError(_)));
+    assert!(matches!(dbg!(err), WriteError::ServerError(_)));
 }

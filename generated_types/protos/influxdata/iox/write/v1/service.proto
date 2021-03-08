@@ -4,10 +4,10 @@ package influxdata.iox.write.v1;
 
 service WriteService {
   // write data into a specific Database
-  rpc Write(WriteDataRequest) returns (WriteDataResponse);
+  rpc Write(WriteRequest) returns (WriteResponse);
 }
 
-message WriteDataRequest {
+message WriteRequest {
   // name of database into which to write
   string name = 1;
 
@@ -17,7 +17,7 @@ message WriteDataRequest {
   string lp_data = 2;
 }
 
-message WriteDataResponse {
+message WriteResponse {
   // how many lines were parsed and written into the database
   uint64 lines_written = 1;
 }

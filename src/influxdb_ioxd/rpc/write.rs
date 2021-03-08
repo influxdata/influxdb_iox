@@ -21,8 +21,8 @@ where
 {
     async fn write(
         &self,
-        request: tonic::Request<WriteDataRequest>,
-    ) -> Result<tonic::Response<WriteDataResponse>, tonic::Status> {
+        request: tonic::Request<WriteRequest>,
+    ) -> Result<tonic::Response<WriteResponse>, tonic::Status> {
         let request = request.into_inner();
 
         let db_name = request.name;
@@ -45,7 +45,7 @@ where
             .map_err(default_error_handler)?;
 
         let lines_written = lp_line_count as u64;
-        Ok(Response::new(WriteDataResponse { lines_written }))
+        Ok(Response::new(WriteResponse { lines_written }))
     }
 }
 
