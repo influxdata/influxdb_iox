@@ -75,7 +75,9 @@ async fn read_and_write_data() {
     .await;
     management_api::test(&mut management_client).await;
     management_cli::test(&fixture).await;
+    write_api::test(&fixture).await;
     write_cli::test(&fixture).await;
+    read_cli::test(&fixture).await;
     test_http_error_messages(&influxdb2).await.unwrap();
 }
 
