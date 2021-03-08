@@ -54,11 +54,11 @@ impl Client {
         }
     }
 
-    /// Write the [LineProtcol] formatted data in `lp_data` to
+    /// Write the [LineProtocol] formatted data in `lp_data` to
     /// database `name`. Returns the number of lines which were parsed
     /// and written to the database
     ///
-    /// [LineProtcol](https://docs.influxdata.com/influxdb/v2.0/reference/syntax/line-protocol/#data-types-and-format)
+    /// [LineProtocol](https://docs.influxdata.com/influxdb/v2.0/reference/syntax/line-protocol/#data-types-and-format)
     pub async fn write(
         &mut self,
         name: impl Into<String>,
