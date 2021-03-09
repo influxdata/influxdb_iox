@@ -78,7 +78,6 @@ async fn read_and_write_data() {
     .await;
     management_api::test(&mut management_client).await;
     management_cli::test(GRPC_URL_BASE).await;
-    //write_api::test(grpc).await;
     write_cli::test(GRPC_URL_BASE).await;
     test_http_error_messages(&influxdb2).await.unwrap();
 }
