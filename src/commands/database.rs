@@ -173,6 +173,7 @@ pub async fn command(url: String, config: Config) -> Result<()> {
             }
 
             let formatted_result = format.format(&batches)?;
+
             println!("{}", formatted_result);
         }
     }
