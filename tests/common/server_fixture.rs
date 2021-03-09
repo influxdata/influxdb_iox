@@ -86,21 +86,28 @@ impl ServerFixture {
     }
 }
 
+#[derive(Debug)]
+/// Represents the current known state of a TestServer
+enum ServerState {
+    Started,
+    Ready,
+    Error,
+}
+
 struct TestServer {
     /// Is the server ready to accept connections?
-    ready: Mutex<bool>,
+    ready: Mutex<ServerState>,
 
     server_process: Child,
 
     // The temporary directory **must** be last so that it is
     // dropped after the database closes.
-    #[allow(dead_code)]
     dir: TempDir,
 }
 
 impl TestServer {
     fn new() -> Result<Self> {
-        let ready = Mutex::new(false);
+        let ready = Mutex::new(ServerState::Started);
 
         let dir = test_helpers::tmp_dir().unwrap();
         // Make a log file in the temporary dir (don't auto delete it to help debugging
@@ -155,8 +162,14 @@ impl TestServer {
 
     async fn wait_until_ready(&self) {
         let mut ready = self.ready.lock().await;
-        if *ready {
-            return;
+        match *ready {
+            ServerState::Started => {} // first time, need to try and start it
+            ServerState::Ready => {
+                return;
+            }
+            ServerState::Error => {
+                panic!("Server was previously found to be in Error, aborting");
+            }
         }
 
         // Poll the RPC and HTTP servers separately as they listen on
@@ -212,8 +225,16 @@ impl TestServer {
         let capped_check = tokio::time::timeout(Duration::from_secs(3), pair);
 
         match capped_check.await {
-            Ok(_) => println!("Server is up correctly"),
-            Err(e) => println!("WARNING: server was not ready: {}", e),
+            Ok(_) => {
+                println!("Server is up correctly");
+                *ready = ServerState::Ready;
+            }
+            Err(e) => {
+                // tell others that this server had some problem
+                *ready = ServerState::Error;
+                std::mem::drop(ready);
+                panic!("Server was not ready in required time: {}", e);
+            }
         }
 
         // Set the writer id, if requested (TODO if requested)
@@ -226,8 +247,6 @@ impl TestServer {
             .update_writer_id(id)
             .await
             .expect("set ID failed");
-
-        *ready = true;
     }
 
     /// Create a connection channel for the gRPR endpoing
@@ -235,8 +254,12 @@ impl TestServer {
         &self,
     ) -> influxdb_iox_client::connection::Result<tonic::transport::Channel> {
         influxdb_iox_client::connection::Builder::default()
-            .build(GRPC_URL_BASE)
+            .build(self.grpc_url_base())
             .await
+    }
+
+    fn grpc_url_base(&self) -> &str {
+        GRPC_URL_BASE
     }
 
     fn http_base(&self) -> &str {
@@ -245,6 +268,17 @@ impl TestServer {
 
     fn iox_api_v1_base(&self) -> &str {
         IOX_API_V1_BASE
+    }
+}
+
+impl std::fmt::Display for TestServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "TestServer (grpc {}, http {})",
+            self.grpc_url_base(),
+            self.http_base()
+        )
     }
 }
 
