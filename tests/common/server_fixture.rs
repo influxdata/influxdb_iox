@@ -1,5 +1,12 @@
-use std::{fs::File, str};
-use std::{num::NonZeroU32, process::Child};
+use std::{
+    fs::File,
+    str,
+    sync::atomic::{AtomicUsize, Ordering::SeqCst},
+};
+use std::{
+    num::NonZeroU32,
+    process::{Child, Command},
+};
 
 use crate::common::no_orphan_cargo::cargo_bin;
 use futures::prelude::*;
@@ -13,23 +20,40 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 // running locally.
 // TODO(786): allocate random free ports instead of hardcoding.
 // TODO(785): we cannot use localhost here.
-macro_rules! http_bind_addr {
-    () => {
-        "127.0.0.1:8090"
-    };
-}
-macro_rules! grpc_bind_addr {
-    () => {
-        "127.0.0.1:8092"
-    };
+static NEXT_PORT: AtomicUsize = AtomicUsize::new(8090);
+
+/// This structure contains all the addresses a test server should use
+struct BindAddresses {
+    http_bind_addr: String,
+    grpc_bind_addr: String,
+
+    http_base: String,
+    iox_api_v1_base: String,
+    grpc_base: String,
 }
 
-const HTTP_BIND_ADDR: &str = http_bind_addr!();
-const GRPC_BIND_ADDR: &str = grpc_bind_addr!();
+impl BindAddresses {
+    /// return a new port assignment suitable for this test's use
+    fn new() -> Self {
+        let http_port = NEXT_PORT.fetch_add(1, SeqCst);
+        let grpc_port = NEXT_PORT.fetch_add(1, SeqCst);
 
-const HTTP_BASE: &str = concat!("http://", http_bind_addr!());
-const IOX_API_V1_BASE: &str = concat!("http://", http_bind_addr!(), "/iox/api/v1");
-const GRPC_URL_BASE: &str = concat!("http://", grpc_bind_addr!(), "/");
+        let http_bind_addr = format!("127.0.0.1:{}", http_port);
+        let grpc_bind_addr = format!("127.0.0.1:{}", grpc_port);
+
+        let http_base = format!("http://{}", http_bind_addr);
+        let iox_api_v1_base = format!("http://{}/iox/api/v1", http_bind_addr);
+        let grpc_base = format!("http://{}", grpc_bind_addr);
+
+        Self {
+            http_bind_addr,
+            grpc_bind_addr,
+            http_base,
+            iox_api_v1_base,
+            grpc_base,
+        }
+    }
+}
 
 const TOKEN: &str = "InfluxDB IOx doesn't have authentication yet";
 
@@ -80,18 +104,18 @@ impl ServerFixture {
     }
 
     /// Return the url base of the grpc management API
-    pub fn grpc_url_base(&self) -> &str {
-        self.server.grpc_url_base()
+    pub fn grpc_base(&self) -> &str {
+        &self.server.addrs().grpc_base
     }
 
     /// Return the http base URL for the HTTP API
     pub fn http_base(&self) -> &str {
-        self.server.http_base()
+        &self.server.addrs().http_base
     }
 
     /// Return the base URL for the IOx V1 API
     pub fn iox_api_v1_base(&self) -> &str {
-        self.server.iox_api_v1_base()
+        &self.server.addrs().iox_api_v1_base
     }
 
     /// Return an a http client suitable suitable for communicating with this
@@ -113,7 +137,11 @@ struct TestServer {
     /// Is the server ready to accept connections?
     ready: Mutex<ServerState>,
 
+    /// Handle to the server process being controlled
     server_process: Child,
+
+    /// Which ports this server should use
+    addrs: BindAddresses,
 
     // The temporary directory **must** be last so that it is
     // dropped after the database closes.
@@ -122,6 +150,7 @@ struct TestServer {
 
 impl TestServer {
     fn new() -> Result<Self> {
+        let addrs = BindAddresses::new();
         let ready = Mutex::new(ServerState::Started);
 
         let dir = test_helpers::tmp_dir().unwrap();
@@ -144,8 +173,8 @@ impl TestServer {
             // Can enable for debbugging
             //.arg("-vv")
             .env("INFLUXDB_IOX_ID", "1")
-            .env("INFLUXDB_IOX_BIND_ADDR", HTTP_BIND_ADDR)
-            .env("INFLUXDB_IOX_GRPC_BIND_ADDR", GRPC_BIND_ADDR)
+            .env("INFLUXDB_IOX_BIND_ADDR", &addrs.http_bind_addr)
+            .env("INFLUXDB_IOX_GRPC_BIND_ADDR", &addrs.grpc_bind_addr)
             // redirect output to log file
             .stdout(stdout_log_file)
             .stderr(stderr_log_file)
@@ -155,6 +184,7 @@ impl TestServer {
         Ok(Self {
             ready,
             dir,
+            addrs,
             server_process,
         })
     }
@@ -217,7 +247,7 @@ impl TestServer {
 
         let try_http_connect = async {
             let client = reqwest::Client::new();
-            let url = format!("{}/health", HTTP_BASE);
+            let url = format!("{}/health", self.addrs().http_base);
             let mut interval = tokio::time::interval(Duration::from_millis(500));
             loop {
                 match client.get(&url).send().await {
@@ -267,20 +297,12 @@ impl TestServer {
         &self,
     ) -> influxdb_iox_client::connection::Result<tonic::transport::Channel> {
         influxdb_iox_client::connection::Builder::default()
-            .build(self.grpc_url_base())
+            .build(&self.addrs().grpc_base)
             .await
     }
 
-    fn grpc_url_base(&self) -> &str {
-        GRPC_URL_BASE
-    }
-
-    fn http_base(&self) -> &str {
-        HTTP_BASE
-    }
-
-    fn iox_api_v1_base(&self) -> &str {
-        IOX_API_V1_BASE
+    fn addrs(&self) -> &BindAddresses {
+        &self.addrs
     }
 }
 
@@ -289,8 +311,8 @@ impl std::fmt::Display for TestServer {
         write!(
             f,
             "TestServer (grpc {}, http {})",
-            self.grpc_url_base(),
-            self.http_base()
+            self.addrs().grpc_base,
+            self.addrs().http_base
         )
     }
 }

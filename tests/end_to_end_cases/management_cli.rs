@@ -4,7 +4,7 @@ use predicates::prelude::*;
 use crate::common::server_fixture::ServerFixture;
 
 pub async fn test(server_fixture: &ServerFixture) {
-    let addr = server_fixture.grpc_url_base();
+    let addr = server_fixture.grpc_base();
 
     test_writer_id(addr).await;
     test_create_database(addr).await;

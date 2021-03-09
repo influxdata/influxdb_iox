@@ -8,7 +8,7 @@ use super::util::rand_name;
 
 pub async fn test(server_fixture: &ServerFixture) {
     let db_name = rand_name();
-    let addr = server_fixture.grpc_url_base();
+    let addr = server_fixture.grpc_base();
     create_database(&db_name, addr).await;
     test_write(&db_name, addr).await;
 }
