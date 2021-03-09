@@ -24,6 +24,9 @@ static NEXT_PORT: AtomicUsize = AtomicUsize::new(8090);
 
 /// This structure contains all the addresses a test server should use
 struct BindAddresses {
+    http_port: usize,
+    grpc_port: usize,
+
     http_bind_addr: String,
     grpc_bind_addr: String,
 
@@ -46,6 +49,8 @@ impl BindAddresses {
         let grpc_base = format!("http://{}", grpc_bind_addr);
 
         Self {
+            http_port,
+            grpc_port,
             http_bind_addr,
             grpc_bind_addr,
             http_base,
@@ -69,9 +74,20 @@ pub struct ServerFixture {
     grpc_channel: tonic::transport::Channel,
 }
 
+/// Specifieds should we configure a server initially
+enum InitialConfig {
+    /// Set the writer id to something so it can accept writes
+    SetWriterId,
+
+    /// leave the writer id empty so the test can set it
+    None,
+}
+
 impl ServerFixture {
     /// Create a new server fixture and wait for it to be ready. This
-    /// is called "create" rather than new because it is async and waits
+    /// is called "create" rather than new because it is async and
+    /// waits. The shared database is configured with a writer id and
+    /// can be used immediately
     ///
     /// This is currently implemented as a singleton so all tests *must*
     /// use a new database and not interfere with the existing database.
@@ -84,8 +100,24 @@ impl ServerFixture {
         }));
 
         // ensure the server is ready
-        server.wait_until_ready().await;
+        server.wait_until_ready(InitialConfig::SetWriterId).await;
+        Self::create_common(server).await
+    }
 
+    /// Create a new server fixture and wait for it to be ready. This
+    /// is called "create" rather than new because it is async and
+    /// waits.  The database is left unconfigured (no writer id) and
+    /// is not shared with any other tests.
+    pub async fn create_single_use() -> Self {
+        let server = TestServer::new().expect("Could start test server");
+        let server = Arc::new(server);
+
+        // ensure the server is ready
+        server.wait_until_ready(InitialConfig::None).await;
+        Self::create_common(server).await
+    }
+
+    async fn create_common(server: Arc<TestServer>) -> Self {
         let grpc_channel = server
             .grpc_channel()
             .await
@@ -157,7 +189,10 @@ impl TestServer {
         // Make a log file in the temporary dir (don't auto delete it to help debugging
         // efforts)
         let mut log_path = std::env::temp_dir();
-        log_path.push("server_fixture.log");
+        log_path.push(format!(
+            "server_fixture_{}_{}.log",
+            addrs.http_port, addrs.grpc_port
+        ));
 
         println!("****************");
         println!("Server Logging to {:?}", log_path);
@@ -203,7 +238,7 @@ impl TestServer {
         Ok(())
     }
 
-    async fn wait_until_ready(&self) {
+    async fn wait_until_ready(&self, initial_config: InitialConfig) {
         let mut ready = self.ready.lock().await;
         match *ready {
             ServerState::Started => {} // first time, need to try and start it
@@ -280,16 +315,23 @@ impl TestServer {
             }
         }
 
-        // Set the writer id, if requested (TODO if requested)
-        let channel = self.grpc_channel().await.expect("gRPC should be running");
-        let mut management_client = influxdb_iox_client::management::Client::new(channel);
+        // Set the writer id, if requested
+        match initial_config {
+            InitialConfig::SetWriterId => {
+                let channel = self.grpc_channel().await.expect("gRPC should be running");
+                let mut management_client = influxdb_iox_client::management::Client::new(channel);
+                let id = NonZeroU32::new(42).expect("42 is non zero, among its other properties");
 
-        let id = NonZeroU32::new(42).expect("42 is non zero, among its other properties");
-
-        management_client
-            .update_writer_id(id)
-            .await
-            .expect("set ID failed");
+                management_client
+                    .update_writer_id(id)
+                    .await
+                    .expect("set ID failed");
+                println!("Set writer_id to {:?}", id);
+            }
+            InitialConfig::None => {
+                println!("Leaving database unconfigured");
+            }
+        }
     }
 
     /// Create a connection channel for the gRPR endpoing

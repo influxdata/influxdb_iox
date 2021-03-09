@@ -3,7 +3,9 @@ use predicates::prelude::*;
 
 use crate::common::server_fixture::ServerFixture;
 
-pub async fn test(server_fixture: &ServerFixture) {
+#[tokio::test]
+pub async fn test() {
+    let server_fixture = ServerFixture::create_single_use().await;
     let addr = server_fixture.grpc_base();
 
     test_writer_id(addr).await;
