@@ -226,7 +226,7 @@ impl TestServer {
 
         match capped_check.await {
             Ok(_) => {
-                println!("Server is up correctly");
+                println!("Successfully started {}", self);
                 *ready = ServerState::Ready;
             }
             Err(e) => {
