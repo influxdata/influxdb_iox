@@ -3,10 +3,7 @@ use std::{
     str,
     sync::atomic::{AtomicUsize, Ordering::SeqCst},
 };
-use std::{
-    num::NonZeroU32,
-    process::{Child, Command},
-};
+use std::{num::NonZeroU32, process::Child};
 
 use crate::common::no_orphan_cargo::cargo_bin;
 use futures::prelude::*;
