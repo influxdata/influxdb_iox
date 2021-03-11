@@ -61,6 +61,7 @@ async fn test_create_database() {
         .success()
         .stdout(predicate::str::contains("Ok"));
 
+    // Listing the database includes the name
     Command::cargo_bin("influxdb_iox")
         .unwrap()
         .arg("database")
@@ -80,7 +81,13 @@ async fn test_create_database() {
         .arg(addr)
         .assert()
         .success()
-        .stdout(predicate::str::contains(format!("name: \"{}\"", db)));
+        .stdout(
+            predicate::str::contains(format!("name: \"{}\"", db)).and(
+                // validate the defaults have been set reasonably
+                predicate::str::contains("%Y-%m-%d %H:00:00")
+                    .and(predicate::str::contains("buffer_size: 104857600")),
+            ),
+        );
 }
 
 #[tokio::test]
