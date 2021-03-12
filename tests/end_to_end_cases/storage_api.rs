@@ -1,4 +1,6 @@
-use crate::{common::server_fixture::ServerFixture, create_database, substitute_nanos, Scenario};
+use super::scenario::{substitute_nanos, Scenario};
+use crate::common::server_fixture::ServerFixture;
+
 use futures::prelude::*;
 use generated_types::{
     aggregate::AggregateType,
@@ -293,7 +295,7 @@ pub async fn read_group_test() {
         .set_org_id("0000111100001110")
         .set_bucket_id("1111000011110001");
 
-    create_database(&mut management, &scenario.database_name()).await;
+    Scenario::create_database(&mut management, &scenario.database_name()).await;
 
     load_read_group_data(&influxdb2, &scenario).await;
 
@@ -549,7 +551,7 @@ pub async fn read_window_aggregate_test() {
         .set_bucket_id("1111000011110011");
     let read_source = scenario.read_source();
 
-    create_database(&mut management, &scenario.database_name()).await;
+    Scenario::create_database(&mut management, &scenario.database_name()).await;
 
     let line_protocol = vec![
         "h2o,state=MA,city=Boston temp=70.0 100",

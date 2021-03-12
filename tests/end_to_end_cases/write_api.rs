@@ -3,7 +3,7 @@ use test_helpers::assert_contains;
 
 use crate::common::server_fixture::ServerFixture;
 
-use super::util::{create_readable_database, rand_name};
+use super::scenario::{create_readable_database, rand_name};
 
 #[tokio::test]
 async fn test_write() {
