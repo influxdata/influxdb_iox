@@ -19,7 +19,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// Which storage system is a chunk located in?
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
 pub enum ChunkStorage {
-    /// The chunk is still open for writes new writes, in the Mutable Buffer
+    /// The chunk is still open for new writes, in the Mutable Buffer
     OpenMutableBuffer,
 
     /// The chunk is no longer open for writes, in the Mutable Buffer
@@ -33,7 +33,7 @@ pub enum ChunkStorage {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
-/// Represents metadata about a chunkin a database.
+/// Represents metadata about a chunk in a database.
 /// A chunk can contain one or more tables.
 pub struct ChunkSummary {
     /// The partitition key of this chunk
@@ -91,7 +91,7 @@ impl From<ChunkStorage> for i32 {
     }
 }
 
-/// Conversion code to management API chunk structure
+/// Conversion code from management API chunk structure
 impl TryFrom<management::Chunk> for ChunkSummary {
     type Error = Error;
 

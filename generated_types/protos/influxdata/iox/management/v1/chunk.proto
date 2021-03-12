@@ -7,7 +7,7 @@ enum ChunkStorage {
   // Not currently returned
   CHUNK_STORAGE_UNSPECIFIED = 0;
 
-  // The chunk is still open for writes new writes, in the Mutable Buffer
+  // The chunk is still open for new writes, in the Mutable Buffer
   CHUNK_STORAGE_OPEN_MUTABLE_BUFFER = 1;
 
   // The chunk is no longer open for writes, in the Mutable Buffer
