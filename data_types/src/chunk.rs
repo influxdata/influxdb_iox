@@ -1,20 +1,9 @@
 //! Module contains a representation of chunk metadata
-use snafu::Snafu;
-use std::{
-    convert::{TryFrom, TryInto},
-    sync::Arc,
-};
+use std::{convert::TryFrom, sync::Arc};
 
-use generated_types::influxdata::iox::management::v1 as management;
+use crate::field_validation::FromField;
+use generated_types::{google::FieldViolation, influxdata::iox::management::v1 as management};
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Snafu)]
-pub enum Error {
-    #[snafu(display("Unknown value for ChunkStorage: {}", v))]
-    UnknownChunkStorage { v: i32 },
-}
-
-pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Which storage system is a chunk located in?
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
@@ -59,7 +48,9 @@ impl From<ChunkSummary> for management::Chunk {
             estimated_bytes,
         } = summary;
 
-        let storage = storage.into();
+        let storage: management::ChunkStorage = storage.into();
+        let storage = storage.into(); // convert to i32
+
         let estimated_bytes = estimated_bytes as u64;
 
         let partition_key = match Arc::try_unwrap(partition_key) {
@@ -78,32 +69,32 @@ impl From<ChunkSummary> for management::Chunk {
     }
 }
 
-impl From<ChunkStorage> for i32 {
+impl From<ChunkStorage> for management::ChunkStorage {
     fn from(storage: ChunkStorage) -> Self {
         match storage {
-            ChunkStorage::OpenMutableBuffer => management::ChunkStorage::OpenMutableBuffer as Self,
-            ChunkStorage::ClosedMutableBuffer => {
-                management::ChunkStorage::ClosedMutableBuffer as Self
-            }
-            ChunkStorage::ReadBuffer => management::ChunkStorage::ReadBuffer as Self,
-            ChunkStorage::ObjectStore => management::ChunkStorage::ObjectStore as Self,
+            ChunkStorage::OpenMutableBuffer => management::ChunkStorage::OpenMutableBuffer,
+            ChunkStorage::ClosedMutableBuffer => management::ChunkStorage::ClosedMutableBuffer,
+            ChunkStorage::ReadBuffer => management::ChunkStorage::ReadBuffer,
+            ChunkStorage::ObjectStore => management::ChunkStorage::ObjectStore,
         }
     }
 }
 
 /// Conversion code from management API chunk structure
 impl TryFrom<management::Chunk> for ChunkSummary {
-    type Error = Error;
+    type Error = FieldViolation;
 
-    fn try_from(chunk: management::Chunk) -> Result<Self, Self::Error> {
+    fn try_from(proto: management::Chunk) -> Result<Self, Self::Error> {
+        // Use prost enum conversion
+        let storage = proto.storage().scope("storage")?;
+
         let management::Chunk {
             partition_key,
             id,
-            storage,
             estimated_bytes,
-        } = chunk;
+            ..
+        } = proto;
 
-        let storage = storage.try_into()?;
         let estimated_bytes = estimated_bytes as usize;
         let partition_key = Arc::new(partition_key);
 
@@ -116,21 +107,16 @@ impl TryFrom<management::Chunk> for ChunkSummary {
     }
 }
 
-impl TryFrom<i32> for ChunkStorage {
-    type Error = Error;
+impl TryFrom<management::ChunkStorage> for ChunkStorage {
+    type Error = FieldViolation;
 
-    fn try_from(v: i32) -> Result<Self, Self::Error> {
-        // There must be a better way to do this...
-        if v == management::ChunkStorage::OpenMutableBuffer as i32 {
-            Ok(Self::OpenMutableBuffer)
-        } else if v == management::ChunkStorage::ClosedMutableBuffer as i32 {
-            Ok(Self::ClosedMutableBuffer)
-        } else if v == management::ChunkStorage::ReadBuffer as i32 {
-            Ok(Self::ReadBuffer)
-        } else if v == management::ChunkStorage::ObjectStore as i32 {
-            Ok(Self::ObjectStore)
-        } else {
-            UnknownChunkStorage { v }.fail()
+    fn try_from(proto: management::ChunkStorage) -> Result<Self, Self::Error> {
+        match proto {
+            management::ChunkStorage::OpenMutableBuffer => Ok(ChunkStorage::OpenMutableBuffer),
+            management::ChunkStorage::ClosedMutableBuffer => Ok(ChunkStorage::ClosedMutableBuffer),
+            management::ChunkStorage::ReadBuffer => Ok(ChunkStorage::ReadBuffer),
+            management::ChunkStorage::ObjectStore => Ok(ChunkStorage::ObjectStore),
+            management::ChunkStorage::Unspecified => Err(FieldViolation::required("")),
         }
     }
 }
@@ -140,14 +126,51 @@ mod test {
     use super::*;
 
     #[test]
-    fn valid_chunk_storage() {
-        let storage = ChunkStorage::try_from(3).expect("conversion successful");
-        assert_eq!(storage, ChunkStorage::ReadBuffer);
+    fn valid_proto_to_summary() {
+        let proto = management::Chunk {
+            partition_key: "foo".to_string(),
+            id: 42,
+            estimated_bytes: 1234,
+            storage: management::ChunkStorage::ObjectStore.into(),
+        };
+
+        let summary = ChunkSummary::try_from(proto).expect("conversion successful");
+        let expected = ChunkSummary {
+            partition_key: Arc::new("foo".to_string()),
+            id: 42,
+            estimated_bytes: 1234,
+            storage: ChunkStorage::ObjectStore,
+        };
+
+        assert_eq!(
+            summary, expected,
+            "Actual:\n\n{:?}\n\nExpected:\n\n{:?}\n\n",
+            summary, expected
+        );
     }
 
     #[test]
-    fn invalid_chunk_storage() {
-        let err = ChunkStorage::try_from(33).expect_err("Unknown value for ChunkStorage: 33");
-        assert_eq!(err.to_string(), "Unknown value for ChunkStorage: 33");
+    fn valid_summary_to_proto() {
+        let summary = ChunkSummary {
+            partition_key: Arc::new("foo".to_string()),
+            id: 42,
+            estimated_bytes: 1234,
+            storage: ChunkStorage::ObjectStore,
+        };
+
+        let proto = management::Chunk::try_from(summary).expect("conversion successful");
+
+        let expected = management::Chunk {
+            partition_key: "foo".to_string(),
+            id: 42,
+            estimated_bytes: 1234,
+            storage: management::ChunkStorage::ObjectStore.into(),
+        };
+
+        assert_eq!(
+            proto, expected,
+            "Actual:\n\n{:?}\n\nExpected:\n\n{:?}\n\n",
+            proto, expected
+        );
     }
 }

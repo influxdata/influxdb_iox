@@ -1,5 +1,6 @@
 //! This module implements the `chunk` CLI command
 use data_types::chunk::ChunkSummary;
+use generated_types::google::FieldViolation;
 use influxdb_iox_client::{
     connection::Builder,
     management::{self, ListChunksError},
@@ -13,8 +14,8 @@ pub enum Error {
     #[error("Error listing chunks: {0}")]
     ListChunkError(#[from] ListChunksError),
 
-    #[error("Error interpreting server response: {0}")]
-    ConvertingResponse(#[from] data_types::chunk::Error),
+    #[error("Error interpreting server response: {:?}", .0)]
+    ConvertingResponse(FieldViolation),
 
     #[error("Error rendering response as JSON: {0}")]
     WritingJson(#[from] serde_json::Error),
