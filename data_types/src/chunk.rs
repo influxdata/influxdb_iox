@@ -72,10 +72,10 @@ impl From<ChunkSummary> for management::Chunk {
 impl From<ChunkStorage> for management::ChunkStorage {
     fn from(storage: ChunkStorage) -> Self {
         match storage {
-            ChunkStorage::OpenMutableBuffer => management::ChunkStorage::OpenMutableBuffer,
-            ChunkStorage::ClosedMutableBuffer => management::ChunkStorage::ClosedMutableBuffer,
-            ChunkStorage::ReadBuffer => management::ChunkStorage::ReadBuffer,
-            ChunkStorage::ObjectStore => management::ChunkStorage::ObjectStore,
+            ChunkStorage::OpenMutableBuffer => Self::OpenMutableBuffer,
+            ChunkStorage::ClosedMutableBuffer => Self::ClosedMutableBuffer,
+            ChunkStorage::ReadBuffer => Self::ReadBuffer,
+            ChunkStorage::ObjectStore => Self::ObjectStore,
         }
     }
 }
@@ -112,10 +112,10 @@ impl TryFrom<management::ChunkStorage> for ChunkStorage {
 
     fn try_from(proto: management::ChunkStorage) -> Result<Self, Self::Error> {
         match proto {
-            management::ChunkStorage::OpenMutableBuffer => Ok(ChunkStorage::OpenMutableBuffer),
-            management::ChunkStorage::ClosedMutableBuffer => Ok(ChunkStorage::ClosedMutableBuffer),
-            management::ChunkStorage::ReadBuffer => Ok(ChunkStorage::ReadBuffer),
-            management::ChunkStorage::ObjectStore => Ok(ChunkStorage::ObjectStore),
+            management::ChunkStorage::OpenMutableBuffer => Ok(Self::OpenMutableBuffer),
+            management::ChunkStorage::ClosedMutableBuffer => Ok(Self::ClosedMutableBuffer),
+            management::ChunkStorage::ReadBuffer => Ok(Self::ReadBuffer),
+            management::ChunkStorage::ObjectStore => Ok(Self::ObjectStore),
             management::ChunkStorage::Unspecified => Err(FieldViolation::required("")),
         }
     }
