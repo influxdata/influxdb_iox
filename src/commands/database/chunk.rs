@@ -33,9 +33,9 @@ pub struct Config {
     command: Command,
 }
 
-/// Get list of chunks for the specified database in JSON format
+/// List the chunks for the specified database in JSON format
 #[derive(Debug, StructOpt)]
-struct Get {
+struct List {
     /// The name of the database
     db_name: String,
 }
@@ -43,15 +43,15 @@ struct Get {
 /// All possible subcommands for chunk
 #[derive(Debug, StructOpt)]
 enum Command {
-    Get(Get),
+    List(List),
 }
 
 pub async fn command(url: String, config: Config) -> Result<()> {
     let connection = Builder::default().build(url).await?;
 
     match config.command {
-        Command::Get(get) => {
-            let Get { db_name } = get;
+        Command::List(get) => {
+            let List { db_name } = get;
 
             let mut client = management::Client::new(connection);
 

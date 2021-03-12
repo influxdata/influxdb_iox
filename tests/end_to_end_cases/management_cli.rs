@@ -121,8 +121,9 @@ async fn test_get_chunks() {
 
     Command::cargo_bin("influxdb_iox")
         .unwrap()
+        .arg("database")
         .arg("chunk")
-        .arg("get")
+        .arg("list")
         .arg(&db_name)
         .arg("--host")
         .arg(addr)
@@ -142,8 +143,9 @@ async fn test_list_chunks_error() {
     // list the chunks
     Command::cargo_bin("influxdb_iox")
         .unwrap()
+        .arg("database")
         .arg("chunk")
-        .arg("get")
+        .arg("list")
         .arg(&db_name)
         .arg("--host")
         .arg(addr)
