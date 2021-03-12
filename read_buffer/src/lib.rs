@@ -689,7 +689,7 @@ impl Partition {
             .chunks
             .get(&chunk_id)
             .map(|chunk| chunk.size())
-            .unwrap_or(0) // treat known chunks as zero size
+            .unwrap_or(0) // treat unknown chunks as zero size
     }
 }
 
