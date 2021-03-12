@@ -2,7 +2,10 @@ use std::time::SystemTime;
 
 use generated_types::google::protobuf::Empty;
 use generated_types::influxdata::iox::management::v1::*;
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use rand::{
+    distributions::{Alphanumeric, Standard},
+    thread_rng, Rng,
+};
 
 use std::{convert::TryInto, str, u32};
 
@@ -15,18 +18,21 @@ use generated_types::{influxdata::iox::management::v1::DatabaseRules, ReadSource
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 type Result<T, E = Error> = std::result::Result<T, E>;
 
-// TODO: Randomly generate org and bucket ids to ensure test data independence
-// where desired
-
+/// A test fixture used for working with the influxdb v2 data model
+/// (storage gRPC api and v2 write api).
+///
+/// Each scenario is assigned a a random org and bucket id to ensure
+/// tests do not interfere with one another
 #[derive(Debug)]
 pub struct Scenario {
-    org_id_str: String,
-    bucket_id_str: String,
+    org_id: String,
+    bucket_id: String,
     ns_since_epoch: i64,
 }
 
-impl Default for Scenario {
-    fn default() -> Self {
+impl Scenario {
+    /// Create a new `Scenario` with a random org_id and bucket_id
+    pub fn new() -> Self {
         let ns_since_epoch = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("System time should have been after the epoch")
@@ -36,41 +42,29 @@ impl Default for Scenario {
 
         Self {
             ns_since_epoch,
-            org_id_str: Default::default(),
-            bucket_id_str: Default::default(),
+            org_id: rand_id(),
+            bucket_id: rand_id(),
         }
-    }
-}
-
-impl Scenario {
-    pub fn set_org_id(mut self, org_id: impl Into<String>) -> Self {
-        self.org_id_str = org_id.into();
-        self
-    }
-
-    pub fn set_bucket_id(mut self, bucket_id: impl Into<String>) -> Self {
-        self.bucket_id_str = bucket_id.into();
-        self
     }
 
     pub fn org_id_str(&self) -> &str {
-        &self.org_id_str
+        &self.org_id
     }
 
     pub fn bucket_id_str(&self) -> &str {
-        &self.bucket_id_str
+        &self.bucket_id
     }
 
     pub fn org_id(&self) -> u64 {
-        u64::from_str_radix(&self.org_id_str, 16).unwrap()
+        u64::from_str_radix(&self.org_id, 16).unwrap()
     }
 
     pub fn bucket_id(&self) -> u64 {
-        u64::from_str_radix(&self.bucket_id_str, 16).unwrap()
+        u64::from_str_radix(&self.bucket_id, 16).unwrap()
     }
 
     pub fn database_name(&self) -> DatabaseName<'_> {
-        org_and_bucket_to_database(&self.org_id_str, &self.bucket_id_str).unwrap()
+        org_and_bucket_to_database(&self.org_id, &self.bucket_id).unwrap()
     }
 
     pub fn ns_since_epoch(&self) -> i64 {
@@ -102,13 +96,11 @@ impl Scenario {
         })
     }
 
-    pub async fn create_database(
-        client: &mut influxdb_iox_client::management::Client,
-        database_name: &str,
-    ) {
+    /// Create's the database on the server for this scenario
+    pub async fn create_database(&self, client: &mut influxdb_iox_client::management::Client) {
         client
             .create_database(DatabaseRules {
-                name: database_name.to_string(),
+                name: self.database_name().to_string(),
                 mutable_buffer_config: Some(Default::default()),
                 ..Default::default()
             })
@@ -243,6 +235,23 @@ pub fn rand_name() -> String {
         .sample_iter(&Alphanumeric)
         .take(10)
         .map(char::from)
+        .collect()
+}
+
+// return a random 16 digit string comprised of numbers suitable for
+// use as a influxdb2 org_id or bucket_id
+pub fn rand_id() -> String {
+    thread_rng()
+        .sample_iter(&Standard)
+        .filter_map(|c: u8| {
+            if c.is_ascii_digit() {
+                Some(char::from(c))
+            } else {
+                // discard if out of range
+                None
+            }
+        })
+        .take(16)
         .collect()
 }
 

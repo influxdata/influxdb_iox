@@ -291,11 +291,8 @@ pub async fn read_group_test() {
     let mut storage_client = StorageClient::new(fixture.grpc_channel());
     let influxdb2 = fixture.influxdb2_client();
 
-    let scenario = Scenario::default()
-        .set_org_id("0000111100001110")
-        .set_bucket_id("1111000011110001");
-
-    Scenario::create_database(&mut management, &scenario.database_name()).await;
+    let scenario = Scenario::new();
+    scenario.create_database(&mut management).await;
 
     load_read_group_data(&influxdb2, &scenario).await;
 
@@ -546,12 +543,10 @@ pub async fn read_window_aggregate_test() {
     let mut storage_client = StorageClient::new(fixture.grpc_channel());
     let influxdb2 = fixture.influxdb2_client();
 
-    let scenario = Scenario::default()
-        .set_org_id("0000111100001100")
-        .set_bucket_id("1111000011110011");
+    let scenario = Scenario::new();
     let read_source = scenario.read_source();
 
-    Scenario::create_database(&mut management, &scenario.database_name()).await;
+    scenario.create_database(&mut management).await;
 
     let line_protocol = vec![
         "h2o,state=MA,city=Boston temp=70.0 100",

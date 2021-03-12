@@ -5,14 +5,11 @@
 //
 // Other rust tests are defined in the various submodules of end_to_end_cases
 
-use end_to_end_cases::*;
-use generated_types::storage_client::StorageClient;
-
 pub mod common;
-
 mod end_to_end_cases;
 
-use end_to_end_cases::scenario::Scenario;
+use end_to_end_cases::{scenario::Scenario, *};
+use generated_types::storage_client::StorageClient;
 
 use common::server_fixture::*;
 
@@ -27,11 +24,8 @@ async fn read_and_write_data() {
 
     // These tests share data; TODO: a better way to indicate this
     {
-        let scenario = Scenario::default()
-            .set_org_id("0000111100001111")
-            .set_bucket_id("1111000011110000");
-
-        Scenario::create_database(&mut management_client, &scenario.database_name()).await;
+        let scenario = Scenario::new();
+        scenario.create_database(&mut management_client).await;
 
         let expected_read_data = scenario.load_data(&influxdb2).await;
         let sql_query = "select * from cpu_load_short";
