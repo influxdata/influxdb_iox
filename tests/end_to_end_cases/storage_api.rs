@@ -14,7 +14,6 @@ use generated_types::{
     MeasurementTagValuesRequest, Node, Predicate, ReadFilterRequest, ReadGroupRequest,
     ReadWindowAggregateRequest, Tag, TagKeysRequest, TagValuesRequest, TimestampRange,
 };
-use influxdb_iox_client::management;
 use std::str;
 use test_helpers::tag_key_bytes_to_strings;
 use tonic::transport::Channel;
@@ -25,8 +24,7 @@ pub async fn test() {
 
     let influxdb2 = storage_fixture.influxdb2_client();
     let mut storage_client = StorageClient::new(storage_fixture.grpc_channel());
-    let mut management_client =
-        influxdb_iox_client::management::Client::new(storage_fixture.grpc_channel());
+    let mut management_client = storage_fixture.management_client();
 
     let scenario = Scenario::new();
     scenario.create_database(&mut management_client).await;
@@ -299,7 +297,7 @@ async fn measurement_fields_endpoint(
 #[tokio::test]
 pub async fn read_group_test() {
     let fixture = ServerFixture::create_shared().await;
-    let mut management = management::Client::new(fixture.grpc_channel());
+    let mut management = fixture.management_client();
     let mut storage_client = StorageClient::new(fixture.grpc_channel());
     let influxdb2 = fixture.influxdb2_client();
 
@@ -551,7 +549,7 @@ async fn test_read_group_last_agg(
 #[tokio::test]
 pub async fn read_window_aggregate_test() {
     let fixture = ServerFixture::create_shared().await;
-    let mut management = management::Client::new(fixture.grpc_channel());
+    let mut management = fixture.management_client();
     let mut storage_client = StorageClient::new(fixture.grpc_channel());
     let influxdb2 = fixture.influxdb2_client();
 

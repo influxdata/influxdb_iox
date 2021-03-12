@@ -1,11 +1,10 @@
 use super::scenario::Scenario;
 use crate::common::server_fixture::ServerFixture;
-use influxdb_iox_client::management;
 
 #[tokio::test]
 pub async fn test() {
     let server_fixture = ServerFixture::create_shared().await;
-    let mut management_client = management::Client::new(server_fixture.grpc_channel());
+    let mut management_client = server_fixture.management_client();
     let influxdb2 = server_fixture.influxdb2_client();
 
     let scenario = Scenario::new();
