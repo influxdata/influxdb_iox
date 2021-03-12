@@ -30,7 +30,6 @@ async fn read_and_write_data() {
         let expected_read_data = scenario.load_data(&influxdb2).await;
         let sql_query = "select * from cpu_load_short";
 
-        read_api::test(&fixture, &scenario, sql_query, &expected_read_data).await;
         storage_api::test(&mut storage_client, &scenario).await;
         flight_api::test(&fixture, &scenario, sql_query, &expected_read_data).await;
     }
