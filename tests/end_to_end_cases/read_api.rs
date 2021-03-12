@@ -1,5 +1,5 @@
+use super::scenario::Scenario;
 use crate::common::server_fixture::ServerFixture;
-use crate::Scenario;
 use influxdb_iox_client::management;
 
 #[tokio::test]

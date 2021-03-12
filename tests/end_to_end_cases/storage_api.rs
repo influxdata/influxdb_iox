@@ -19,15 +19,27 @@ use std::str;
 use test_helpers::tag_key_bytes_to_strings;
 use tonic::transport::Channel;
 
-pub async fn test(storage_client: &mut StorageClient<Channel>, scenario: &Scenario) {
-    capabilities_endpoint(storage_client).await;
-    read_filter_endpoint(storage_client, scenario).await;
-    tag_keys_endpoint(storage_client, scenario).await;
-    tag_values_endpoint(storage_client, scenario).await;
-    measurement_names_endpoint(storage_client, scenario).await;
-    measurement_tag_keys_endpoint(storage_client, scenario).await;
-    measurement_tag_values_endpoint(storage_client, scenario).await;
-    measurement_fields_endpoint(storage_client, scenario).await;
+#[tokio::test]
+pub async fn test() {
+    let storage_fixture = ServerFixture::create_shared().await;
+
+    let influxdb2 = storage_fixture.influxdb2_client();
+    let mut storage_client = StorageClient::new(storage_fixture.grpc_channel());
+    let mut management_client =
+        influxdb_iox_client::management::Client::new(storage_fixture.grpc_channel());
+
+    let scenario = Scenario::new();
+    scenario.create_database(&mut management_client).await;
+    scenario.load_data(&influxdb2).await;
+
+    capabilities_endpoint(&mut storage_client).await;
+    read_filter_endpoint(&mut storage_client, &scenario).await;
+    tag_keys_endpoint(&mut storage_client, &scenario).await;
+    tag_values_endpoint(&mut storage_client, &scenario).await;
+    measurement_names_endpoint(&mut storage_client, &scenario).await;
+    measurement_tag_keys_endpoint(&mut storage_client, &scenario).await;
+    measurement_tag_values_endpoint(&mut storage_client, &scenario).await;
+    measurement_fields_endpoint(&mut storage_client, &scenario).await;
 }
 
 /// Validate that capabilities storage endpoint is hooked up
