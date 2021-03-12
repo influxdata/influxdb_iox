@@ -39,6 +39,7 @@ fn generate_grpc_types(root: &Path) -> Result<()> {
         idpe_path.join("source.proto"),
         management_path.join("base_types.proto"),
         management_path.join("database_rules.proto"),
+        management_path.join("chunk.proto"),
         management_path.join("service.proto"),
         management_path.join("jobs.proto"),
         write_path.join("service.proto"),
