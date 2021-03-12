@@ -67,7 +67,8 @@ struct Create {
     /// The name of the database
     name: String,
 
-    /// Create a mutable buffer of the specified size in bytes
+    /// Create a mutable buffer of the specified size in bytes.  If
+    /// size is 0, no mutable buffer is created.
     #[structopt(short, long, default_value = "104857600")] // 104857600 = 100*1024*1024
     mutable_buffer: u64,
 }
@@ -126,15 +127,21 @@ pub async fn command(url: String, config: Config) -> Result<()> {
         Command::Create(command) => {
             let mut client = management::Client::new(connection);
 
+            // Configure a mutable buffer if requested
             let buffer_size = command.mutable_buffer;
+            let mutable_buffer_config = if buffer_size > 0 {
+                Some(MutableBufferConfig {
+                    buffer_size,
+                    ..Default::default()
+                })
+            } else {
+                None
+            };
 
             let rules = DatabaseRules {
                 name: command.name,
 
-                mutable_buffer_config: Some(MutableBufferConfig {
-                    buffer_size,
-                    ..Default::default()
-                }),
+                mutable_buffer_config,
 
                 // Default to hourly partitions
                 partition_template: Some(PartitionTemplate {
