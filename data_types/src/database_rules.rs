@@ -641,7 +641,7 @@ pub enum TemplatePart {
     TimeFormat(String),
     /// Applies a regex to the value in a string column
     RegexCapture(RegexCapture),
-    /// Applies a strftime pattern to some column other than "time"
+    /// Applies a `strftime` pattern to some column other than "time"
     StrftimeColumn(StrftimeColumn),
 }
 
@@ -653,7 +653,7 @@ pub struct RegexCapture {
     regex: String,
 }
 
-/// [`StrftimeColumn`] is be used to create a time based partition key off some
+/// [`StrftimeColumn`] is used to create a time based partition key off some
 /// column other than the builtin `time` column.
 ///
 /// The value of the named column is formatted using a `strftime`
