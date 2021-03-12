@@ -29,6 +29,7 @@ message Chunk {
   // The id of this chunk
   uint32 id = 2;
 
+  // Which storage system the chunk is located in
   ChunkStorage storage = 3;
 
   // The total estimated size of this chunk, in bytes
