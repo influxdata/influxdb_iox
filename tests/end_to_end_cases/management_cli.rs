@@ -6,7 +6,6 @@ use crate::common::server_fixture::ServerFixture;
 
 use super::util::{create_readable_database, rand_name};
 
-
 #[tokio::test]
 async fn test_writer_id() {
     let server_fixture = ServerFixture::create_shared().await;
@@ -156,9 +155,8 @@ async fn test_list_chunks_error() {
         );
 }
 
-
 #[tokio::test]
-async fn test_remotes(addr: &str) {
+async fn test_remotes() {
     let server_fixture = ServerFixture::create_single_use().await;
     let addr = server_fixture.grpc_base();
     Command::cargo_bin("influxdb_iox")
