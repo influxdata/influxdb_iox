@@ -629,7 +629,7 @@ impl TryFrom<management::PartitionTemplate> for PartitionTemplate {
 /// part of a partition key.
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub enum TemplatePart {
-    /// The name of a table (blank to
+    /// The name of a table
     Table,
     /// The value in a named column
     Column(String),
