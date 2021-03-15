@@ -422,7 +422,7 @@ async fn test_new_partition_chunk() {
         .await
         .expect("new partition chunk");
 
-    // Load some more data and now expect that we have a second chunj
+    // Load some more data and now expect that we have a second chunk
 
     let lp_lines = vec!["cpu,region=west user=21.0 150"];
 
