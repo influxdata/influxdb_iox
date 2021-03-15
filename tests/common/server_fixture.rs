@@ -175,7 +175,7 @@ impl ServerFixture {
         influxdb2_client::Client::new(self.http_base(), TOKEN)
     }
 
-    /// Return a management client  suitable for communicating with this
+    /// Return a management client suitable for communicating with this
     /// server
     pub fn management_client(&self) -> influxdb_iox_client::management::Client {
         influxdb_iox_client::management::Client::new(self.grpc_channel())

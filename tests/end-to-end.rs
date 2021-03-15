@@ -3,7 +3,7 @@
 //
 // The servers under test are managed using [`ServerFixture`]
 //
-// The tests are defined in the  submodules of end_to_end_cases
+// The tests are defined in the submodules of [`end_to_end_cases`]
 
 pub mod common;
 mod end_to_end_cases;
