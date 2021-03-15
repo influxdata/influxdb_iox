@@ -395,8 +395,8 @@ async fn test_partition_get_error() {
 #[tokio::test]
 async fn test_new_partition_chunk() {
     let fixture = ServerFixture::create_shared().await;
-    let mut management_client = Client::new(fixture.grpc_channel());
-    let mut write_client = influxdb_iox_client::write::Client::new(fixture.grpc_channel());
+    let mut management_client = fixture.management_client();
+    let mut write_client = fixture.write_client();
 
     let db_name = rand_name();
     create_readable_database(&db_name, fixture.grpc_channel()).await;
@@ -473,7 +473,7 @@ async fn test_new_partition_chunk() {
 #[tokio::test]
 async fn test_new_partition_chunk_error() {
     let fixture = ServerFixture::create_shared().await;
-    let mut management_client = Client::new(fixture.grpc_channel());
+    let mut management_client = fixture.management_client();
 
     let err = management_client
         .new_partition_chunk("this database does not exist", "nor_does_this_partition")
