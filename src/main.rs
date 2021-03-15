@@ -67,7 +67,7 @@ Examples:
 Command are generally structured in the form:
     <type of object> <action> <arguments>
 
-For exampl, a command such as the following shows all actions
+For example, a command such as the following shows all actions
     available for database chunks, including get and list.
 
     influxdb_iox database chunk --help
