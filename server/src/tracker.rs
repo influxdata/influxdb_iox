@@ -281,10 +281,14 @@ impl TrackerRegistration {
 
 impl Drop for TrackerRegistration {
     fn drop(&mut self) {
+        // This synchronizes with the Acquire load in Tracker::get_status
         let previous = self
             .state
             .pending_registrations
             .fetch_sub(1, Ordering::Release);
+
+        // This implies a TrackerRegistration has been cloned without it incrementing
+        // the pending_registration counter
         assert_ne!(previous, 0);
     }
 }
