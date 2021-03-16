@@ -1,27 +1,20 @@
 use std::num::NonZeroU32;
 
 use generated_types::{
-    google::protobuf::{Any, Duration, Empty},
+    google::protobuf::{Duration, Empty},
     influxdata::iox::management::v1::*,
-    protobuf_type_url_eq,
 };
 use influxdb_iox_client::management::CreateDatabaseError;
 use test_helpers::assert_contains;
 
-use crate::common::server_fixture::ServerFixture;
-
-use super::scenario::{
-    create_readable_database, create_two_partition_database, create_unreadable_database, rand_name,
+use super::{
+    operations_api::get_operation_metadata,
+    scenario::{
+        create_readable_database, create_two_partition_database, create_unreadable_database,
+        rand_name,
+    },
 };
-
-// TODO remove after #1001 and use something directly in the influxdb_iox_client
-// crate
-fn get_operation_metadata(metadata: Option<Any>) -> OperationMetadata {
-    assert!(metadata.is_some());
-    let metadata = metadata.unwrap();
-    assert!(protobuf_type_url_eq(&metadata.type_url, OPERATION_METADATA));
-    prost::Message::decode(metadata.value).expect("failed to decode metadata")
-}
+use crate::common::server_fixture::ServerFixture;
 
 #[tokio::test]
 async fn test_list_update_remotes() {
