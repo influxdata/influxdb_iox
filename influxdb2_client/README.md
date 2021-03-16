@@ -3,6 +3,7 @@
 This crate contains a work-in-progress implementation of a Rust client for the [InfluxDB 2.0 API](https://docs.influxdata.com/influxdb/v2.0/reference/api/).
 
 This client is not the Rust client for IOx. You can find that [here](../influxdb_iox_client).
+
 The InfluxDB IOx project plans to focus its efforts on the subset of the API which are most relevent to IOx, but we accept (welcome!) PRs for adding the other pieces of functionality.
 
 
@@ -19,4 +20,4 @@ If you would like to contribute code you can do through GitHub by forking the re
 
 - [ ] Publish as a crate on [crates.io](http://crates.io)
 
-If you would like to contribute code you can do through GitHub by forking the repository and sending a pull request into the master branch.
+If you would like to contribute code you can do through GitHub by forking the repository and sending a pull request into the main branch.
