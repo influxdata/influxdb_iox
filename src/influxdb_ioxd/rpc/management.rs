@@ -250,13 +250,8 @@ where
             ..Default::default()
         })?;
 
-        let chunk_summaries = match db.partition_chunk_summaries(&partition_key) {
-            Ok(chunk_summaries) => chunk_summaries,
-            Err(e) => return Err(default_db_error_handler(e)),
-        };
-
-        let chunks: Vec<Chunk> = chunk_summaries
-            .into_iter()
+        let chunks: Vec<Chunk> = db
+            .partition_chunk_summaries(&partition_key)
             .map(|summary| summary.into())
             .collect();
 

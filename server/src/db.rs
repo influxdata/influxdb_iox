@@ -274,14 +274,11 @@ impl Db {
     pub fn partition_chunk_summaries(
         &self,
         partition_key: &str,
-    ) -> Result<impl Iterator<Item = ChunkSummary>> {
-        let summaries = self
-            .mutable_buffer_chunks(&partition_key)
+    ) -> impl Iterator<Item = ChunkSummary> {
+        self.mutable_buffer_chunks(&partition_key)
             .into_iter()
             .chain(self.read_buffer_chunks(&partition_key).into_iter())
-            .map(|c| c.summary());
-
-        Ok(summaries)
+            .map(|c| c.summary())
     }
 }
 
@@ -341,7 +338,6 @@ impl Database for Db {
             .partition_keys()?
             .into_iter()
             .map(|partition_key| self.partition_chunk_summaries(&partition_key))
-            .flatten()
             .flatten()
             .collect();
         Ok(summaries)
@@ -616,7 +612,6 @@ mod tests {
 
         let mut chunk_summaries = db
             .partition_chunk_summaries("1970-01-05T15")
-            .expect("expected summary to return")
             .collect::<Vec<_>>();
 
         chunk_summaries.sort_unstable();
