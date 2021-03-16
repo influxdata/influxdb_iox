@@ -426,6 +426,9 @@ impl<M: ConnectionManager> Server<M> {
                 info!(?job, "job finished");
             }
 
+            // Ensure mutex guard is not held across await point
+            std::mem::drop(jobs);
+
             interval.tick().await;
         }
     }
