@@ -427,15 +427,11 @@ impl<M: ConnectionManager> Server<M> {
             chunk_id,
         });
 
-        let captured_registration = registration.clone();
         let task = async move {
             // Close the chunk if it isn't already closed
             if db.is_open_chunk(&partition_key, chunk_id) {
                 debug!(%db_name, %partition_key, %chunk_id, "Rolling over partition to close chunk");
-                let result = db
-                    .rollover_partition(&partition_key)
-                    .track(captured_registration.clone())
-                    .await;
+                let result = db.rollover_partition(&partition_key).await;
 
                 if let Err(e) = result {
                     info!(?e, %db_name, %partition_key, %chunk_id, "background task error during chunk closing");
@@ -444,10 +440,7 @@ impl<M: ConnectionManager> Server<M> {
             }
 
             debug!(%db_name, %partition_key, %chunk_id, "background task loading chunk to read buffer");
-            let result = db
-                .load_chunk_to_read_buffer(&partition_key, chunk_id)
-                .track(captured_registration.clone())
-                .await;
+            let result = db.load_chunk_to_read_buffer(&partition_key, chunk_id).await;
             if let Err(e) = result {
                 info!(?e, %db_name, %partition_key, %chunk_id, "background task error loading read buffer chunk");
                 return Err(e);
@@ -455,10 +448,7 @@ impl<M: ConnectionManager> Server<M> {
 
             // now, drop the chunk
             debug!(%db_name, %partition_key, %chunk_id, "background task dropping mutable buffer chunk");
-            let result = db
-                .drop_mutable_buffer_chunk(&partition_key, chunk_id)
-                .track(captured_registration)
-                .await;
+            let result = db.drop_mutable_buffer_chunk(&partition_key, chunk_id).await;
             if let Err(e) = result {
                 info!(?e, %db_name, %partition_key, %chunk_id, "background task error loading read buffer chunk");
                 return Err(e);
@@ -901,7 +891,7 @@ mod tests {
 
         // ensure that we don't leave the server instance hanging around
         background_handle.abort();
-        background_handle.await.ok();
+        let _ = background_handle.await;
 
         Ok(())
     }
@@ -975,7 +965,7 @@ partition_key:
 
         // ensure that we don't leave the server instance hanging around
         background_handle.abort();
-        background_handle.await.ok();
+        let _ = background_handle.await;
 
         Ok(())
     }
