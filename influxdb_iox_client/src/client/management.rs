@@ -5,6 +5,7 @@ use thiserror::Error;
 use self::generated_types::{management_service_client::ManagementServiceClient, *};
 
 use crate::connection::Connection;
+use ::generated_types::google::longrunning::Operation;
 use std::convert::TryInto;
 
 /// Re-export generated_types
@@ -104,6 +105,18 @@ pub enum UpdateRemoteError {
     ServerError(tonic::Status),
 }
 
+/// Errors returned by Client::create_dummy_job
+#[derive(Debug, Error)]
+pub enum CreateDummyJobError {
+    /// Response contained no payload
+    #[error("Server returned an empty response")]
+    EmptyResponse,
+
+    /// Client received an unexpected error from the server
+    #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
+    ServerError(tonic::Status),
+}
+
 /// Errors returned by Client::list_partitions
 #[derive(Debug, Error)]
 pub enum ListPartitionsError {
@@ -127,6 +140,14 @@ pub enum GetPartitionError {
     #[error("Partition not found")]
     PartitionNotFound,
 
+    /// Client received an unexpected error from the server
+    #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
+    ServerError(tonic::Status),
+}
+
+/// Errors returned by Client::list_partition_chunks
+#[derive(Debug, Error)]
+pub enum ListPartitionChunksError {
     /// Client received an unexpected error from the server
     #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
     ServerError(tonic::Status),
@@ -364,6 +385,26 @@ impl Client {
         partition.ok_or(GetPartitionError::PartitionNotFound)
     }
 
+    /// List chunks in a partition
+    pub async fn list_partition_chunks(
+        &mut self,
+        db_name: impl Into<String>,
+        partition_key: impl Into<String>,
+    ) -> Result<Vec<Chunk>, ListPartitionChunksError> {
+        let db_name = db_name.into();
+        let partition_key = partition_key.into();
+
+        let response = self
+            .inner
+            .list_partition_chunks(ListPartitionChunksRequest {
+                db_name,
+                partition_key,
+            })
+            .await
+            .map_err(ListPartitionChunksError::ServerError)?;
+        Ok(response.into_inner().chunks)
+    }
+
     /// Create a new chunk in a partittion
     pub async fn new_partition_chunk(
         &mut self,
@@ -385,5 +426,24 @@ impl Client {
             })?;
 
         Ok(())
+    }
+
+    /// Creates a dummy job that for each value of the nanos field
+    /// spawns a task that sleeps for that number of nanoseconds before
+    /// returning
+    pub async fn create_dummy_job(
+        &mut self,
+        nanos: Vec<u64>,
+    ) -> Result<Operation, CreateDummyJobError> {
+        let response = self
+            .inner
+            .create_dummy_job(CreateDummyJobRequest { nanos })
+            .await
+            .map_err(CreateDummyJobError::ServerError)?;
+
+        Ok(response
+            .into_inner()
+            .operation
+            .ok_or(CreateDummyJobError::EmptyResponse)?)
     }
 }

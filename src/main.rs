@@ -23,6 +23,7 @@ mod commands {
     mod input;
     pub mod logging;
     pub mod meta;
+    pub mod operations;
     pub mod run;
     pub mod server;
     pub mod server_remote;
@@ -63,6 +64,14 @@ Examples:
 
     # Dumps storage statistics about out.parquet to stdout
     influxdb_iox stats out.parquet
+
+Command are generally structured in the form:
+    <type of object> <action> <arguments>
+
+For example, a command such as the following shows all actions
+    available for database chunks, including get and list.
+
+    influxdb_iox database chunk --help
 "#
 )]
 struct Config {
@@ -116,6 +125,7 @@ enum Command {
     Stats(commands::stats::Config),
     Server(commands::server::Config),
     Writer(commands::writer::Config),
+    Operation(commands::operations::Config),
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -181,6 +191,13 @@ fn main() -> Result<(), std::io::Error> {
             Command::Writer(config) => {
                 logging_level.setup_basic_logging();
                 if let Err(e) = commands::writer::command(host, config).await {
+                    eprintln!("{}", e);
+                    std::process::exit(ReturnCode::Failure as _)
+                }
+            }
+            Command::Operation(config) => {
+                logging_level.setup_basic_logging();
+                if let Err(e) = commands::operations::command(host, config).await {
                     eprintln!("{}", e);
                     std::process::exit(ReturnCode::Failure as _)
                 }
