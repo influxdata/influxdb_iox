@@ -24,7 +24,7 @@ message OperationMetadata {
 
 // A job that simply sleeps for a specified time and then returns success
 message Dummy {
-  // How long the job should sleep for before
+  // How long the job should sleep for before returning
   repeated uint64 nanos = 1;
 }
 
@@ -34,7 +34,7 @@ message PersistSegment {
   uint64 segment_id = 2;
 }
 
-// A job that simply sleeps for a specified time and then returns success
+// Move a chunk from mutable buffer to read buffer
 message CloseChunk {
   // name of the database
   string db_name = 1;
