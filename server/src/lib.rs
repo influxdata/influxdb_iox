@@ -407,11 +407,11 @@ impl<M: ConnectionManager> Server<M> {
     /// background job, dropping when complete.
     pub fn close_chunk(
         &self,
-        db_name: impl Into<String>,
+        db_name: DatabaseName<'_>,
         partition_key: impl Into<String>,
         chunk_id: u32,
     ) -> Result<Tracker<Job>> {
-        let db_name = db_name.into();
+        let db_name = db_name.to_string();
         let name = DatabaseName::new(&db_name).context(InvalidDatabaseName)?;
 
         let partition_key = partition_key.into();
@@ -845,22 +845,23 @@ mod tests {
 
         server.set_id(1);
 
-        let db_name = "foo";
+        let db_name = DatabaseName::new("foo").unwrap();
         server
-            .create_database(db_name, DatabaseRules::new())
+            .create_database(db_name.as_str(), DatabaseRules::new())
             .await?;
 
         let line = "cpu bar=1 10";
         let lines: Vec<_> = parse_lines(line).map(|l| l.unwrap()).collect();
-        server.write_lines(db_name, &lines).await.unwrap();
+        server.write_lines(&db_name, &lines).await.unwrap();
 
         // start the close (note this is not an async)
         let partition_key = "";
+        let db_name_string = db_name.to_string();
         let tracker = server.close_chunk(db_name, partition_key, 0).unwrap();
 
         let metadata = tracker.metadata();
         let expected_metadata = Job::CloseChunk {
-            db_name: db_name.to_string(),
+            db_name: db_name_string,
             partition_key: partition_key.to_string(),
             chunk_id: 0,
         };

@@ -292,7 +292,7 @@ where
         } = request.into_inner();
 
         // Validate that the database name is legit
-        DatabaseName::new(&db_name).field("db_name")?;
+        let db_name = DatabaseName::new(db_name).field("db_name")?;
 
         let tracker = self
             .server
