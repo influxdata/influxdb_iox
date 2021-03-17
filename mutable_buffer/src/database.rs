@@ -190,7 +190,7 @@ impl MutableBufferDb {
             Some(b) => self.write_entries_to_partitions(&b)?,
             None => {
                 return MissingPayload {
-                    writer: write.to_fb().writer(),
+                    writer: write.fb().writer(),
                 }
                 .fail()
             }
