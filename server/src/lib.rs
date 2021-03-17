@@ -403,7 +403,7 @@ impl<M: ConnectionManager> Server<M> {
         tracker
     }
 
-    /// Closes a chunk and starts movubg its data to the read buffer, as a
+    /// Closes a chunk and starts moving its data to the read buffer, as a
     /// background job, dropping when complete.
     pub fn close_chunk(
         &self,
