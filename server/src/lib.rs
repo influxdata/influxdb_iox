@@ -421,7 +421,7 @@ impl<M: ConnectionManager> Server<M> {
             .db(&name)
             .context(DatabaseNotFound { db_name: &db_name })?;
 
-        let (tracker, registration) = self.jobs.register(Job::CloseChunk {
+        let (tracker, registration) = self.jobs.lock().register(Job::CloseChunk {
             db_name: db_name.clone(),
             partition_key: partition_key.clone(),
             chunk_id,
@@ -481,18 +481,16 @@ impl<M: ConnectionManager> Server<M> {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
 
         loop {
-            // TODO: Retain limited history of past jobs, e.g. enqueue returned data into a
-            // Dequeue
-            let mut jobs = self.jobs.lock();
-
-            for job in jobs.reclaim() {
-                info!(?job, "job finished");
-            }
-
-            // Ensure mutex guard is not held across await point
-            std::mem::drop(jobs);
-
+            self.reclaim_jobs();
             interval.tick().await;
+        }
+    }
+
+    fn reclaim_jobs(&self) {
+        let mut jobs = self.jobs.lock();
+
+        for job in jobs.reclaim() {
+            info!(?job, "job finished");
         }
     }
 }
