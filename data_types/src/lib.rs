@@ -11,7 +11,9 @@
 )]
 
 pub use database_name::*;
-pub use schema::TIME_COLUMN_NAME;
+
+/// The name of the timestamp column
+//pub const TIME_COLUMN_NAME: &str = "time";
 
 /// The name of the column containing table names returned by a call to
 /// `table_names`.
@@ -22,15 +24,12 @@ pub const TABLE_NAMES_COLUMN_NAME: &str = "table";
 pub const COLUMN_NAMES_COLUMN_NAME: &str = "column";
 
 pub mod chunk;
-pub mod data;
 pub mod database_rules;
 pub mod error;
 pub mod http;
 pub mod job;
 pub mod names;
 pub mod partition_metadata;
-pub mod schema;
-pub mod selection;
 pub mod timestamp;
 pub mod wal;
 
