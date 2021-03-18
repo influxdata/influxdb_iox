@@ -18,3 +18,10 @@ generated_types = { path = "../generated_types" }
 influxdb_line_protocol = { path = "../influxdb_line_protocol" }
 snafu = "0.6"
 tracing = "0.1"
+
+[dev-dependencies] # In alphabetical order
+criterion = "0.3"
+
+[[bench]]
+name = "benchmark"
+harness = false

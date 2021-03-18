@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use data_types::schema::Schema;
+use internal_types::schema::Schema;
 use influxdb_line_protocol::parse_lines;
 use ingest::{
     parquet::{

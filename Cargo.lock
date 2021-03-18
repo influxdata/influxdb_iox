@@ -748,7 +748,6 @@ name = "data_types"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "criterion",
  "generated_types",
  "influxdb_line_protocol",
  "percent-encoding",
@@ -1546,6 +1545,7 @@ dependencies = [
  "arrow_deps",
  "chrono",
  "crc32fast",
+ "criterion",
  "data_types",
  "flatbuffers 0.6.1",
  "generated_types",
