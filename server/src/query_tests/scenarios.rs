@@ -50,14 +50,21 @@ impl DBSetup for NoData {
         writer.write_lp_string(&db, data).await.unwrap();
         // move data out of open chunk
         assert_eq!(db.rollover_partition(partition_key).await.unwrap().id(), 0);
-        // drop it
-        db.drop_mutable_buffer_chunk(partition_key, 0)
+
+        assert_eq!(db.mutable_buffer_chunks(partition_key).len(), 2);
+        assert_eq!(db.read_buffer_chunks(partition_key).len(), 0); // only open chunk
+
+        db.load_chunk_to_read_buffer(partition_key, 0)
             .await
             .unwrap();
 
         assert_eq!(db.mutable_buffer_chunks(partition_key).len(), 1);
+        assert_eq!(db.read_buffer_chunks(partition_key).len(), 1); // only open chunk
 
-        assert_eq!(db.read_buffer_chunks(partition_key).len(), 0); // only open chunk
+        db.drop_chunk(partition_key, 0).unwrap();
+
+        assert_eq!(db.mutable_buffer_chunks(partition_key).len(), 1);
+        assert_eq!(db.read_buffer_chunks(partition_key).len(), 0);
 
         let scenario3 = DBScenario {
             scenario_name: "Empty Database after drop chunk".into(),
@@ -228,26 +235,11 @@ pub(crate) async fn make_one_chunk_scenarios(partition_key: &str, data: &str) ->
         .await
         .unwrap();
     let scenario3 = DBScenario {
-        scenario_name: "Data in both read buffer and mutable buffer".into(),
+        scenario_name: "Data in read buffer".into(),
         db,
     };
 
-    let db = make_db();
-    let mut writer = TestLPWriter::default();
-    writer.write_lp_string(&db, data).await.unwrap();
-    db.rollover_partition(partition_key).await.unwrap();
-    db.load_chunk_to_read_buffer(partition_key, 0)
-        .await
-        .unwrap();
-    db.drop_mutable_buffer_chunk(partition_key, 0)
-        .await
-        .unwrap();
-    let scenario4 = DBScenario {
-        scenario_name: "Data in only read buffer and not mutable buffer".into(),
-        db,
-    };
-
-    vec![scenario1, scenario2, scenario3, scenario4]
+    vec![scenario1, scenario2, scenario3]
 }
 
 /// This function loads two chunks of lp data into 4 different scenarios
@@ -289,9 +281,6 @@ pub async fn make_two_chunk_scenarios(
     db.load_chunk_to_read_buffer(partition_key, 0)
         .await
         .unwrap();
-    db.drop_mutable_buffer_chunk(partition_key, 0)
-        .await
-        .unwrap();
     writer.write_lp_string(&db, data2).await.unwrap();
     let scenario3 = DBScenario {
         scenario_name: "Data in open chunk of mutable buffer, and one chunk of read buffer".into(),
@@ -309,14 +298,8 @@ pub async fn make_two_chunk_scenarios(
     db.load_chunk_to_read_buffer(partition_key, 0)
         .await
         .unwrap();
-    db.drop_mutable_buffer_chunk(partition_key, 0)
-        .await
-        .unwrap();
 
     db.load_chunk_to_read_buffer(partition_key, 1)
-        .await
-        .unwrap();
-    db.drop_mutable_buffer_chunk(partition_key, 1)
         .await
         .unwrap();
     let scenario4 = DBScenario {
