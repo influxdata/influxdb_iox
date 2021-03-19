@@ -171,12 +171,12 @@ pub async fn main(logging_level: LoggingLevel, config: Config) -> Result<()> {
     // There are two different select macros - tokio::select and futures::select
     //
     // tokio::select takes ownership of the passed future "moving" it into the
-    // select block This works well when not running select inside a loop, or
+    // select block. This works well when not running select inside a loop, or
     // when using a future that can be dropped and recreated, often the case
     // with tokio's futures e.g. `channel.recv()`
     //
     // futures::select is more flexible as it doesn't take ownership of the provided
-    // future However, to safely provide this imposes some additional
+    // future. However, to safely provide this it imposes some additional
     // requirements
     //
     // All passed futures must implement FusedFuture - it is IB to poll a future
@@ -189,8 +189,8 @@ pub async fn main(logging_level: LoggingLevel, config: Config) -> Result<()> {
     // The additional requirement of futures::select is that if the future passed
     // outlives the select block, it must be Unpin or already Pinned
 
-    // pin_mut constructs a Pin<&mut T> from a T by pinning it to the current stack
-    // frame
+    // pin_mut constructs a Pin<&mut T> from a T by preventing moving the T
+    // from the current stack frame and constructing a Pin<&mut T> to it
     pin_mut!(signal);
     pin_mut!(app);
     pin_mut!(grpc_server);
