@@ -2,7 +2,7 @@ use crate::commands::{
     logging::LoggingLevel,
     run::{Config, ObjectStore as ObjStoreOpt},
 };
-use futures::{pin_mut, select, FutureExt};
+use futures::{pin_mut, FutureExt};
 use hyper::server::conn::AddrIncoming;
 use object_store::{
     self, aws::AmazonS3, azure::MicrosoftAzure, gcp::GoogleCloudStorage, ObjectStore,
@@ -69,6 +69,8 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// On unix platforms we want to intercept SIGINT and SIGTERM
+/// This method returns if either are signalled
 #[cfg(unix)]
 async fn wait_for_signal() {
     use tokio::signal::unix::{signal, SignalKind};
@@ -82,6 +84,8 @@ async fn wait_for_signal() {
 }
 
 #[cfg(windows)]
+/// ctrl_c is the cross-platform way to intercept the equivalent of SIGINT
+/// This method returns if this occurs
 async fn wait_for_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
@@ -164,6 +168,29 @@ pub async fn main(logging_level: LoggingLevel, config: Config) -> Result<()> {
     // Shutdown signal
     let signal = wait_for_signal().fuse();
 
+    // There are two different select macros - tokio::select and futures::select
+    //
+    // tokio::select takes ownership of the passed future "moving" it into the
+    // select block This works well when not running select inside a loop, or
+    // when using a future that can be dropped and recreated, often the case
+    // with tokio's futures e.g. `channel.recv()`
+    //
+    // futures::select is more flexible as it doesn't take ownership of the provided
+    // future However, to safely provide this imposes some additional
+    // requirements
+    //
+    // All passed futures must implement FusedFuture - it is IB to poll a future
+    // that has returned Poll::Ready(_). A FusedFuture has an is_terminated()
+    // method that indicates if it is safe to poll - e.g. false if it has
+    // returned Poll::Ready(_). futures::select uses this to implement its
+    // functionality. futures::FutureExt adds a fuse() method that
+    // wraps an arbitrary future and makes it a FusedFuture
+    //
+    // The additional requirement of futures::select is that if the future passed
+    // outlives the select block, it must be Unpin or already Pinned
+
+    // pin_mut constructs a Pin<&mut T> from a T by pinning it to the current stack
+    // frame
     pin_mut!(signal);
     pin_mut!(app);
     pin_mut!(grpc_server);
@@ -175,7 +202,7 @@ pub async fn main(logging_level: LoggingLevel, config: Config) -> Result<()> {
     // Trigger graceful shutdown of server components on signal
     // or any background service exiting
     loop {
-        select! {
+        futures::select! {
             _ = signal => info!("Shutdown requested"),
             _ = app => info!("Background worker shutdown"),
             result = grpc_server => match result {
