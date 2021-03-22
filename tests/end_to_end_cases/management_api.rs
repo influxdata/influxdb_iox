@@ -500,7 +500,10 @@ async fn test_new_partition_chunk() {
         .await
         .expect_err("new partition chunk");
 
-    assert_eq!("Resource partition/non_existent_partition not found", err.to_string());
+    assert_eq!(
+        "Resource partition/non_existent_partition not found",
+        err.to_string()
+    );
 }
 
 #[tokio::test]
@@ -513,7 +516,10 @@ async fn test_new_partition_chunk_error() {
         .await
         .expect_err("expected error");
 
-    assert_contains!(err.to_string(), "Resource database/this database does not exist not found");
+    assert_contains!(
+        err.to_string(),
+        "Resource database/this database does not exist not found"
+    );
 }
 
 #[tokio::test]

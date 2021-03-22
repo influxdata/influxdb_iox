@@ -39,16 +39,18 @@ pub enum Error {
         chunk_id: u32,
     },
 
-    #[snafu(display("Internal error: can not rollover unknown partition chunk {} {}", partition_key, chunk_id ))]
+    #[snafu(display(
+        "Internal error: can not rollover unknown partition chunk {} {}",
+        partition_key,
+        chunk_id
+    ))]
     InternalRolloverUnknownChunk {
         partition_key: String,
         chunk_id: u32,
     },
 
-    #[snafu(display("Cannot rollover non existent partition:  {} ", partition_key ))]
-    UnknownPartition {
-        partition_key: String,
-    },
+    #[snafu(display("Cannot rollover non existent partition:  {} ", partition_key))]
+    UnknownPartition { partition_key: String },
 
     #[snafu(display("Unknown Mutable Buffer Chunk {}", chunk_id))]
     UnknownMutableBufferChunk { chunk_id: u32 },
@@ -180,14 +182,19 @@ impl Db {
         // may be inconsistent with the catalog state
 
         // validate that the partition is known
-        catalog.partition(partition_key)
+        catalog
+            .partition(partition_key)
             .context(UnknownPartition { partition_key })?;
 
         let chunk_id = mutable_buffer.open_chunk_id(partition_key);
 
-        let catalog_chunk = catalog
-            .chunk_mut(partition_key, chunk_id)
-            .context(InternalRolloverUnknownChunk { partition_key, chunk_id})?;
+        let catalog_chunk =
+            catalog
+                .chunk_mut(partition_key, chunk_id)
+                .context(InternalRolloverUnknownChunk {
+                    partition_key,
+                    chunk_id,
+                })?;
 
         assert_eq!(
             catalog_chunk.state(),
@@ -275,7 +282,7 @@ impl Db {
                 chunk_id,
             })?;
 
-        // clear it also from the read buffer / mutable buffer, if any
+        // clear it also from the read buffer / mutable buffer, if needed
         let (drop_mb, drop_rb) = match chunk.state() {
             ChunkState::Open => (true, false),
             ChunkState::Closing => (true, false),
@@ -364,7 +371,7 @@ impl Db {
         // Relock the catalog again (nothing else should have
         // been able to modify the chunk state while we were moving it.
         //
-        // TODO: Handle the case we do in the case when someone dropped
+        // TODO: Handle the case when someone dropped
         // the chunk / partition while we were moving it. We probably
         // need to purge it from the read buffer now after the fact
         let mut catalog = self.catalog.write();

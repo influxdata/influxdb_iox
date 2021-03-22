@@ -96,7 +96,7 @@ impl Catalog {
         let chunks = chunks.expect("No such partition");
 
         // Ensure this chunk doesn't already exist
-        if chunks.iter().find(|c| c.id() == id).is_some() {
+        if chunks.iter().any(|c| c.id() == id) {
             panic!("chunk already exists");
         }
 

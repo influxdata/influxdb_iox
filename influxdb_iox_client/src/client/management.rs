@@ -439,7 +439,7 @@ impl Client {
             .map_err(|status| match status.code() {
                 tonic::Code::NotFound => {
                     NewPartitionChunkError::NotFound(status.message().to_string())
-                },
+                }
                 _ => NewPartitionChunkError::ServerError(status),
             })?;
 

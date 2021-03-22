@@ -46,7 +46,7 @@ pub fn default_db_error_handler(error: server::db::Error) -> tonic::Status {
             description: "Cannot write to database: no mutable buffer configured".to_string(),
         }
         .into(),
-        Error::UnknownPartition {partition_key} => NotFound {
+        Error::UnknownPartition { partition_key } => NotFound {
             resource_type: "partition".to_string(),
             resource_name: partition_key,
             ..Default::default()
