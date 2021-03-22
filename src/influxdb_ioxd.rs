@@ -11,7 +11,7 @@ use panic_logging::SendPanicsToTracing;
 use server::{ConnectionManagerImpl as ConnectionManager, Server as AppServer};
 use snafu::{ResultExt, Snafu};
 use std::{convert::TryFrom, fs, net::SocketAddr, path::PathBuf, sync::Arc};
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, Instrument};
 
 mod http;
 mod rpc;
@@ -163,7 +163,10 @@ pub async fn main(logging_level: LoggingLevel, config: Config) -> Result<()> {
     info!(git_hash, "InfluxDB IOx server ready");
 
     // Get IOx background worker task
-    let app = app_server.background_worker(token.clone()).fuse();
+    let app = app_server
+        .background_worker(token.clone())
+        .instrument(tracing::info_span!("server_worker"))
+        .fuse();
 
     // Shutdown signal
     let signal = wait_for_signal().fuse();

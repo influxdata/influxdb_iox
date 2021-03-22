@@ -108,6 +108,7 @@ pub struct Db {
     #[serde(skip)]
     sequence: AtomicU64,
 }
+
 impl Db {
     pub fn new(
         rules: DatabaseRules,
@@ -315,6 +316,16 @@ impl Db {
             .into_iter()
             .chain(self.read_buffer_chunks(&partition_key).into_iter())
             .map(|c| c.summary())
+    }
+
+    /// Background worker function
+    pub async fn background_worker(&self, shutdown: tokio_util::sync::CancellationToken) {
+        info!("started background worker");
+
+        // TODO: Do more here
+        shutdown.cancelled().await;
+
+        info!("finished background worker");
     }
 }
 

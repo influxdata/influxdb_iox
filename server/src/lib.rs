@@ -90,6 +90,8 @@ use influxdb_line_protocol::ParsedLine;
 use object_store::{path::ObjectStorePath, ObjectStore, ObjectStoreApi};
 use query::{exec::Executor, DatabaseStore};
 
+use futures::{pin_mut, FutureExt};
+
 use crate::{
     config::{
         object_store_path_for_database_config, Config, GRPCConnectionString, DB_RULES_FILE_NAME,
@@ -477,6 +479,8 @@ impl<M: ConnectionManager> Server<M> {
 
     /// Background worker function
     pub async fn background_worker(&self, shutdown: tokio_util::sync::CancellationToken) {
+        info!("started background worker");
+
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
 
         while !shutdown.is_cancelled() {
@@ -485,6 +489,22 @@ impl<M: ConnectionManager> Server<M> {
             tokio::select! {
                 _ = interval.tick() => {},
                 _ = shutdown.cancelled() => break
+            }
+        }
+
+        info!("shutting down background worker");
+
+        let join = self.config.drain().fuse();
+        pin_mut!(join);
+
+        // Keep running reclaim whilst shutting down in case something
+        // is waiting on a tracker to complete
+        loop {
+            self.jobs.lock().reclaim();
+
+            futures::select! {
+                _ = interval.tick().fuse() => {},
+                _ = join => break
             }
         }
     }

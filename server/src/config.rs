@@ -12,6 +12,9 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{Arc, RwLock},
 };
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+use tracing::{error, Instrument};
 
 pub(crate) const DB_RULES_FILE_NAME: &str = "rules.json";
 
@@ -20,6 +23,7 @@ pub(crate) const DB_RULES_FILE_NAME: &str = "rules.json";
 /// that can be loaded incrementally from objet storage.
 #[derive(Default, Debug)]
 pub(crate) struct Config {
+    shutdown: CancellationToken,
     state: RwLock<ConfigState>,
 }
 
@@ -57,7 +61,7 @@ impl Config {
 
     pub(crate) fn db(&self, name: &DatabaseName<'_>) -> Option<Arc<Db>> {
         let state = self.state.read().expect("mutex poisoned");
-        state.databases.get(name).cloned()
+        state.databases.get(name).map(|x| Arc::clone(&x.db))
     }
 
     pub(crate) fn db_names_sorted(&self) -> Vec<DatabaseName<'static>> {
@@ -86,12 +90,62 @@ impl Config {
             .reservations
             .take(name)
             .expect("reservation doesn't exist");
-        assert!(state.databases.insert(name, db).is_none())
+
+        if self.shutdown.is_cancelled() {
+            error!("server is shutting down");
+            return;
+        }
+
+        let shutdown = self.shutdown.child_token();
+        let shutdown_captured = shutdown.clone();
+        let db_captured = Arc::clone(&db);
+        let name_captured = name.clone();
+
+        let handle = Some(tokio::spawn(async move {
+            db_captured
+                .background_worker(shutdown_captured)
+                .instrument(tracing::info_span!("db_worker", database=%name_captured))
+                .await
+        }));
+
+        assert!(state
+            .databases
+            .insert(
+                name,
+                DatabaseConfig {
+                    db,
+                    handle,
+                    shutdown
+                }
+            )
+            .is_none())
     }
 
     fn rollback(&self, name: &DatabaseName<'static>) {
         let mut state = self.state.write().expect("mutex poisoned");
         state.reservations.remove(name);
+    }
+
+    /// Cancels and drains all background worker tasks
+    pub(crate) async fn drain(&self) {
+        // This will cancel all background child tasks
+        self.shutdown.cancel();
+
+        let handles: Vec<_>;
+
+        // Explicit block needed for https://github.com/rust-lang/rust/issues/57478
+        {
+            let mut state = self.state.write().expect("mutex poisoned");
+            handles = state
+                .databases
+                .iter_mut()
+                .filter_map(|(_, v)| v.handle.take())
+                .collect();
+        }
+
+        for handle in handles {
+            let _ = handle.await;
+        }
     }
 }
 
@@ -111,9 +165,16 @@ pub type GRPCConnectionString = String;
 #[derive(Default, Debug)]
 struct ConfigState {
     reservations: BTreeSet<DatabaseName<'static>>,
-    databases: BTreeMap<DatabaseName<'static>, Arc<Db>>,
+    databases: BTreeMap<DatabaseName<'static>, DatabaseConfig>,
     /// Map between remote IOx server IDs and management API connection strings.
     remotes: BTreeMap<WriterId, GRPCConnectionString>,
+}
+
+#[derive(Debug)]
+struct DatabaseConfig {
+    db: Arc<Db>,
+    handle: Option<JoinHandle<()>>,
+    shutdown: CancellationToken,
 }
 
 /// CreateDatabaseHandle is retunred when a call is made to `create_db` on
@@ -150,8 +211,8 @@ mod test {
     use super::*;
     use object_store::{memory::InMemory, ObjectStore, ObjectStoreApi};
 
-    #[test]
-    fn create_db() {
+    #[tokio::test]
+    async fn create_db() {
         let name = DatabaseName::new("foo").unwrap();
         let config = Config::default();
         let rules = DatabaseRules::new();
@@ -165,8 +226,9 @@ mod test {
         let db_reservation = config.create_db(name.clone(), rules).unwrap();
         db_reservation.commit();
         assert!(config.db(&name).is_some());
-
         assert_eq!(config.db_names_sorted(), vec![name]);
+
+        config.drain().await
     }
 
     #[test]
