@@ -77,7 +77,7 @@ use bytes::Bytes;
 use futures::stream::TryStreamExt;
 use parking_lot::Mutex;
 use snafu::{OptionExt, ResultExt, Snafu};
-use tracing::{debug, error, info};
+use tracing::{debug, error, warn, info};
 
 use data_types::{
     database_rules::{DatabaseRules, WriterId},
@@ -507,6 +507,17 @@ impl<M: ConnectionManager> Server<M> {
                 _ = join => break
             }
         }
+
+        info!("draining tracker registry");
+
+        // Wait for any outstanding jobs to finish - frontend shutdown should be
+        // sequenced before shutting down the background workers and so there
+        // shouldn't be any
+        while self.jobs.lock().tracked_len() != 0 {
+            interval.tick().await;
+        }
+
+        info!("drained tracker registry");
     }
 }
 

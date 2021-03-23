@@ -14,7 +14,7 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{warn, error, Instrument};
+use tracing::{info, warn, error, Instrument};
 
 pub(crate) const DB_RULES_FILE_NAME: &str = "rules.json";
 
@@ -133,6 +133,8 @@ impl Config {
 
     /// Cancels and drains all background worker tasks
     pub(crate) async fn drain(&self) {
+        info!("shutting down database background workers");
+
         // This will cancel all background child tasks
         self.shutdown.cancel();
 
@@ -148,6 +150,8 @@ impl Config {
         for handle in handles {
             let _ = handle.await;
         }
+
+        info!("database background workers shutdown");
     }
 }
 
