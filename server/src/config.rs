@@ -14,7 +14,7 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn, error, Instrument};
+use tracing::{error, info, warn, Instrument};
 
 pub(crate) const DB_RULES_FILE_NAME: &str = "rules.json";
 
@@ -245,7 +245,13 @@ mod test {
 
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
-        assert!(config.db(&name).expect("expected database").worker_iterations() > 0);
+        assert!(
+            config
+                .db(&name)
+                .expect("expected database")
+                .worker_iterations()
+                > 0
+        );
 
         config.drain().await
     }
