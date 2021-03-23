@@ -166,7 +166,7 @@ pub async fn main(logging_level: LoggingLevel, config: Config) -> Result<()> {
     info!(git_hash, "InfluxDB IOx server ready");
 
     // Get IOx background worker task
-    let app = app_server
+    let background_worker = app_server
         .background_worker(internal_shutdown.clone())
         .fuse();
 
@@ -197,20 +197,27 @@ pub async fn main(logging_level: LoggingLevel, config: Config) -> Result<()> {
     // pin_mut constructs a Pin<&mut T> from a T by preventing moving the T
     // from the current stack frame and constructing a Pin<&mut T> to it
     pin_mut!(signal);
-    pin_mut!(app);
+    pin_mut!(background_worker);
     pin_mut!(grpc_server);
     pin_mut!(http_server);
 
     // Return the first error encountered
     let mut res = Ok(());
 
-    // Trigger graceful shutdown of server components on signal
-    // or any background service exiting
+    // Graceful shutdown can be triggered by sending SIGINT or SIGTERM to the
+    // process, or by a background task exiting - most likely with an error
+    //
+    // Graceful shutdown should then proceed in the following order
+    // 1. Stop accepting new HTTP and gRPC requests and drain existing connections
+    // 2. Trigger shutdown of internal background workers loops
+    //
+    // This is important to ensure background tasks, such as polling the tracker
+    // registry, don't exit before HTTP and gRPC requests dependent on them
     while !grpc_server.is_terminated() && !http_server.is_terminated() {
         futures::select! {
             _ = signal => info!("Shutdown requested"),
-            _ = app => {
-                error!("background worker shutdown prematurely");
+            _ = background_worker => {
+                info!("background worker shutdown prematurely");
                 internal_shutdown.cancel();
             },
             result = grpc_server => match result {
@@ -234,7 +241,7 @@ pub async fn main(logging_level: LoggingLevel, config: Config) -> Result<()> {
 
     info!("frontend shutdown completed");
     internal_shutdown.cancel();
-    app.await;
+    background_worker.await;
 
     info!("server completed shutting down");
 
