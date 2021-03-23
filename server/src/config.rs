@@ -14,13 +14,18 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, Instrument};
+use tracing::{warn, error, Instrument};
 
 pub(crate) const DB_RULES_FILE_NAME: &str = "rules.json";
 
-/// The Config tracks the configuration od databases and their rules along
+/// The Config tracks the configuration of databases and their rules along
 /// with host groups for replication. It is used as an in-memory structure
-/// that can be loaded incrementally from objet storage.
+/// that can be loaded incrementally from object storage.
+///
+/// drain() should be called prior to drop to ensure termination
+/// of background worker tasks. They will be cancelled on drop
+/// but they are effectively "detached" at that point, and they may not
+/// run to completion if the tokio runtime is dropped
 #[derive(Default, Debug)]
 pub(crate) struct Config {
     shutdown: CancellationToken,
@@ -112,7 +117,7 @@ impl Config {
             .databases
             .insert(
                 name,
-                DatabaseConfig {
+                DatabaseState {
                     db,
                     handle,
                     shutdown
@@ -131,17 +136,14 @@ impl Config {
         // This will cancel all background child tasks
         self.shutdown.cancel();
 
-        let handles: Vec<_>;
-
-        // Explicit block needed for https://github.com/rust-lang/rust/issues/57478
-        {
-            let mut state = self.state.write().expect("mutex poisoned");
-            handles = state
-                .databases
-                .iter_mut()
-                .filter_map(|(_, v)| v.handle.take())
-                .collect();
-        }
+        let handles: Vec<_> = self
+            .state
+            .write()
+            .expect("mutex poisoned")
+            .databases
+            .iter_mut()
+            .filter_map(|(_, v)| v.handle.take())
+            .collect();
 
         for handle in handles {
             let _ = handle.await;
@@ -165,19 +167,28 @@ pub type GRPCConnectionString = String;
 #[derive(Default, Debug)]
 struct ConfigState {
     reservations: BTreeSet<DatabaseName<'static>>,
-    databases: BTreeMap<DatabaseName<'static>, DatabaseConfig>,
+    databases: BTreeMap<DatabaseName<'static>, DatabaseState>,
     /// Map between remote IOx server IDs and management API connection strings.
     remotes: BTreeMap<WriterId, GRPCConnectionString>,
 }
 
 #[derive(Debug)]
-struct DatabaseConfig {
+struct DatabaseState {
     db: Arc<Db>,
     handle: Option<JoinHandle<()>>,
     shutdown: CancellationToken,
 }
 
-/// CreateDatabaseHandle is retunred when a call is made to `create_db` on
+impl Drop for DatabaseState {
+    fn drop(&mut self) {
+        if self.handle.is_some() {
+            warn!("DatabaseState dropped without waiting for background task to complete");
+            self.shutdown.cancel();
+        }
+    }
+}
+
+/// CreateDatabaseHandle is returned when a call is made to `create_db` on
 /// the Config struct. The handle can be used to hold a reservation for the
 /// database name. Calling `commit` on the handle will consume the struct
 /// and move the database from reserved to being in the config.
@@ -226,7 +237,11 @@ mod test {
         let db_reservation = config.create_db(name.clone(), rules).unwrap();
         db_reservation.commit();
         assert!(config.db(&name).is_some());
-        assert_eq!(config.db_names_sorted(), vec![name]);
+        assert_eq!(config.db_names_sorted(), vec![name.clone()]);
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        assert!(config.db(&name).expect("expected database").worker_iterations() > 0);
 
         config.drain().await
     }

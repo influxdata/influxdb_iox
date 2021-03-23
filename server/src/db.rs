@@ -25,6 +25,8 @@ use tracing::info;
 
 mod chunk;
 pub(crate) use chunk::DBChunk;
+use std::sync::atomic::AtomicUsize;
+
 pub mod pred;
 mod streams;
 
@@ -107,6 +109,9 @@ pub struct Db {
 
     #[serde(skip)]
     sequence: AtomicU64,
+
+    #[serde(skip)]
+    worker_iterations: AtomicUsize,
 }
 
 impl Db {
@@ -124,6 +129,7 @@ impl Db {
             read_buffer,
             wal_buffer,
             sequence: AtomicU64::new(STARTING_SEQUENCE),
+            worker_iterations: AtomicUsize::new(0),
         }
     }
 
@@ -318,12 +324,25 @@ impl Db {
             .map(|c| c.summary())
     }
 
+    /// Returns the number of iterations of the background worker loop
+    pub fn worker_iterations(&self) -> usize {
+        self.worker_iterations.load(Ordering::Relaxed)
+    }
+
     /// Background worker function
     pub async fn background_worker(&self, shutdown: tokio_util::sync::CancellationToken) {
         info!("started background worker");
 
-        // TODO: Do more here
-        shutdown.cancelled().await;
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+
+        while !shutdown.is_cancelled() {
+            self.worker_iterations.fetch_add(1, Ordering::Relaxed);
+
+            tokio::select! {
+                _ = interval.tick() => {},
+                _ = shutdown.cancelled() => break
+            }
+        }
 
         info!("finished background worker");
     }

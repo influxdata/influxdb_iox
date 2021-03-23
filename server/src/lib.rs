@@ -477,7 +477,7 @@ impl<M: ConnectionManager> Server<M> {
         self.jobs.lock().get(id)
     }
 
-    /// Background worker function
+    /// Background worker function for the server
     pub async fn background_worker(&self, shutdown: tokio_util::sync::CancellationToken) {
         info!("started background worker");
 
