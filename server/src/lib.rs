@@ -84,9 +84,8 @@ use data_types::{
     job::Job,
     {DatabaseName, DatabaseNameError},
 };
-use internal_types::data::{lines_to_replicated_write, ReplicatedWrite};
-
 use influxdb_line_protocol::ParsedLine;
+use internal_types::data::{lines_to_replicated_write, ReplicatedWrite};
 use object_store::{path::ObjectStorePath, ObjectStore, ObjectStoreApi};
 use query::{exec::Executor, DatabaseStore};
 
@@ -97,7 +96,9 @@ use crate::{
         object_store_path_for_database_config, Config, GRPCConnectionString, DB_RULES_FILE_NAME,
     },
     db::Db,
-    tracker::{TrackedFutureExt, Tracker, TrackerId, TrackerRegistryWithHistory},
+    tracker::{
+        TrackedFutureExt, Tracker, TrackerId, TrackerRegistration, TrackerRegistryWithHistory,
+    },
 };
 
 pub mod buffer;
@@ -151,8 +152,33 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-const STORE_ERROR_PAUSE_SECONDS: u64 = 100;
 const JOB_HISTORY_SIZE: usize = 1000;
+
+/// The global job registry
+#[derive(Debug)]
+pub struct JobRegistry {
+    inner: Mutex<TrackerRegistryWithHistory<Job>>,
+}
+
+impl Default for JobRegistry {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(TrackerRegistryWithHistory::new(JOB_HISTORY_SIZE)),
+        }
+    }
+}
+
+impl JobRegistry {
+    fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn register(&self, job: Job) -> (Tracker<Job>, TrackerRegistration) {
+        self.inner.lock().register(job)
+    }
+}
+
+const STORE_ERROR_PAUSE_SECONDS: u64 = 100;
 
 /// `Server` is the container struct for how servers store data internally, as
 /// well as how they communicate with other servers. Each server will have one
@@ -164,18 +190,20 @@ pub struct Server<M: ConnectionManager> {
     connection_manager: Arc<M>,
     pub store: Arc<ObjectStore>,
     executor: Arc<Executor>,
-    jobs: Mutex<TrackerRegistryWithHistory<Job>>,
+    jobs: Arc<JobRegistry>,
 }
 
 impl<M: ConnectionManager> Server<M> {
     pub fn new(connection_manager: M, store: Arc<ObjectStore>) -> Self {
+        let jobs = Arc::new(JobRegistry::new());
+
         Self {
             id: AtomicU32::new(SERVER_ID_NOT_SET),
-            config: Arc::new(Config::default()),
+            config: Arc::new(Config::new(Arc::clone(&jobs))),
             store,
             connection_manager: Arc::new(connection_manager),
             executor: Arc::new(Executor::new()),
-            jobs: Mutex::new(TrackerRegistryWithHistory::new(JOB_HISTORY_SIZE)),
+            jobs,
         }
     }
 
@@ -356,7 +384,7 @@ impl<M: ConnectionManager> Server<M> {
                     let writer_id = self.require_id()?;
                     let store = Arc::clone(&self.store);
 
-                    let (_, tracker) = self.jobs.lock().register(Job::PersistSegment {
+                    let (_, tracker) = self.jobs.register(Job::PersistSegment {
                         writer_id,
                         segment_id: segment.id,
                     });
@@ -392,7 +420,7 @@ impl<M: ConnectionManager> Server<M> {
     }
 
     pub fn spawn_dummy_job(&self, nanos: Vec<u64>) -> Tracker<Job> {
-        let (tracker, registration) = self.jobs.lock().register(Job::Dummy {
+        let (tracker, registration) = self.jobs.register(Job::Dummy {
             nanos: nanos.clone(),
         });
 
@@ -424,7 +452,7 @@ impl<M: ConnectionManager> Server<M> {
             .db(&name)
             .context(DatabaseNotFound { db_name: &db_name })?;
 
-        let (tracker, registration) = self.jobs.lock().register(Job::CloseChunk {
+        let (tracker, registration) = self.jobs.register(Job::CloseChunk {
             db_name: db_name.clone(),
             partition_key: partition_key.clone(),
             chunk_id,
@@ -469,12 +497,12 @@ impl<M: ConnectionManager> Server<M> {
 
     /// Returns a list of all jobs tracked by this server
     pub fn tracked_jobs(&self) -> Vec<Tracker<Job>> {
-        self.jobs.lock().tracked()
+        self.jobs.inner.lock().tracked()
     }
 
     /// Returns a specific job tracked by this server
     pub fn get_job(&self, id: TrackerId) -> Option<Tracker<Job>> {
-        self.jobs.lock().get(id)
+        self.jobs.inner.lock().get(id)
     }
 
     /// Background worker function for the server
@@ -484,7 +512,7 @@ impl<M: ConnectionManager> Server<M> {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
 
         while !shutdown.is_cancelled() {
-            self.jobs.lock().reclaim();
+            self.jobs.inner.lock().reclaim();
 
             tokio::select! {
                 _ = interval.tick() => {},
@@ -500,7 +528,7 @@ impl<M: ConnectionManager> Server<M> {
         // Keep running reclaim whilst shutting down in case something
         // is waiting on a tracker to complete
         loop {
-            self.jobs.lock().reclaim();
+            self.jobs.inner.lock().reclaim();
 
             futures::select! {
                 _ = interval.tick().fuse() => {},
@@ -513,7 +541,9 @@ impl<M: ConnectionManager> Server<M> {
         // Wait for any outstanding jobs to finish - frontend shutdown should be
         // sequenced before shutting down the background workers and so there
         // shouldn't be any
-        while self.jobs.lock().tracked_len() != 0 {
+        while self.jobs.inner.lock().tracked_len() != 0 {
+            self.jobs.inner.lock().reclaim();
+
             interval.tick().await;
         }
 
@@ -651,6 +681,8 @@ mod tests {
     use futures::TryStreamExt;
     use parking_lot::Mutex;
     use snafu::Snafu;
+    use tokio::task::JoinHandle;
+    use tokio_util::sync::CancellationToken;
 
     use arrow_deps::{assert_table_eq, datafusion::physical_plan::collect};
     use data_types::database_rules::{
@@ -663,8 +695,6 @@ mod tests {
     use crate::buffer::Segment;
 
     use super::*;
-    use tokio::task::JoinHandle;
-    use tokio_util::sync::CancellationToken;
 
     type TestError = Box<dyn std::error::Error + Send + Sync + 'static>;
     type Result<T = (), E = TestError> = std::result::Result<T, E>;

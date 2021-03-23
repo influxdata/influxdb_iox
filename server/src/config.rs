@@ -1,5 +1,8 @@
-/// This module contains code for managing the configuration of the server.
-use crate::{db::Db, Error, Result};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, RwLock},
+};
+
 use data_types::{
     database_rules::{DatabaseRules, WriterId},
     DatabaseName,
@@ -8,10 +11,8 @@ use mutable_buffer::MutableBufferDb;
 use object_store::path::ObjectStorePath;
 use read_buffer::Database as ReadBufferDb;
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::{Arc, RwLock},
-};
+/// This module contains code for managing the configuration of the server.
+use crate::{db::Db, Error, JobRegistry, Result};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn, Instrument};
@@ -26,13 +27,22 @@ pub(crate) const DB_RULES_FILE_NAME: &str = "rules.json";
 /// of background worker tasks. They will be cancelled on drop
 /// but they are effectively "detached" at that point, and they may not
 /// run to completion if the tokio runtime is dropped
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub(crate) struct Config {
     shutdown: CancellationToken,
+    jobs: Arc<JobRegistry>,
     state: RwLock<ConfigState>,
 }
 
 impl Config {
+    pub(crate) fn new(jobs: Arc<JobRegistry>) -> Self {
+        Self {
+            shutdown: Default::default(),
+            state: Default::default(),
+            jobs,
+        }
+    }
+
     pub(crate) fn create_db(
         &self,
         name: DatabaseName<'static>,
@@ -54,7 +64,13 @@ impl Config {
         let read_buffer = ReadBufferDb::new();
 
         let wal_buffer = rules.wal_buffer_config.as_ref().map(Into::into);
-        let db = Arc::new(Db::new(rules, mutable_buffer, read_buffer, wal_buffer));
+        let db = Arc::new(Db::new(
+            rules,
+            mutable_buffer,
+            read_buffer,
+            wal_buffer,
+            Arc::clone(&self.jobs),
+        ));
 
         state.reservations.insert(name.clone());
         Ok(CreateDatabaseHandle {
@@ -223,13 +239,14 @@ impl<'a> Drop for CreateDatabaseHandle<'a> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use object_store::{memory::InMemory, ObjectStore, ObjectStoreApi};
+
+    use super::*;
 
     #[tokio::test]
     async fn create_db() {
         let name = DatabaseName::new("foo").unwrap();
-        let config = Config::default();
+        let config = Config::new(Arc::new(JobRegistry::new()));
         let rules = DatabaseRules::new();
 
         {
