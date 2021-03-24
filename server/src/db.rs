@@ -346,7 +346,7 @@ impl Db {
             ChunkState::Open => (true, false),
             ChunkState::Closing => (true, false),
             ChunkState::Closed => (true, false),
-            ChunkState::Moving => (true, true), // data may be partially in read buffer
+            ChunkState::Moving => (true, true), // not possible as `ChunkState::Moving` checked above
             ChunkState::Moved => (false, true),
         };
 
