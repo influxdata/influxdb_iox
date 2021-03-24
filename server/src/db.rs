@@ -11,7 +11,6 @@ use parking_lot::{Mutex, RwLock};
 use snafu::{OptionExt, ResultExt, Snafu};
 use tracing::{debug, info};
 
-use catalog::{chunk::ChunkState, Catalog};
 pub(crate) use chunk::DBChunk;
 use data_types::{chunk::ChunkSummary, database_rules::DatabaseRules};
 use internal_types::{data::ReplicatedWrite, selection::Selection};
@@ -21,9 +20,12 @@ use read_buffer::Database as ReadBufferDb;
 
 use crate::{buffer::Buffer, JobRegistry};
 
+pub mod catalog;
 mod chunk;
 pub mod pred;
 mod streams;
+
+use catalog::{chunk::ChunkState, Catalog};
 
 #[derive(Debug, Snafu)]
 pub enum Error {

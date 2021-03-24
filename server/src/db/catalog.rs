@@ -1,11 +1,4 @@
 //! This module contains the implementation of the InfluxDB IOx Metadata catalog
-#![deny(rust_2018_idioms)]
-#![warn(
-    missing_debug_implementations,
-    clippy::explicit_iter_loop,
-    clippy::use_self,
-    clippy::clone_on_ref_ptr
-)]
 use std::collections::{btree_map::Entry, BTreeMap};
 
 use snafu::{OptionExt, Snafu};

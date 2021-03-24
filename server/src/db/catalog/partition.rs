@@ -1,9 +1,8 @@
 //! The catalog representation of a Partition
 
-use crate::chunk::Chunk;
 use std::collections::{btree_map::Entry, BTreeMap};
 
-use super::{ChunkAlreadyExists, Result, UnknownChunk};
+use super::{chunk::Chunk, ChunkAlreadyExists, Result, UnknownChunk};
 use snafu::OptionExt;
 
 /// IOx Catalog Partition
