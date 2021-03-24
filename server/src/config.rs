@@ -160,7 +160,7 @@ impl Config {
             .expect("mutex poisoned")
             .databases
             .iter_mut()
-            .filter_map(|(_, v)| v.handle.take())
+            .filter_map(|(_, v)| v.join())
             .collect();
 
         for handle in handles {
@@ -199,9 +199,17 @@ struct DatabaseState {
     shutdown: CancellationToken,
 }
 
+impl DatabaseState {
+    fn join(&mut self) -> Option<JoinHandle<()>> {
+        self.handle.take()
+    }
+}
+
 impl Drop for DatabaseState {
     fn drop(&mut self) {
         if self.handle.is_some() {
+            // Join should be called on `DatabaseState` prior to dropping, for example, by
+            // calling drain() on the owning `Config`
             warn!("DatabaseState dropped without waiting for background task to complete");
             self.shutdown.cancel();
         }
@@ -271,6 +279,32 @@ mod test {
         );
 
         config.drain().await
+    }
+
+    #[tokio::test]
+    async fn test_db_drop() {
+        let name = DatabaseName::new("foo").unwrap();
+        let config = Config::new(Arc::new(JobRegistry::new()));
+        let rules = DatabaseRules::new();
+
+        let db_reservation = config.create_db(name.clone(), rules).unwrap();
+        db_reservation.commit();
+
+        let token = config
+            .state
+            .read()
+            .expect("lock poisoned")
+            .databases
+            .get(&name)
+            .unwrap()
+            .shutdown
+            .clone();
+
+        // Drop config without calling drain
+        std::mem::drop(config);
+
+        // This should cancel the the background task
+        assert!(token.is_cancelled());
     }
 
     #[test]
