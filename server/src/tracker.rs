@@ -551,11 +551,12 @@ mod tests {
 
         let assert_fuzzy = |actual: usize, expected: std::time::Duration| {
             // Number of milliseconds of toleration
-            let epsilon = Duration::from_millis(10).as_nanos() as usize;
+            let epsilon = Duration::from_millis(25).as_nanos() as usize;
             let expected = expected.as_nanos() as usize;
 
+            // std::thread::sleep is guaranteed to take at least as long as requested
             assert!(
-                actual > expected.saturating_sub(epsilon),
+                actual > expected,
                 "Expected {} got {}",
                 expected,
                 actual
