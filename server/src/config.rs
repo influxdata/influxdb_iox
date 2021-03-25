@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn, Instrument};
 
-pub(crate) const DB_RULES_FILE_NAME: &str = "rules.json";
+pub(crate) const DB_RULES_FILE_NAME: &str = "rules.pb";
 
 /// The Config tracks the configuration of databases and their rules along
 /// with host groups for replication. It is used as an in-memory structure
