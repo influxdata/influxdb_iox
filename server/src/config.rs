@@ -318,7 +318,7 @@ mod test {
 
         let mut expected_path = base_path;
         expected_path.push_dir("foo");
-        expected_path.set_file_name("rules.json");
+        expected_path.set_file_name("rules.pb");
 
         assert_eq!(rules_path, expected_path);
     }
