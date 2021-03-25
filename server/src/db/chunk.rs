@@ -72,32 +72,56 @@ pub enum DBChunk {
 }
 
 impl DBChunk {
-    /// Create a new mutable buffer chunk
-    pub fn new_mb(
-        chunk: Arc<mutable_buffer::chunk::Chunk>,
-        partition_key: impl Into<String>,
-        open: bool,
-    ) -> Arc<Self> {
-        let partition_key = Arc::new(partition_key.into());
-        Arc::new(Self::MutableBuffer {
-            chunk,
-            partition_key,
-            open,
-        })
-    }
+    /// Create a DBChunk snapshot of the catalog chunk
+    pub fn snapshot(chunk: &super::catalog::chunk::Chunk) -> Arc<Self> {
+        let partition_key = Arc::new(chunk.key().to_string());
+        let chunk_id = chunk.id();
 
-    /// create a new read buffer chunk
-    pub fn new_rb(
-        db: Arc<ReadBufferDb>,
-        partition_key: impl Into<String>,
-        chunk_id: u32,
-    ) -> Arc<Self> {
-        let partition_key = Arc::new(partition_key.into());
-        Arc::new(Self::ReadBuffer {
-            db,
-            chunk_id,
-            partition_key,
-        })
+        let db_chunk = match chunk.state() {
+            super::catalog::chunk::ChunkState::None => {
+                panic!("Invalid internal state");
+            }
+            super::catalog::chunk::ChunkState::Open(chunk) => {
+                // TODO the performance if cloning the chunk is terrible
+                // Proper performance is tracked in
+                // https://github.com/influxdata/influxdb_iox/issues/635
+                let chunk = Arc::new(chunk.clone());
+                Self::MutableBuffer {
+                    chunk,
+                    partition_key,
+                    open: true,
+                }
+            }
+            super::catalog::chunk::ChunkState::Closing(chunk) => {
+                // TODO the performance if cloning the chunk is terrible
+                // Proper performance is tracked in
+                // https://github.com/influxdata/influxdb_iox/issues/635
+                let chunk = Arc::new(chunk.clone());
+                Self::MutableBuffer {
+                    chunk,
+                    partition_key,
+                    open: false,
+                }
+            }
+            super::catalog::chunk::ChunkState::Closed(chunk)
+            | super::catalog::chunk::ChunkState::Moving(chunk) => {
+                let chunk = Arc::clone(chunk);
+                Self::MutableBuffer {
+                    chunk,
+                    partition_key,
+                    open: false,
+                }
+            }
+            super::catalog::chunk::ChunkState::Moved(db) => {
+                let db = Arc::clone(db);
+                Self::ReadBuffer {
+                    db,
+                    partition_key,
+                    chunk_id,
+                }
+            }
+        };
+        Arc::new(db_chunk)
     }
 
     pub fn summary(&self) -> ChunkSummary {
