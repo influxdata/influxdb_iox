@@ -555,12 +555,7 @@ mod tests {
             let expected = expected.as_nanos() as usize;
 
             // std::thread::sleep is guaranteed to take at least as long as requested
-            assert!(
-                actual > expected,
-                "Expected {} got {}",
-                expected,
-                actual
-            );
+            assert!(actual > expected, "Expected {} got {}", expected, actual);
             assert!(
                 actual < expected.saturating_add(epsilon),
                 "Expected {} got {}",
