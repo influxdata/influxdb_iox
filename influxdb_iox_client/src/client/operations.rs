@@ -1,11 +1,11 @@
 use thiserror::Error;
 
-use ::generated_types::google::FieldViolation;
-
-use crate::connection::Connection;
+use ::generated_types::{
+    google::FieldViolation, influxdata::iox::management::v1 as management, protobuf_type_url_eq,
+};
 
 use self::generated_types::{operations_client::OperationsClient, *};
-
+use crate::connection::Connection;
 /// Re-export generated_types
 pub mod generated_types {
     pub use generated_types::google::longrunning::*;
@@ -25,6 +25,10 @@ pub enum Error {
     /// Client received an unexpected error from the server
     #[error("Unexpected server error: {}: {}", .0.code(), .0.message())]
     ServerError(tonic::Status),
+
+    /// Operation is not type url
+    #[error("Operation metadata is not type_url")]
+    WrongOperationMetaData,
 }
 
 /// Result type for the operations Client
@@ -70,6 +74,20 @@ impl Client {
             .map_err(Error::ServerError)?
             .into_inner()
             .operations)
+    }
+
+    /// Get information of all client operation
+    pub async fn list_client_operations(&mut self) -> Result<Vec<Result<ClientOperation>>> {
+        Ok(self
+            .inner
+            .list_operations(ListOperationsRequest::default())
+            .await
+            .map_err(Error::ServerError)?
+            .into_inner()
+            .operations
+            .into_iter()
+            .map(ClientOperation::try_new)
+            .collect())
     }
 
     /// Get information about a specific operation
@@ -121,5 +139,49 @@ impl Client {
                 _ => Error::ServerError(e),
             })?
             .into_inner())
+    }
+
+    /// Return the Client Operation
+    pub async fn client_operation(&mut self, id: usize) -> Result<ClientOperation> {
+        let operation = self.get_operation(id).await?;
+        ClientOperation::try_new(operation)
+    }
+}
+
+/// IOx's Client Operation
+#[derive(Debug, Clone)] //, Serialize)]
+pub struct ClientOperation {
+    inner: generated_types::Operation,
+}
+
+impl ClientOperation {
+    /// Create a new Cient Operation
+    pub fn try_new(operation: generated_types::Operation) -> Result<Self> {
+        if operation.metadata.is_some() {
+            let metadata = operation.metadata.clone().unwrap();
+            if !protobuf_type_url_eq(&metadata.type_url, management::OPERATION_METADATA) {
+                return Err(Error::WrongOperationMetaData);
+            }
+        } else {
+            return Err(Error::NotFound(0));
+        }
+
+        Ok(Self { inner: operation })
+    }
+
+    /// Return Metadata for this client operation
+    pub fn metadata(&self) -> management::OperationMetadata {
+        prost::Message::decode(self.inner.metadata.clone().unwrap().value)
+            .expect("failed to decode metadata")
+    }
+
+    /// Return name of this operation
+    pub fn name(&self) -> String {
+        self.inner.name.clone()
+    }
+
+    /// Return the inner's Operation
+    pub fn operation(self) -> Operation {
+        self.inner
     }
 }
