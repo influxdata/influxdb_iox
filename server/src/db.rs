@@ -15,7 +15,7 @@ pub(crate) use chunk::DBChunk;
 use data_types::{chunk::ChunkSummary, database_rules::DatabaseRules};
 use internal_types::{data::ReplicatedWrite, selection::Selection};
 use mutable_buffer::MutableBufferDb;
-use query::Database;
+use query::{Database, PartitionChunk};
 use read_buffer::Database as ReadBufferDb;
 
 use crate::{buffer::Buffer, JobRegistry};
@@ -25,7 +25,15 @@ mod chunk;
 pub mod pred;
 mod streams;
 
+use arrow_deps::datafusion::catalog::catalog::CatalogProvider;
+use arrow_deps::datafusion::catalog::schema::SchemaProvider;
+use arrow_deps::datafusion::datasource::TableProvider;
 use catalog::{chunk::ChunkState, Catalog};
+use mutable_buffer::pred::ChunkPredicate;
+use query::provider::ProviderBuilder;
+use query::DEFAULT_SCHEMA;
+use std::any::Any;
+use std::collections::BTreeSet;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -682,6 +690,87 @@ impl Database for Db {
     }
 }
 
+/// Temporary newtype Db wrapper to allow it to act as a CatalogProvider
+///
+/// TODO: Make Db implement CatalogProvider and Catalog implement SchemaProvider
+#[derive(Debug)]
+pub struct DbCatalog(Arc<Db>);
+
+impl DbCatalog {
+    pub fn new(db: Arc<Db>) -> Self {
+        Self(db)
+    }
+}
+
+impl CatalogProvider for DbCatalog {
+    fn as_any(&self) -> &dyn Any {
+        self as &dyn Any
+    }
+
+    fn schema_names(&self) -> Vec<String> {
+        vec![DEFAULT_SCHEMA.to_string()]
+    }
+
+    fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
+        info!(%name, "using schema");
+        match name {
+            DEFAULT_SCHEMA => Some(self.0.clone()),
+            _ => None,
+        }
+    }
+}
+
+impl SchemaProvider for Db {
+    fn as_any(&self) -> &dyn Any {
+        self as &dyn Any
+    }
+
+    fn table_names(&self) -> Vec<String> {
+        // TODO: Get information from catalog potentially with caching and less
+        // buffering
+        let mut names = BTreeSet::new();
+
+        // Currently only support getting tables from the mutable buffer
+        if let Some(mutable_buffer) = self.mutable_buffer.as_ref() {
+            for partition in self.catalog.partitions() {
+                let partition = partition.read();
+
+                for chunk_id in partition.chunk_ids() {
+                    if let Some(chunk) = mutable_buffer.get_chunk(partition.key(), chunk_id) {
+                        // This is a hack until infallible table listing supported on catalog
+                        let chunk_tables = chunk
+                            .table_names(&ChunkPredicate::default())
+                            .expect("this cannot fail");
+                        names.extend(chunk_tables.into_iter().map(ToString::to_string))
+                    }
+                }
+            }
+
+            let vec = names.into_iter().collect();
+            println!("{:?}", vec);
+            vec
+        } else {
+            vec![]
+        }
+    }
+
+    fn table(&self, table_name: &str) -> Option<Arc<dyn TableProvider>> {
+        let mut builder = ProviderBuilder::new(table_name);
+        for partition_key in self.partition_keys().expect("cannot fail") {
+            for chunk in self.chunks(&partition_key) {
+                if chunk.has_table(table_name) {
+                    let schema =
+                        futures::executor::block_on(chunk.table_schema(table_name, Selection::All))
+                            .expect("cannot fail");
+                    builder = builder.add_chunk(chunk, schema).expect("cannot fail")
+                }
+            }
+        }
+
+        Some(Arc::new(builder.build().expect("cannot fail")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use arrow_deps::{
@@ -720,11 +809,14 @@ mod tests {
 
     #[tokio::test]
     async fn read_write() {
-        let db = make_db();
+        let db = Arc::new(make_db());
         let mut writer = TestLPWriter::default();
-        writer.write_lp_string(&db, "cpu bar=1 10").await.unwrap();
+        writer
+            .write_lp_string(db.as_ref(), "cpu bar=1 10")
+            .await
+            .unwrap();
 
-        let batches = run_query(&db, "select * from cpu").await;
+        let batches = run_query(db, "select * from cpu").await;
 
         let expected = vec![
             "+-----+------+",
@@ -738,9 +830,12 @@ mod tests {
 
     #[tokio::test]
     async fn write_with_rollover() {
-        let db = make_db();
+        let db = Arc::new(make_db());
         let mut writer = TestLPWriter::default();
-        writer.write_lp_string(&db, "cpu bar=1 10").await.unwrap();
+        writer
+            .write_lp_string(db.as_ref(), "cpu bar=1 10")
+            .await
+            .unwrap();
         assert_eq!(vec!["1970-01-01T00"], db.partition_keys().unwrap());
 
         let mb_chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
@@ -753,11 +848,14 @@ mod tests {
             "| 1   | 10   |",
             "+-----+------+",
         ];
-        let batches = run_query(&db, "select * from cpu").await;
+        let batches = run_query(Arc::clone(&db), "select * from cpu").await;
         assert_table_eq!(expected, &batches);
 
         // add new data
-        writer.write_lp_string(&db, "cpu bar=2 20").await.unwrap();
+        writer
+            .write_lp_string(db.as_ref(), "cpu bar=2 20")
+            .await
+            .unwrap();
         let expected = vec![
             "+-----+------+",
             "| bar | time |",
@@ -766,24 +864,30 @@ mod tests {
             "| 2   | 20   |",
             "+-----+------+",
         ];
-        let batches = run_query(&db, "select * from cpu").await;
+        let batches = run_query(Arc::clone(&db), "select * from cpu").await;
         assert_table_eq!(&expected, &batches);
 
         // And expect that we still get the same thing when data is rolled over again
         let chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
         assert_eq!(chunk.id(), 1);
 
-        let batches = run_query(&db, "select * from cpu").await;
+        let batches = run_query(db, "select * from cpu").await;
         assert_table_eq!(&expected, &batches);
     }
 
     #[tokio::test]
     async fn read_from_read_buffer() {
         // Test that data can be loaded into the ReadBuffer
-        let db = make_db();
+        let db = Arc::new(make_db());
         let mut writer = TestLPWriter::default();
-        writer.write_lp_string(&db, "cpu bar=1 10").await.unwrap();
-        writer.write_lp_string(&db, "cpu bar=2 20").await.unwrap();
+        writer
+            .write_lp_string(db.as_ref(), "cpu bar=1 10")
+            .await
+            .unwrap();
+        writer
+            .write_lp_string(db.as_ref(), "cpu bar=2 20")
+            .await
+            .unwrap();
 
         let partition_key = "1970-01-01T00";
         let mb_chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
@@ -809,13 +913,13 @@ mod tests {
             "| 2   | 20   |",
             "+-----+------+",
         ];
-        let batches = run_query(&db, "select * from cpu").await;
+        let batches = run_query(Arc::clone(&db), "select * from cpu").await;
         assert_table_eq!(&expected, &batches);
 
         // drop, the chunk from the read buffer
         db.drop_chunk(partition_key, mb_chunk.id()).unwrap();
         assert_eq!(
-            read_buffer_chunk_ids(&db, partition_key),
+            read_buffer_chunk_ids(db.as_ref(), partition_key),
             vec![] as Vec<u32>
         );
 
@@ -1033,11 +1137,14 @@ mod tests {
     }
 
     // run a sql query against the database, returning the results as record batches
-    async fn run_query(db: &Db, query: &str) -> Vec<RecordBatch> {
+    async fn run_query(db: Arc<Db>, query: &str) -> Vec<RecordBatch> {
         let planner = SQLQueryPlanner::default();
         let executor = Executor::new();
 
-        let physical_plan = planner.query(db, query, &executor).await.unwrap();
+        let physical_plan = planner
+            .query(Arc::new(DbCatalog::new(db)), query, &executor)
+            .await
+            .unwrap();
 
         collect(physical_plan).await.unwrap()
     }

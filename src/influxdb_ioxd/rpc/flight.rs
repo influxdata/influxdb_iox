@@ -16,7 +16,11 @@ use arrow_deps::{
     },
     datafusion::physical_plan::collect,
 };
+use data_types::DatabaseName;
 use query::{frontend::sql::SQLQueryPlanner, DatabaseStore};
+use server::db::DbCatalog;
+use server::{ConnectionManager, Server};
+use std::fmt::Debug;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -87,18 +91,21 @@ struct ReadInfo {
 
 /// Concrete implementation of the gRPC Arrow Flight Service API
 #[derive(Debug)]
-struct FlightService<T: DatabaseStore> {
-    pub db_store: Arc<T>,
+struct FlightService<M: ConnectionManager> {
+    server: Arc<Server<M>>,
 }
 
-pub fn make_server<T: DatabaseStore + 'static>(db_store: Arc<T>) -> FlightServer<impl Flight> {
-    FlightServer::new(FlightService { db_store })
+pub fn make_server<M>(server: Arc<Server<M>>) -> FlightServer<impl Flight>
+where
+    M: ConnectionManager + Send + Sync + Debug + 'static,
+{
+    FlightServer::new(FlightService { server })
 }
 
 #[tonic::async_trait]
-impl<T> Flight for FlightService<T>
+impl<M: ConnectionManager> Flight for FlightService<M>
 where
-    T: DatabaseStore + 'static,
+    M: ConnectionManager + Send + Sync + Debug + 'static,
 {
     type HandshakeStream = TonicStream<HandshakeResponse>;
     type ListFlightsStream = TonicStream<FlightInfo>;
@@ -129,18 +136,22 @@ where
         let read_info: ReadInfo =
             serde_json::from_str(&json_str).context(InvalidQuery { query: &json_str })?;
 
-        let db = self
-            .db_store
-            .db(&read_info.database_name)
-            .context(DatabaseNotFound {
-                database_name: &read_info.database_name,
-            })?;
+        // TODO: Fixme
+        let database = DatabaseName::new(&read_info.database_name).unwrap();
+
+        let db = self.server.db(&database).context(DatabaseNotFound {
+            database_name: &read_info.database_name,
+        })?;
 
         let planner = SQLQueryPlanner::default();
-        let executor = self.db_store.executor();
+        let executor = self.server.executor();
 
         let physical_plan = planner
-            .query(&*db, &read_info.sql_query, &executor)
+            .query(
+                Arc::new(DbCatalog::new(db)),
+                &read_info.sql_query,
+                &executor,
+            )
             .await
             .context(PlanningSQLQuery {
                 query: &read_info.sql_query,
