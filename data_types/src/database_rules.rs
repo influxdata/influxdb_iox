@@ -2,7 +2,6 @@ use std::convert::{TryFrom, TryInto};
 
 use chrono::{DateTime, TimeZone, Utc};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 
 use generated_types::google::protobuf::Empty;
@@ -22,27 +21,33 @@ pub enum Error {
         source_module: &'static str,
         source: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
+
+    #[snafu(context(false))]
+    ProstDecodeError { source: prost::DecodeError },
+
+    #[snafu(context(false))]
+    ProstEncodeError { source: prost::EncodeError },
+
+    #[snafu(context(false))]
+    FieldViolation { source: FieldViolation },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// DatabaseRules contains the rules for replicating data, sending data to
 /// subscribers, and querying data for a single database.
-#[derive(Debug, Serialize, Deserialize, Default, Eq, PartialEq, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct DatabaseRules {
     /// The unencoded name of the database. This gets put in by the create
     /// database call, so an empty default is fine.
-    #[serde(default)]
     pub name: String, // TODO: Use DatabaseName here
 
     /// Template that generates a partition key for each row inserted into the
     /// db
-    #[serde(default)]
     pub partition_template: PartitionTemplate,
 
     /// When set this will buffer WAL writes in memory based on the
     /// configuration.
-    #[serde(default)]
     pub wal_buffer_config: Option<WalBufferConfig>,
 
     /// Unless explicitly disabled by setting this to None (or null in JSON),
@@ -50,7 +55,6 @@ pub struct DatabaseRules {
     /// called the Mutable Buffer. It is optimized to receive writes so they
     /// can be batched together later to the Read Buffer or to Parquet files
     /// in object storage.
-    #[serde(default = "MutableBufferConfig::default_option")]
     pub mutable_buffer_config: Option<MutableBufferConfig>,
 
     /// An optional config to split writes into different "shards". A shard
@@ -60,7 +64,6 @@ pub struct DatabaseRules {
     /// based on table name and assign to 1 of 10 shards. Within each
     /// shard you would have partitions, which would likely be based off time.
     /// This makes it possible to horizontally scale out writes.
-    #[serde(default)]
     pub shard_config: Option<ShardConfig>,
 }
 
@@ -78,6 +81,18 @@ impl DatabaseRules {
             mutable_buffer_config: MutableBufferConfig::default_option(),
             ..Default::default()
         }
+    }
+}
+
+impl DatabaseRules {
+    pub fn decode(bytes: prost::bytes::Bytes) -> Result<Self> {
+        let message: management::DatabaseRules = prost::Message::decode(bytes)?;
+        Ok(message.try_into()?)
+    }
+
+    pub fn encode(self, bytes: &mut prost::bytes::BytesMut) -> Result<()> {
+        let encoded: management::DatabaseRules = self.into();
+        Ok(prost::Message::encode(&encoded, bytes)?)
     }
 }
 
@@ -103,6 +118,7 @@ impl From<DatabaseRules> for management::DatabaseRules {
             partition_template: Some(rules.partition_template.into()),
             wal_buffer_config: rules.wal_buffer_config.map(Into::into),
             mutable_buffer_config: rules.mutable_buffer_config.map(Into::into),
+            shard_config: rules.shard_config.map(Into::into),
         }
     }
 }
@@ -124,12 +140,17 @@ impl TryFrom<management::DatabaseRules> for DatabaseRules {
             .optional("partition_template")?
             .unwrap_or_default();
 
+        let shard_config = proto
+            .shard_config
+            .optional("shard_config")
+            .unwrap_or_default();
+
         Ok(Self {
             name: proto.name,
             partition_template,
             wal_buffer_config,
             mutable_buffer_config,
-            shard_config: None,
+            shard_config,
         })
     }
 }
@@ -137,7 +158,7 @@ impl TryFrom<management::DatabaseRules> for DatabaseRules {
 /// MutableBufferConfig defines the configuration for the in-memory database
 /// that is hot for writes as they arrive. Operators can define rules for
 /// evicting data once the mutable buffer passes a set memory threshold.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct MutableBufferConfig {
     /// The size the mutable buffer should be limited to. Once the buffer gets
     /// to this size it will drop partitions in the given order. If unable
@@ -244,7 +265,7 @@ impl TryFrom<management::MutableBufferConfig> for MutableBufferConfig {
 ///     sort: PartitionSort::CreatedAtTime,
 /// };
 /// ```
-#[derive(Debug, Default, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct PartitionSortRules {
     /// Sort partitions by this order. Last will be dropped.
     pub order: Order,
@@ -278,7 +299,7 @@ impl TryFrom<management::mutable_buffer_config::PartitionDropOrder> for Partitio
 }
 
 /// What to sort the partition by.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum PartitionSort {
     /// The last time the partition received a write.
     LastWriteTime,
@@ -351,7 +372,7 @@ impl TryFrom<management::mutable_buffer_config::partition_drop_order::Sort> for 
 }
 
 /// The sort order.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Order {
     Asc,
     Desc,
@@ -385,7 +406,7 @@ impl TryFrom<management::Order> for Order {
 }
 
 /// Use columns of this type.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ColumnType {
     I64,
     U64,
@@ -422,7 +443,7 @@ impl TryFrom<management::ColumnType> for ColumnType {
 }
 
 /// Use either the min or max summary statistic.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ColumnValue {
     Min,
     Max,
@@ -454,7 +475,7 @@ impl TryFrom<management::Aggregate> for ColumnValue {
 /// WalBufferConfig defines the configuration for buffering data from the WAL in
 /// memory. This buffer is used for asynchronous replication and to collect
 /// segments before sending them to object storage.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct WalBufferConfig {
     /// The size the WAL buffer should be limited to. Once the buffer gets to
     /// this size it will drop old segments to remain below this size, but
@@ -528,7 +549,7 @@ impl TryFrom<management::WalBufferConfig> for WalBufferConfig {
 /// WalBufferRollover defines the behavior of what should happen if a write
 /// comes in that would cause the buffer to exceed its max size AND the oldest
 /// segment can't be dropped because it has not yet been persisted.
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Copy)]
+#[derive(Debug, Clone, Eq, PartialEq, Copy)]
 pub enum WalBufferRollover {
     /// Drop the old segment even though it hasn't been persisted. This part of
     /// the WAL will be lost on this server.
@@ -573,7 +594,7 @@ impl TryFrom<management::wal_buffer_config::Rollover> for WalBufferRollover {
 ///
 /// The key is constructed in order of the template parts; thus ordering changes
 /// what partition key is generated.
-#[derive(Debug, Serialize, Deserialize, Default, Eq, PartialEq, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct PartitionTemplate {
     pub parts: Vec<TemplatePart>,
 }
@@ -627,7 +648,7 @@ impl TryFrom<management::PartitionTemplate> for PartitionTemplate {
 
 /// `TemplatePart` specifies what part of a row should be used to compute this
 /// part of a partition key.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum TemplatePart {
     /// The name of a table
     Table,
@@ -647,7 +668,7 @@ pub enum TemplatePart {
 
 /// `RegexCapture` is for pulling parts of a string column into the partition
 /// key.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct RegexCapture {
     column: String,
     regex: String,
@@ -662,7 +683,7 @@ pub struct RegexCapture {
 /// For example, a time format of "%Y-%m-%d %H:%M:%S" will produce
 /// partition key parts such as "2021-03-14 12:25:21" and
 /// "2021-04-14 12:24:21"
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct StrftimeColumn {
     column: String,
     format: String,
@@ -737,7 +758,7 @@ impl TryFrom<management::partition_template::Part> for TemplatePart {
 /// based on table name and assign to 1 of 10 shards. Within each
 /// shard you would have partitions, which would likely be based off time.
 /// This makes it possible to horizontally scale out writes.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ShardConfig {
     /// An optional matcher. If there is a match, the route will be evaluated to
     /// the given targets, otherwise the hash ring will be evaluated. This is
@@ -758,7 +779,7 @@ pub struct ShardConfig {
 
 /// Maps a matcher with specific target group. If the line/row matches
 /// it should be sent to the group.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]
+#[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub struct MatcherToTargets {
     pub matcher: Matcher,
     pub target: NodeGroup,
@@ -769,7 +790,7 @@ pub type NodeGroup = Vec<WriterId>;
 
 /// HashRing is a rule for creating a hash key for a row and mapping that to
 /// an individual node on a ring.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct HashRing {
     /// If true the table name will be included in the hash key
     pub table_name: bool,
@@ -781,10 +802,9 @@ pub struct HashRing {
 
 /// A matcher is used to match routing rules or subscriptions on a row-by-row
 /// (or line) basis.
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Matcher {
     /// if provided, match if the table name matches against the regex
-    #[serde(with = "serde_regex")]
     pub table_name_regex: Option<Regex>,
     // paul: what should we use for predicate matching here against a single row/line?
     pub predicate: Option<String>,
@@ -1138,6 +1158,7 @@ mod tests {
         // These should be none as preserved on non-protobuf DatabaseRules
         assert!(back.wal_buffer_config.is_none());
         assert!(back.mutable_buffer_config.is_none());
+        assert!(back.shard_config.is_none());
     }
 
     #[test]
@@ -1527,5 +1548,21 @@ mod tests {
 
         assert_eq!(shard_config.ignore_errors, false);
         assert_eq!(protobuf.ignore_errors, back.ignore_errors);
+    }
+
+    #[test]
+    fn test_database_rules_shard_config() {
+        let protobuf = management::DatabaseRules {
+            name: "database".to_string(),
+            shard_config: Some(management::ShardConfig {
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let rules: DatabaseRules = protobuf.try_into().unwrap();
+        let back: management::DatabaseRules = rules.into();
+
+        assert!(back.shard_config.is_some());
     }
 }
