@@ -7,6 +7,11 @@ use std::{
 use parking_lot::RwLock;
 use snafu::{OptionExt, Snafu};
 
+pub mod chunk;
+pub mod partition;
+
+use partition::Partition;
+
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("unknown partition: {}", partition_key))]
@@ -28,11 +33,6 @@ pub enum Error {
     },
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-
-pub mod chunk;
-pub mod partition;
-
-use partition::Partition;
 
 /// InfluxDB IOx Metadata Catalog
 ///
