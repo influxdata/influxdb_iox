@@ -187,6 +187,20 @@ impl PartitionChunk for DBChunk {
         }
     }
 
+    fn all_table_names(&self, known_tables: &mut StringSet) {
+        match self {
+            Self::MutableBuffer { chunk, .. } => chunk.all_table_names(known_tables),
+            Self::ReadBuffer {
+                db,
+                partition_key,
+                chunk_id,
+            } => db.all_table_names(partition_key, &[*chunk_id], known_tables),
+            Self::ParquetFile => {
+                unimplemented!("parquet files")
+            }
+        }
+    }
+
     fn table_names(
         &self,
         predicate: &Predicate,

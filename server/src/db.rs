@@ -2,7 +2,6 @@
 //! instances of the mutable buffer, read buffer, and object store
 
 use std::any::Any;
-use std::collections::BTreeSet;
 use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},
     Arc,
@@ -20,8 +19,9 @@ use arrow_deps::datafusion::{
 use catalog::{chunk::ChunkState, Catalog};
 use data_types::{chunk::ChunkSummary, database_rules::DatabaseRules, error::ErrorLogger};
 use internal_types::{data::ReplicatedWrite, selection::Selection};
-use mutable_buffer::{chunk::Chunk, pred::ChunkPredicate};
+use mutable_buffer::chunk::Chunk;
 use query::{
+    exec::stringset::StringSet,
     provider::{self, ProviderBuilder},
     Database, PartitionChunk, DEFAULT_SCHEMA,
 };
@@ -572,29 +572,18 @@ impl SchemaProvider for Db {
     }
 
     fn table_names(&self) -> Vec<String> {
-        // TODO: Get information from catalog potentially with caching and less
-        // buffering
-        let mut names = BTreeSet::new();
+        let mut names = StringSet::new();
 
-        // Currently only support getting tables from the mutable buffer
-        if let Some(mutable_buffer) = self.mutable_buffer.as_ref() {
-            for partition in self.catalog.partitions() {
-                let partition = partition.read();
+        self.catalog.partitions().for_each(|partition| {
+            let partition = partition.read();
+            partition.chunks().for_each(|chunk| {
+                let chunk = chunk.read();
+                let db_chunk = DBChunk::snapshot(&chunk);
+                db_chunk.all_table_names(&mut names);
+            })
+        });
 
-                for chunk_id in partition.chunk_ids() {
-                    if let Some(chunk) = mutable_buffer.get_chunk(partition.key(), chunk_id) {
-                        // This is a hack until infallible table listing supported on catalog
-                        if let Ok(tables) = chunk.table_names(&ChunkPredicate::default()) {
-                            names.extend(tables.into_iter().map(ToString::to_string))
-                        }
-                    }
-                }
-            }
-
-            names.into_iter().collect()
-        } else {
-            vec![]
-        }
+        names.into_iter().collect::<Vec<_>>()
     }
 
     fn table(&self, table_name: &str) -> Option<Arc<dyn TableProvider>> {
