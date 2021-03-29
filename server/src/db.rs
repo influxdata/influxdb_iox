@@ -433,7 +433,20 @@ impl Database for Db {
     /// Note there could/should be an error here (if the partition
     /// doesn't exist... but the trait doesn't have an error)
     fn chunks(&self, partition_key: &str) -> Vec<Arc<Self::Chunk>> {
-        self.catalog.chunks(partition_key)
+        let partition = match self.catalog.partition(partition_key) {
+            Some(partition) => partition,
+            None => return vec![],
+        };
+
+        let partition = partition.read();
+
+        partition
+            .chunks()
+            .map(|chunk| {
+                let chunk = chunk.read();
+                DBChunk::snapshot(&chunk)
+            })
+            .collect()
     }
 
     fn store_replicated_write(&self, write: &ReplicatedWrite) -> Result<(), Self::Error> {

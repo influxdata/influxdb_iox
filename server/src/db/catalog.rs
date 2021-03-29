@@ -18,8 +18,6 @@ use query::{
     PartitionChunk,
 };
 
-use super::DBChunk;
-
 pub mod chunk;
 pub mod partition;
 
@@ -133,24 +131,6 @@ impl Catalog {
             .cloned()
             .context(UnknownPartition { partition_key })
     }
-
-    /// Return the chunks for specific partition
-    pub fn chunks(&self, partition_key: &str) -> Vec<Arc<DBChunk>> {
-        let partition = match self.partition(partition_key) {
-            Some(partition) => partition,
-            None => return vec![],
-        };
-
-        let partition = partition.read();
-
-        partition
-            .chunks()
-            .map(|chunk| {
-                let chunk = chunk.read();
-                DBChunk::snapshot(&chunk)
-            })
-            .collect()
-    }
 }
 
 impl SchemaProvider for Catalog {
@@ -164,20 +144,25 @@ impl SchemaProvider for Catalog {
         self.partitions().for_each(|partition| {
             let partition = partition.read();
             partition.chunks().for_each(|chunk| {
-                let chunk = chunk.read();
-                let db_chunk = DBChunk::snapshot(&chunk);
-                db_chunk.all_table_names(&mut names);
+                chunk.read().table_names(&mut names);
             })
         });
 
-        names.into_iter().collect::<Vec<_>>()
+        names.into_iter().collect()
     }
 
     fn table(&self, table_name: &str) -> Option<Arc<dyn TableProvider>> {
         let mut builder = ProviderBuilder::new(table_name);
-        for partition_key in self.partition_keys() {
-            for chunk in self.chunks(&partition_key) {
+        let partitions = self.partitions.read();
+
+        for partition in partitions.values() {
+            let partition = partition.read();
+            for chunk in partition.chunks() {
+                let chunk = chunk.read();
+
                 if chunk.has_table(table_name) {
+                    let chunk = super::DBChunk::snapshot(&chunk);
+
                     // This should only fail if the table doesn't exist which isn't possible
                     let schema = chunk
                         .table_schema(table_name, Selection::All)
