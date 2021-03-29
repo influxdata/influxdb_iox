@@ -16,7 +16,7 @@ use arrow_deps::{
     },
     datafusion::physical_plan::collect,
 };
-use data_types::DatabaseName;
+use data_types::{DatabaseName, DatabaseNameError};
 use query::{frontend::sql::SQLQueryPlanner, DatabaseStore};
 use server::db::DbCatalog;
 use server::{ConnectionManager, Server};
@@ -53,6 +53,9 @@ pub enum Error {
         query: String,
         source: query::frontend::sql::Error,
     },
+
+    #[snafu(display("Invalid database name: {}", source))]
+    InvalidDatabaseName { source: DatabaseNameError },
 }
 
 impl From<Error> for tonic::Status {
@@ -75,6 +78,7 @@ impl Error {
             Self::DatabaseNotFound { .. } => Status::not_found(self.to_string()),
             Self::Query { .. } => Status::internal(self.to_string()),
             Self::PlanningSQLQuery { .. } => Status::invalid_argument(self.to_string()),
+            Self::InvalidDatabaseName { .. } => Status::invalid_argument(self.to_string()),
         }
     }
 }
@@ -136,8 +140,7 @@ where
         let read_info: ReadInfo =
             serde_json::from_str(&json_str).context(InvalidQuery { query: &json_str })?;
 
-        // TODO: Fixme
-        let database = DatabaseName::new(&read_info.database_name).unwrap();
+        let database = DatabaseName::new(&read_info.database_name).context(InvalidDatabaseName)?;
 
         let db = self.server.db(&database).context(DatabaseNotFound {
             database_name: &read_info.database_name,

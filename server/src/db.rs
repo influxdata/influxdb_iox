@@ -1,6 +1,8 @@
 //! This module contains the main IOx Database object which has the
 //! instances of the mutable buffer, read buffer, and object store
 
+use std::any::Any;
+use std::collections::BTreeSet;
 use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},
     Arc,
@@ -11,12 +13,21 @@ use parking_lot::Mutex;
 use snafu::{OptionExt, ResultExt, Snafu};
 use tracing::{debug, info};
 
-pub(crate) use chunk::DBChunk;
-use data_types::{chunk::ChunkSummary, database_rules::DatabaseRules};
+use arrow_deps::datafusion::{
+    catalog::{catalog::CatalogProvider, schema::SchemaProvider},
+    datasource::TableProvider,
+};
+use catalog::{chunk::ChunkState, Catalog};
+use data_types::{chunk::ChunkSummary, database_rules::DatabaseRules, error::ErrorLogger};
 use internal_types::{data::ReplicatedWrite, selection::Selection};
-use mutable_buffer::MutableBufferDb;
-use query::{Database, PartitionChunk};
+use mutable_buffer::{pred::ChunkPredicate, MutableBufferDb};
+use query::{
+    provider::{self, ProviderBuilder},
+    Database, PartitionChunk, DEFAULT_SCHEMA,
+};
 use read_buffer::Database as ReadBufferDb;
+
+pub(crate) use chunk::DBChunk;
 
 use crate::{buffer::Buffer, JobRegistry};
 
@@ -24,16 +35,6 @@ pub mod catalog;
 mod chunk;
 pub mod pred;
 mod streams;
-
-use arrow_deps::datafusion::catalog::catalog::CatalogProvider;
-use arrow_deps::datafusion::catalog::schema::SchemaProvider;
-use arrow_deps::datafusion::datasource::TableProvider;
-use catalog::{chunk::ChunkState, Catalog};
-use mutable_buffer::pred::ChunkPredicate;
-use query::provider::ProviderBuilder;
-use query::DEFAULT_SCHEMA;
-use std::any::Any;
-use std::collections::BTreeSet;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -714,7 +715,7 @@ impl CatalogProvider for DbCatalog {
     fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
         info!(%name, "using schema");
         match name {
-            DEFAULT_SCHEMA => Some(self.0.clone()),
+            DEFAULT_SCHEMA => Some(Arc::<Db>::clone(&self.0)),
             _ => None,
         }
     }
@@ -738,17 +739,14 @@ impl SchemaProvider for Db {
                 for chunk_id in partition.chunk_ids() {
                     if let Some(chunk) = mutable_buffer.get_chunk(partition.key(), chunk_id) {
                         // This is a hack until infallible table listing supported on catalog
-                        let chunk_tables = chunk
-                            .table_names(&ChunkPredicate::default())
-                            .expect("this cannot fail");
-                        names.extend(chunk_tables.into_iter().map(ToString::to_string))
+                        if let Ok(tables) = chunk.table_names(&ChunkPredicate::default()) {
+                            names.extend(tables.into_iter().map(ToString::to_string))
+                        }
                     }
                 }
             }
 
-            let vec = names.into_iter().collect();
-            println!("{:?}", vec);
-            vec
+            names.into_iter().collect()
         } else {
             vec![]
         }
@@ -759,13 +757,26 @@ impl SchemaProvider for Db {
         for partition_key in self.partition_keys().expect("cannot fail") {
             for chunk in self.chunks(&partition_key) {
                 if chunk.has_table(table_name) {
-                    let schema = chunk.table_schema(table_name, Selection::All).expect("cannot fail");
-                    builder = builder.add_chunk(chunk, schema).expect("cannot fail")
+                    // This should only fail if the table doesn't exist which isn't possible
+                    let schema = chunk
+                        .table_schema(table_name, Selection::All)
+                        .expect("cannot fail");
+
+                    // This is unfortunate - a table with incompatible chunks ceases to
+                    // be visible to the query engine
+                    builder = builder
+                        .add_chunk(chunk, schema)
+                        .log_if_error("Adding chunks to table")
+                        .ok()?
                 }
             }
         }
 
-        Some(Arc::new(builder.build().expect("cannot fail")))
+        match builder.build() {
+            Ok(provider) => Some(Arc::new(provider)),
+            Err(provider::Error::InternalNoChunks { .. }) => None,
+            Err(e) => panic!("unexpected error: {:?}", e),
+        }
     }
 }
 

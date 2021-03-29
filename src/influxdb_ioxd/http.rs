@@ -777,7 +777,7 @@ mod tests {
             .db(&DatabaseName::new("MyOrg_MyBucket").unwrap())
             .expect("Database exists");
 
-        let batches = run_query(test_db.as_ref(), "select * from h2o_temperature").await;
+        let batches = run_query(test_db, "select * from h2o_temperature").await;
         let expected = vec![
             "+----------------+--------------+-------+-----------------+------------+",
             "| bottom_degrees | location     | state | surface_degrees | time       |",
@@ -967,7 +967,7 @@ mod tests {
             .db(&DatabaseName::new("MyOrg_MyBucket").unwrap())
             .expect("Database exists");
 
-        let batches = run_query(test_db.as_ref(), "select * from h2o_temperature").await;
+        let batches = run_query(test_db, "select * from h2o_temperature").await;
 
         let expected = vec![
             "+----------------+--------------+-------+-----------------+------------+",
@@ -1195,7 +1195,10 @@ mod tests {
     async fn run_query(db: Arc<Db>, query: &str) -> Vec<RecordBatch> {
         let planner = SQLQueryPlanner::default();
         let executor = Executor::new();
-        let physical_plan = planner.query(db, query, &executor).await.unwrap();
+        let physical_plan = planner
+            .query(Arc::new(DbCatalog::new(db)), query, &executor)
+            .await
+            .unwrap();
 
         collect(physical_plan).await.unwrap()
     }

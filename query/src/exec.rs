@@ -144,7 +144,7 @@ impl Executor {
             .into_iter()
             .map(|plan| {
                 // TODO run these on some executor other than the main tokio pool (maybe?)
-                let ctx = self.new_context(true);
+                let ctx = self.new_context();
                 let (plan_tx, plan_rx) = mpsc::channel(1);
                 rx_channels.push(plan_rx);
 
@@ -215,7 +215,7 @@ impl Executor {
                 let counters = Arc::clone(&self.counters);
 
                 tokio::task::spawn(async move {
-                    let ctx = IOxExecutionContext::new(counters, true);
+                    let ctx = IOxExecutionContext::new(counters);
                     let physical_plan = ctx
                         .prepare_plan(&plan)
                         .await
@@ -251,8 +251,8 @@ impl Executor {
     }
 
     /// Create a new execution context, suitable for executing a new query
-    pub fn new_context(&self, default_catalog: bool) -> IOxExecutionContext {
-        IOxExecutionContext::new(Arc::clone(&self.counters), default_catalog)
+    pub fn new_context(&self) -> IOxExecutionContext {
+        IOxExecutionContext::new(Arc::clone(&self.counters))
     }
 
     /// plans and runs the plans in parallel and collects the results
@@ -261,7 +261,7 @@ impl Executor {
         let value_futures = plans
             .into_iter()
             .map(|plan| {
-                let ctx = self.new_context(true);
+                let ctx = self.new_context();
                 // TODO run these on some executor other than the main tokio pool
                 tokio::task::spawn(async move {
                     let physical_plan = ctx
