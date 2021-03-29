@@ -130,6 +130,49 @@ const STARTING_SEQUENCE: u64 = 1;
 /// This is the main IOx Database object. It is the root object of any
 /// specific InfluxDB IOx instance
 ///
+///
+/// The data in a `Db` is structured in this way:
+///
+/// ┌───────────────────────────────────────────────┐
+/// │                                               │
+/// │    ┌────────────────┐                         │
+/// │    │    Database    │                         │
+/// │    └────────────────┘                         │
+/// │             │ one partition per               │
+/// │             │ partition_key                   │
+/// │             ▼                                 │
+/// │    ┌────────────────┐                         │
+/// │    │   Partition    │                         │
+/// │    └────────────────┘                         │
+/// │             │  one open Chunk                 │
+/// │             │  zero or more closed            │
+/// │             ▼  Chunks                         │
+/// │    ┌────────────────┐                         │
+/// │    │     Chunk      │                         │
+/// │    └────────────────┘                         │
+/// │             │  multiple Tables (measurements) │
+/// │             ▼                                 │
+/// │    ┌────────────────┐                         │
+/// │    │     Table      │                         │
+/// │    └────────────────┘                         │
+/// │             │  multiple Colums                │
+/// │             ▼                                 │
+/// │    ┌────────────────┐                         │
+/// │    │     Column     │                         │
+/// │    └────────────────┘                         │
+/// │                              MutableBuffer    │
+/// │                                               │
+/// └───────────────────────────────────────────────┘
+///
+/// Each row of data is routed into a particular partitions based on
+/// column values in that row. The partition's open chunk is updated
+/// with the new data.
+///
+/// The currently open chunk in a partition can be rolled over. When
+/// this happens, the chunk is closed (becomes read-only) and stops
+/// taking writes. Any new writes to the same partition will create a
+/// new active open chunk.
+///
 /// Catalog Usage: the state of the catalog and the state of the `Db`
 /// must remain in sync. If they are ever out of sync, the IOx system
 /// should be shutdown and forced through a "recovery" to correctly
@@ -537,11 +580,10 @@ impl CatalogProvider for Db {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use arrow_deps::{
         arrow::record_batch::RecordBatch, assert_table_eq, datafusion::physical_plan::collect,
     };
+    use chrono::Utc;
     use data_types::{chunk::ChunkStorage, database_rules::LifecycleRules};
     use query::{
         exec::Executor, frontend::sql::SQLQueryPlanner, test::TestLPWriter, PartitionChunk,
@@ -721,12 +763,12 @@ mod tests {
     #[tokio::test]
     async fn write_updates_last_write_at() {
         let db = make_db();
-        let before_create = Instant::now();
+        let before_create = Utc::now();
 
         let partition_key = "1970-01-01T00";
         let mut writer = TestLPWriter::default();
         writer.write_lp_string(&db, "cpu bar=1 10").unwrap();
-        let after_write = Instant::now();
+        let after_write = Utc::now();
 
         let last_write_prev = {
             let partition = db.catalog.valid_partition(partition_key).unwrap();
@@ -744,6 +786,44 @@ mod tests {
             let partition = partition.read();
             assert!(last_write_prev < partition.last_write_at());
         }
+    }
+
+    #[tokio::test]
+    async fn test_chunk_timestamps() {
+        let start = Utc::now();
+        let db = make_db();
+
+        // Given data loaded into two chunks
+        let mut writer = TestLPWriter::default();
+        writer.write_lp_string(&db, "cpu bar=1 10").unwrap();
+        let after_data_load = Utc::now();
+
+        // When the chunk is rolled over
+        let partition_key = "1970-01-01T00";
+        let chunk_id = db.rollover_partition("1970-01-01T00").await.unwrap().id();
+        let after_rollover = Utc::now();
+
+        let partition = db.catalog.valid_partition(partition_key).unwrap();
+        let partition = partition.read();
+        let chunk = partition.chunk(chunk_id).unwrap();
+        let chunk = chunk.read();
+        let chunk = match chunk.state() {
+            ChunkState::Closing(c) => c,
+            state => panic!("Unexpected chunk state: {}", state.name()),
+        };
+
+        println!(
+            "start: {:?}, after_data_load: {:?}, after_rollover: {:?}",
+            start, after_data_load, after_rollover
+        );
+        println!("Chunk: {:#?}", chunk);
+
+        // then the chunk creation and rollover times are as expected
+        assert!(start < chunk.time_of_first_write.unwrap());
+        assert!(chunk.time_of_first_write.unwrap() < after_data_load);
+        assert!(chunk.time_of_first_write.unwrap() == chunk.time_of_last_write.unwrap());
+        assert!(after_data_load < chunk.time_closing.unwrap());
+        assert!(chunk.time_closing.unwrap() < after_rollover);
     }
 
     #[tokio::test]

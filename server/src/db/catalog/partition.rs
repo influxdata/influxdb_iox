@@ -3,13 +3,13 @@
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     sync::Arc,
-    time::Instant,
 };
 
 use super::{
     chunk::{Chunk, ChunkState},
     ChunkAlreadyExists, Result, UnknownChunk,
 };
+use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use snafu::OptionExt;
 
@@ -28,11 +28,11 @@ pub struct Partition {
     chunks: BTreeMap<u32, Arc<RwLock<Chunk>>>,
 
     /// When this partition was created
-    created_at: Instant,
+    created_at: DateTime<Utc>,
 
     /// the last time at which write was made to this
     /// partition. Partition::new initializes this to now.
-    last_write_at: Instant,
+    last_write_at: DateTime<Utc>,
 }
 
 impl Partition {
@@ -51,7 +51,7 @@ impl Partition {
     pub(crate) fn new(key: impl Into<String>) -> Self {
         let key = key.into();
 
-        let now = Instant::now();
+        let now = Utc::now();
         Self {
             key,
             next_chunk_id: 0,
@@ -63,16 +63,16 @@ impl Partition {
 
     /// Update the last write time to now
     pub fn update_last_write_at(&mut self) {
-        self.last_write_at = Instant::now();
+        self.last_write_at = Utc::now();
     }
 
     /// Return the time at which this partition was created
-    pub fn created_at(&self) -> Instant {
+    pub fn created_at(&self) -> DateTime<Utc> {
         self.created_at
     }
 
     /// Return the time at which the last write was written to this partititon
-    pub fn last_write_at(&self) -> Instant {
+    pub fn last_write_at(&self) -> DateTime<Utc> {
         self.last_write_at
     }
 
