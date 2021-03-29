@@ -3,6 +3,7 @@
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     sync::Arc,
+    time::Instant,
 };
 
 use super::{
@@ -15,7 +16,7 @@ use snafu::OptionExt;
 /// IOx Catalog Partition
 ///
 /// A partition contains multiple Chunks.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Partition {
     /// The partition key
     key: String,
@@ -25,6 +26,13 @@ pub struct Partition {
 
     /// The chunks that make up this partition, indexed by id
     chunks: BTreeMap<u32, Arc<RwLock<Chunk>>>,
+
+    /// When this partition was created
+    created_at: Instant,
+
+    /// the last time at which write was made to this
+    /// partition. Partition::new initializes this to now.
+    last_write_at: Instant,
 }
 
 impl Partition {
@@ -43,10 +51,29 @@ impl Partition {
     pub(crate) fn new(key: impl Into<String>) -> Self {
         let key = key.into();
 
+        let now = Instant::now();
         Self {
             key,
-            ..Default::default()
+            next_chunk_id: 0,
+            chunks: BTreeMap::new(),
+            created_at: now,
+            last_write_at: now,
         }
+    }
+
+    /// Update the last write time to now
+    pub fn update_last_write_at(&mut self) {
+        self.last_write_at = Instant::now();
+    }
+
+    /// Return the time at which this partition was created
+    pub fn created_at(&self) -> Instant {
+        self.created_at
+    }
+
+    /// Return the time at which the last write was written to this partititon
+    pub fn last_write_at(&self) -> Instant {
+        self.last_write_at
     }
 
     /// Create a new Chunk

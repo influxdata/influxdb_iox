@@ -119,11 +119,6 @@ pub enum Error {
         chunk_id: u32,
     },
 
-    #[snafu(display("Error writing to mutable buffer: {}", source))]
-    MutableBufferWrite {
-        source: mutable_buffer::database::Error,
-    },
-
     #[snafu(display("Error dropping data from read buffer: {}", source))]
     ReadBufferDrop { source: read_buffer::Error },
 }
@@ -488,10 +483,12 @@ impl Database for Db {
                                 .set_open(Chunk::new(chunk_id))
                                 .context(CreatingChunk { partition_key })?;
                         }
+                        partition.update_last_write_at();
                         chunk
                     }
                     Some(partition) => {
-                        let partition = partition.read();
+                        let mut partition = partition.write();
+                        partition.update_last_write_at();
                         partition
                             .open_chunk()
                             .context(InternalNoOpenChunk { partition_key })?
@@ -540,6 +537,8 @@ impl CatalogProvider for Db {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use arrow_deps::{
         arrow::record_batch::RecordBatch, assert_table_eq, datafusion::physical_plan::collect,
     };
@@ -713,10 +712,38 @@ mod tests {
         );
 
         // Currently this doesn't work (as we need to teach the stores how to
-        // purge tables after data bas beend dropped println!("running
+        // purge tables after data bas been dropped println!("running
         // query after all data dropped!"); let expected = vec![] as
         // Vec<&str>; let batches = run_query(&db, "select * from
         // cpu").await; assert_table_eq!(expected, &batches);
+    }
+
+    #[tokio::test]
+    async fn write_updates_last_write_at() {
+        let db = make_db();
+        let before_create = Instant::now();
+
+        let partition_key = "1970-01-01T00";
+        let mut writer = TestLPWriter::default();
+        writer.write_lp_string(&db, "cpu bar=1 10").unwrap();
+        let after_write = Instant::now();
+
+        let last_write_prev = {
+            let partition = db.catalog.valid_partition(partition_key).unwrap();
+            let partition = partition.read();
+
+            assert_ne!(partition.created_at(), partition.last_write_at());
+            assert!(before_create < partition.last_write_at());
+            assert!(after_write > partition.last_write_at());
+            partition.last_write_at()
+        };
+
+        writer.write_lp_string(&db, "cpu bar=1 20").unwrap();
+        {
+            let partition = db.catalog.valid_partition(partition_key).unwrap();
+            let partition = partition.read();
+            assert!(last_write_prev < partition.last_write_at());
+        }
     }
 
     #[tokio::test]
