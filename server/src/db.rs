@@ -8,13 +8,17 @@ use std::sync::{
 };
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use snafu::{OptionExt, ResultExt, Snafu};
 use tracing::{debug, info};
 
 use arrow_deps::datafusion::catalog::{catalog::CatalogProvider, schema::SchemaProvider};
 use catalog::{chunk::ChunkState, Catalog};
-use data_types::{chunk::ChunkSummary, database_rules::DatabaseRules};
+use data_types::{
+    chunk::ChunkSummary,
+    database_rules::{DatabaseRules, Order, Sort, SortOrder},
+};
 use internal_types::{data::ReplicatedWrite, selection::Selection};
 use mutable_buffer::chunk::Chunk;
 use query::{Database, DEFAULT_SCHEMA};
@@ -425,6 +429,35 @@ impl Db {
         self.chunks(partition_key).into_iter().map(|c| c.summary())
     }
 
+    /// Returns the partition_keys in the requested sort order
+    pub fn partition_keys_sorted_by(&self, sort_rules: &SortOrder) -> Vec<String> {
+        let mut partitions: Vec<(String, DateTime<Utc>, DateTime<Utc>)> = self
+            .catalog
+            .partitions()
+            .map(|p| {
+                let p = p.read();
+                (p.key().to_string(), p.created_at(), p.last_write_at())
+            })
+            .collect();
+
+        match &sort_rules.sort {
+            Sort::CreatedAtTime => partitions.sort_by_key(|(_, created_at, _)| *created_at),
+            Sort::LastWriteTime => partitions.sort_by_key(|(_, _, last_write_at)| *last_write_at),
+            Sort::Column(_name, _data_type, _val) => {
+                unimplemented!()
+            }
+        }
+
+        if sort_rules.order == Order::Desc {
+            partitions.reverse();
+        }
+
+        partitions
+            .into_iter()
+            .map(|(key, _, _)| key)
+            .collect::<Vec<_>>()
+    }
+
     /// Returns the number of iterations of the background worker loop
     pub fn worker_iterations(&self) -> usize {
         self.worker_iterations.load(Ordering::Relaxed)
@@ -584,7 +617,10 @@ mod tests {
         arrow::record_batch::RecordBatch, assert_table_eq, datafusion::physical_plan::collect,
     };
     use chrono::Utc;
-    use data_types::{chunk::ChunkStorage, database_rules::LifecycleRules};
+    use data_types::{
+        chunk::ChunkStorage,
+        database_rules::{LifecycleRules, SortOrder},
+    };
     use query::{
         exec::Executor, frontend::sql::SQLQueryPlanner, test::TestLPWriter, PartitionChunk,
     };
@@ -824,6 +860,34 @@ mod tests {
         assert!(chunk.time_of_first_write.unwrap() == chunk.time_of_last_write.unwrap());
         assert!(after_data_load < chunk.time_closing.unwrap());
         assert!(chunk.time_closing.unwrap() < after_rollover);
+    }
+
+    #[tokio::test]
+    async fn partitions_sorted_by_times() {
+        let db = make_db();
+        let mut writer = TestLPWriter::default();
+        writer.write_lp_string(&db, "cpu val=1 1").unwrap();
+        writer
+            .write_lp_string(&db, "mem val=2 400000000000001")
+            .unwrap();
+        writer.write_lp_string(&db, "cpu val=1 2").unwrap();
+        writer
+            .write_lp_string(&db, "mem val=2 400000000000002")
+            .unwrap();
+
+        let sort_rules = SortOrder {
+            order: Order::Desc,
+            sort: Sort::LastWriteTime,
+        };
+        let partitions = db.partition_keys_sorted_by(&sort_rules);
+        assert_eq!(partitions, vec!["1970-01-05T15", "1970-01-01T00"]);
+
+        let sort_rules = SortOrder {
+            order: Order::Asc,
+            sort: Sort::CreatedAtTime,
+        };
+        let partitions = db.partition_keys_sorted_by(&sort_rules);
+        assert_eq!(partitions, vec!["1970-01-01T00", "1970-01-05T15"]);
     }
 
     #[tokio::test]
