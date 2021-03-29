@@ -759,9 +759,7 @@ impl SchemaProvider for Db {
         for partition_key in self.partition_keys().expect("cannot fail") {
             for chunk in self.chunks(&partition_key) {
                 if chunk.has_table(table_name) {
-                    let schema =
-                        futures::executor::block_on(chunk.table_schema(table_name, Selection::All))
-                            .expect("cannot fail");
+                    let schema = chunk.table_schema(table_name, Selection::All).expect("cannot fail");
                     builder = builder.add_chunk(chunk, schema).expect("cannot fail")
                 }
             }
