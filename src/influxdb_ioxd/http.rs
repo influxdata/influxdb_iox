@@ -487,7 +487,7 @@ fn default_format() -> String {
     QueryOutputFormat::default().to_string()
 }
 
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument]
 async fn query<M: ConnectionManager + Send + Sync + Debug + 'static>(
     req: Request<Body>,
 ) -> Result<Response<Body>, ApplicationError> {
@@ -542,7 +542,7 @@ async fn query<M: ConnectionManager + Send + Sync + Debug + 'static>(
     Ok(response)
 }
 
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument]
 async fn get_wal_meta<M: ConnectionManager + Send + Sync + Debug + 'static>(
     req: Request<Body>,
 ) -> Result<Response<Body>, ApplicationError> {
@@ -598,7 +598,7 @@ async fn get_wal_meta<M: ConnectionManager + Send + Sync + Debug + 'static>(
     Ok(response)
 }
 
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument]
 async fn health(_: Request<Body>) -> Result<Response<Body>, ApplicationError> {
     let response_body = "OK";
     Ok(Response::new(Body::from(response_body.to_string())))
@@ -616,7 +616,7 @@ struct DatabaseInfo {
     bucket: String,
 }
 
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument]
 async fn list_partitions<M: ConnectionManager + Send + Sync + Debug + 'static>(
     req: Request<Body>,
 ) -> Result<Response<Body>, ApplicationError> {
@@ -656,7 +656,7 @@ struct SnapshotInfo {
     partition: String,
 }
 
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument]
 async fn snapshot_partition<M: ConnectionManager + Send + Sync + Debug + 'static>(
     req: Request<Body>,
 ) -> Result<Response<Body>, ApplicationError> {

@@ -18,10 +18,10 @@ members = [
     "influxdb2_client",
     "ingest",
     "internal_types",
-    "logfmt",
     "mem_qe",
     "mutable_buffer",
     "object_store",
+    "observability_deps",
     "packers",
     "panic_logging",
     "query",
@@ -29,7 +29,6 @@ members = [
     "server",
     "test_helpers",
     "tracker",
-    "observability_deps",
     "wal",
 ]
 
@@ -49,17 +48,16 @@ influxdb_line_protocol = { path = "influxdb_line_protocol" }
 influxdb_tsm = { path = "influxdb_tsm" }
 internal_types = { path = "internal_types" }
 ingest = { path = "ingest" }
-logfmt = { path = "logfmt" }
 mem_qe = { path = "mem_qe" }
 mutable_buffer = { path = "mutable_buffer" }
 object_store = { path = "object_store" }
+observability_deps = { path = "observability_deps" }
 packers = { path = "packers" }
 panic_logging = { path = "panic_logging" }
 query = { path = "query" }
 read_buffer = { path = "read_buffer" }
 server = { path = "server" }
 tracker = { path = "tracker" }
-observability_deps = { path = "observability_deps" }
 wal = { path = "wal" }
 
 # Crates.io dependencies, in alphabetical order

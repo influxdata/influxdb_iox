@@ -10,12 +10,12 @@
 use std::str::FromStr;
 
 use dotenv::dotenv;
-use observability_deps::tracing::{debug, warn};
 use structopt::StructOpt;
 use tokio::runtime::Runtime;
 
-use commands::logging::LoggingLevel;
+use commands::tracing::init_logs_and_tracing;
 use ingest::parquet::writer::CompressionLevel;
+use observability_deps::tracing::{debug, warn};
 
 use tikv_jemallocator::Jemalloc;
 
@@ -23,7 +23,6 @@ mod commands {
     pub mod convert;
     pub mod database;
     mod input;
-    pub mod logging;
     pub mod meta;
     pub mod metrics;
     pub mod operations;
@@ -31,6 +30,7 @@ mod commands {
     pub mod server;
     pub mod server_remote;
     pub mod stats;
+    pub mod tracing;
     pub mod writer;
 }
 
@@ -140,13 +140,6 @@ fn main() -> Result<(), std::io::Error> {
 
     let config = Config::from_args();
 
-    // Logging level is determined via:
-    // 1. If RUST_LOG environment variable is set, use that value
-    // 2. if `-vv` (multiple instances of verbose), use DEFAULT_DEBUG_LOG_LEVEL
-    // 2. if `-v` (single instances of verbose), use DEFAULT_VERBOSE_LOG_LEVEL
-    // 3. Otherwise use DEFAULT_LOG_LEVEL
-    let logging_level = LoggingLevel::new(config.verbose);
-
     let tokio_runtime = get_runtime(config.num_threads)?;
     tokio_runtime.block_on(async move {
         let host = config.host;
@@ -156,8 +149,7 @@ fn main() -> Result<(), std::io::Error> {
                 output,
                 compression_level,
             } => {
-                logging_level.setup_basic_logging();
-
+                let _tracing_guard = init_logs_and_tracing(&config);
                 let compression_level = CompressionLevel::from_str(&compression_level).unwrap();
                 match commands::convert::convert(&input, &output, compression_level) {
                     Ok(()) => debug!("Conversion completed successfully"),
@@ -168,7 +160,7 @@ fn main() -> Result<(), std::io::Error> {
                 }
             }
             Command::Meta { input } => {
-                logging_level.setup_basic_logging();
+                let _tracing_guard = init_logs_and_tracing(&config);
                 match commands::meta::dump_meta(&input) {
                     Ok(()) => debug!("Metadata dump completed successfully"),
                     Err(e) => {
@@ -178,7 +170,7 @@ fn main() -> Result<(), std::io::Error> {
                 }
             }
             Command::Stats(config) => {
-                logging_level.setup_basic_logging();
+                let _tracing_guard = init_logs_and_tracing(&config);
                 match commands::stats::stats(&config).await {
                     Ok(()) => debug!("Storage statistics dump completed successfully"),
                     Err(e) => {
@@ -188,37 +180,36 @@ fn main() -> Result<(), std::io::Error> {
                 }
             }
             Command::Database(config) => {
-                logging_level.setup_basic_logging();
+                let _tracing_guard = init_logs_and_tracing(&config);
                 if let Err(e) = commands::database::command(host, config).await {
                     eprintln!("{}", e);
                     std::process::exit(ReturnCode::Failure as _)
                 }
             }
             Command::Writer(config) => {
-                logging_level.setup_basic_logging();
+                let _tracing_guard = init_logs_and_tracing(&config);
                 if let Err(e) = commands::writer::command(host, config).await {
                     eprintln!("{}", e);
                     std::process::exit(ReturnCode::Failure as _)
                 }
             }
             Command::Operation(config) => {
-                logging_level.setup_basic_logging();
+                let _tracing_guard = init_logs_and_tracing(&config);
                 if let Err(e) = commands::operations::command(host, config).await {
                     eprintln!("{}", e);
                     std::process::exit(ReturnCode::Failure as _)
                 }
             }
             Command::Server(config) => {
-                logging_level.setup_basic_logging();
+                let _tracing_guard = init_logs_and_tracing(&config);
                 if let Err(e) = commands::server::command(host, config).await {
                     eprintln!("Server command failed: {}", e);
                     std::process::exit(ReturnCode::Failure as _)
                 }
             }
             Command::Run(config) => {
-                // Note don't set up basic logging here, different logging rules apply in server
-                // mode
-                if let Err(e) = commands::run::command(logging_level, *config).await {
+                let _tracing_guard = init_logs_and_tracing(&config);
+                if let Err(e) = commands::run::command(*config).await {
                     eprintln!("Server command failed: {}", e);
                     std::process::exit(ReturnCode::Failure as _)
                 }
