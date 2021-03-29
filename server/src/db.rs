@@ -635,6 +635,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn write_with_missing_tags_are_null() {
+        let db = Arc::new(make_db());
+        let mut writer = TestLPWriter::default();
+
+        // Note the `region` tag is introduced in the second line, so
+        // the values in prior rows for the region column are
+        // null. Likewise the `core` tag is introduced in the third
+        // line so the prior columns are null
+        let lines = vec![
+            "cpu,region=west user=23.2 10",
+            "cpu, user=10.0 11",
+            "cpu,core=one user=10.0 11",
+        ];
+
+        writer
+            .write_lp_string(db.as_ref(), &lines.join("\n"))
+            .unwrap();
+        assert_eq!(vec!["1970-01-01T00"], db.partition_keys().unwrap());
+
+        let mb_chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
+        assert_eq!(mb_chunk.id(), 0);
+
+        let expected = vec![
+            "+------+--------+------+------+",
+            "| core | region | time | user |",
+            "+------+--------+------+------+",
+            "|      | west   | 10   | 23.2 |",
+            "|      |        | 11   | 10   |",
+            "| one  |        | 11   | 10   |",
+            "+------+--------+------+------+",
+        ];
+        let batches = run_query(Arc::clone(&db), "select * from cpu").await;
+        assert_table_eq!(expected, &batches);
+    }
+
+    #[tokio::test]
     async fn read_from_read_buffer() {
         // Test that data can be loaded into the ReadBuffer
         let db = Arc::new(make_db());

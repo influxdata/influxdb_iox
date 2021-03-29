@@ -254,63 +254,6 @@ mod tests {
     type Result<T = (), E = TestError> = std::result::Result<T, E>;
 
     #[tokio::test]
-    async fn missing_tags_are_null() -> Result {
-        let db = MutableBufferDb::new("mydb");
-
-        // Note the `region` tag is introduced in the second line, so
-        // the values in prior rows for the region column are
-        // null. Likewise the `core` tag is introduced in the third
-        // line so the prior columns are null
-        let lines = vec![
-            "cpu,region=west user=23.2 10",
-            "cpu, user=10.0 11",
-            "cpu,core=one user=10.0 11",
-        ];
-        let partition_key = "1970-01-01T00";
-
-        write_lines_to_partition(&db, &lines, partition_key).await;
-
-        let chunk = db.get_chunk(partition_key, 0).unwrap();
-        let mut batches = Vec::new();
-        let selection = Selection::Some(&["region", "core"]);
-        chunk
-            .table_to_arrow(&mut batches, "cpu", selection)
-            .unwrap();
-        let columns = batches[0].columns();
-
-        assert_eq!(
-            2,
-            columns.len(),
-            "Got only two columns in partiton: {:#?}",
-            columns
-        );
-
-        let region_col = columns[0]
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .expect("Get region column as a string");
-
-        assert_eq!(region_col.len(), 3);
-        assert_eq!(region_col.value(0), "west", "region_col: {:?}", region_col);
-        assert!(!region_col.is_null(0), "is_null(0): {:?}", region_col);
-        assert!(region_col.is_null(1), "is_null(1): {:?}", region_col);
-        assert!(region_col.is_null(2), "is_null(1): {:?}", region_col);
-
-        let host_col = columns[1]
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .expect("Get host column as a string");
-
-        assert_eq!(host_col.len(), 3);
-        assert!(host_col.is_null(0), "is_null(0): {:?}", host_col);
-        assert!(host_col.is_null(1), "is_null(1): {:?}", host_col);
-        assert!(!host_col.is_null(2), "is_null(2): {:?}", host_col);
-        assert_eq!(host_col.value(2), "one", "host_col: {:?}", host_col);
-
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn db_size() {
         let db = MutableBufferDb::new("column_namedb");
 
