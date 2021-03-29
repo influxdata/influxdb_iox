@@ -32,10 +32,7 @@ async fn test_operations() {
 
     let id = operation.name.parse().expect("not an integer");
 
-    let meta = operations_client
-        .client_operation(id)
-        .await
-        .metadata();
+    let meta = operations_client.client_operation(id).await.metadata();
 
     let job = meta.job.expect("expected a job");
 
@@ -67,7 +64,9 @@ async fn test_operations() {
         .expect("failed to cancel operation");
 
     let waited = wait.await.unwrap();
-    let meta = operations::ClientOperation::try_new(waited.clone()).unwrap().metadata();
+    let meta = operations::ClientOperation::try_new(waited.clone())
+        .unwrap()
+        .metadata();
 
     assert!(waited.done);
     assert!(meta.wall_nanos > 0);

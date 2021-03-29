@@ -76,7 +76,6 @@ impl Client {
             .operations)
     }
 
-    
     /// Get information of all client operation
     pub async fn list_client_operations(&mut self) -> Result<Vec<ClientOperation>> {
         Ok(self
@@ -90,7 +89,6 @@ impl Client {
             .map(|o| ClientOperation::try_new(o).unwrap())
             .collect())
     }
-
 
     /// Get information about a specific operation
     pub async fn get_operation(&mut self, id: usize) -> Result<Operation> {
@@ -151,7 +149,7 @@ impl Client {
 }
 
 /// IOx's Client Operation
-#[derive(Debug, Clone)]//, Serialize)]
+#[derive(Debug, Clone)] //, Serialize)]
 pub struct ClientOperation {
     inner: generated_types::Operation,
 }

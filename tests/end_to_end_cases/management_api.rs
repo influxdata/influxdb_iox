@@ -558,7 +558,9 @@ async fn test_close_partition_chunk() {
     println!("Operation response is {:?}", operation);
     let operation_id = operation.name.parse().expect("not an integer");
 
-    let meta = operations::ClientOperation::try_new(operation).unwrap().metadata();
+    let meta = operations::ClientOperation::try_new(operation)
+        .unwrap()
+        .metadata();
 
     // ensure we got a legit job description back
     if let Some(Job::CloseChunk(close_chunk)) = meta.job {
