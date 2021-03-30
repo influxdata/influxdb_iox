@@ -2,6 +2,7 @@ use generated_types::wal as wb;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    iter::FromIterator,
     sync::Arc,
 };
 
@@ -23,9 +24,7 @@ use snafu::{OptionExt, ResultExt, Snafu};
 use arrow_deps::{
     arrow,
     arrow::{
-        array::{
-            ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, StringBuilder, UInt64Builder,
-        },
+        array::{ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray, UInt64Array},
         datatypes::DataType as ArrowDataType,
         record_batch::RecordBatch,
     },
@@ -33,13 +32,6 @@ use arrow_deps::{
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Tag value ID {} not found in dictionary of chunk {}", value, chunk))]
-    TagValueIdNotFoundInDictionary {
-        value: u32,
-        chunk: u64,
-        source: DictionaryError,
-    },
-
     #[snafu(display("Column error on column {}: {}", column, source))]
     ColumnError {
         column: String,
@@ -351,74 +343,38 @@ impl Table {
 
             let array = match column {
                 Column::String(vals, _) => {
-                    let mut builder = StringBuilder::with_capacity(vals.len(), vals.len() * 10);
-
-                    for v in vals {
-                        match v {
-                            None => builder.append_null(),
-                            Some(s) => builder.append_value(s),
-                        }
-                        .context(ArrowError {})?;
-                    }
-
-                    Arc::new(builder.finish()) as ArrayRef
+                    let iter = vals.iter().map(|s| s.as_ref().map(|s| s.as_str()));
+                    let array = StringArray::from_iter(iter);
+                    Arc::new(array) as ArrayRef
                 }
                 Column::Tag(vals, _) => {
-                    let mut builder = StringBuilder::with_capacity(vals.len(), vals.len() * 10);
+                    let iter = vals.iter().map(|id| {
+                        id.as_ref().map(|value_id| {
+                            chunk
+                                .dictionary
+                                .lookup_id(*value_id)
+                                .expect("dictionary had mapping for tag value")
+                        })
+                    });
 
-                    for v in vals {
-                        match v {
-                            None => builder.append_null(),
-                            Some(value_id) => {
-                                let tag_value = chunk.dictionary.lookup_id(*value_id).context(
-                                    TagValueIdNotFoundInDictionary {
-                                        value: *value_id,
-                                        chunk: chunk.id,
-                                    },
-                                )?;
-                                builder.append_value(tag_value)
-                            }
-                        }
-                        .context(ArrowError {})?;
-                    }
-
-                    Arc::new(builder.finish()) as ArrayRef
+                    let array = StringArray::from_iter(iter);
+                    Arc::new(array) as ArrayRef
                 }
                 Column::F64(vals, _) => {
-                    let mut builder = Float64Builder::new(vals.len());
-
-                    for v in vals {
-                        builder.append_option(*v).context(ArrowError {})?;
-                    }
-
-                    Arc::new(builder.finish()) as ArrayRef
+                    let array = Float64Array::from_iter(vals.iter());
+                    Arc::new(array) as ArrayRef
                 }
                 Column::I64(vals, _) => {
-                    let mut builder = Int64Builder::new(vals.len());
-
-                    for v in vals {
-                        builder.append_option(*v).context(ArrowError {})?;
-                    }
-
-                    Arc::new(builder.finish()) as ArrayRef
+                    let array = Int64Array::from_iter(vals.iter());
+                    Arc::new(array) as ArrayRef
                 }
                 Column::U64(vals, _) => {
-                    let mut builder = UInt64Builder::new(vals.len());
-
-                    for v in vals {
-                        builder.append_option(*v).context(ArrowError {})?;
-                    }
-
-                    Arc::new(builder.finish()) as ArrayRef
+                    let array = UInt64Array::from_iter(vals.iter());
+                    Arc::new(array) as ArrayRef
                 }
                 Column::Bool(vals, _) => {
-                    let mut builder = BooleanBuilder::new(vals.len());
-
-                    for v in vals {
-                        builder.append_option(*v).context(ArrowError {})?;
-                    }
-
-                    Arc::new(builder.finish()) as ArrayRef
+                    let array = BooleanArray::from_iter(vals.iter());
+                    Arc::new(array) as ArrayRef
                 }
             };
 
