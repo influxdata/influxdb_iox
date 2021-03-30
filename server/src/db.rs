@@ -896,6 +896,7 @@ mod tests {
         assert_eq!(read_buffer_chunk_ids(&db, partition_key), vec![1]);
     }
 
+    /// Normalizes a set of ChunkSummaries for comparison by removing timestamps
     fn normalize_summaries(summaries: Vec<ChunkSummary>) -> Vec<ChunkSummary> {
         let mut summaries = summaries
             .into_iter()
@@ -950,6 +951,58 @@ mod tests {
             expected, chunk_summaries,
             "expected:\n{:#?}\n\nactual:{:#?}\n\n",
             expected, chunk_summaries
+        );
+    }
+
+    #[tokio::test]
+    async fn partition_chunk_summaries_timestamp() {
+        let db = make_db();
+        let mut writer = TestLPWriter::default();
+
+        let start = Utc::now();
+        writer.write_lp_string(&db, "cpu bar=1 1").unwrap();
+        let after_first_write = Utc::now();
+        writer.write_lp_string(&db, "cpu bar=2 2").unwrap();
+        db.rollover_partition("1970-01-01T00").await.unwrap();
+        let after_close = Utc::now();
+
+        let mut chunk_summaries = db.chunk_summaries().unwrap();
+
+        chunk_summaries.sort_by_key(|s| s.id);
+
+        let summary = &chunk_summaries[0];
+        assert_eq!(summary.id, 0, "summary; {:#?}", summary);
+        assert!(
+            summary.time_of_first_write.unwrap() > start,
+            "summary; {:#?}",
+            summary
+        );
+        assert!(
+            summary.time_of_first_write.unwrap() < after_close,
+            "summary; {:#?}",
+            summary
+        );
+
+        assert!(
+            summary.time_of_last_write.unwrap() > after_first_write,
+            "summary; {:#?}",
+            summary
+        );
+        assert!(
+            summary.time_of_last_write.unwrap() < after_close,
+            "summary; {:#?}",
+            summary
+        );
+
+        assert!(
+            summary.time_closing.unwrap() > after_first_write,
+            "summary; {:#?}",
+            summary
+        );
+        assert!(
+            summary.time_closing.unwrap() < after_close,
+            "summary; {:#?}",
+            summary
         );
     }
 
