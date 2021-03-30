@@ -142,9 +142,9 @@ impl Client {
     }
 
     /// Return the Client Operation
-    pub async fn client_operation(&mut self, id: usize) -> ClientOperation {
-        let operation = self.get_operation(id).await.expect("get operation failed");
-        ClientOperation::try_new(operation).unwrap()
+    pub async fn client_operation(&mut self, id: usize) -> Result<ClientOperation> {
+        let operation = self.get_operation(id).await?;
+        ClientOperation::try_new(operation)
     }
 }
 
