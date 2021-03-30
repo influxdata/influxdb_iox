@@ -123,7 +123,7 @@ impl Chunk {
     }
 
     pub fn time_closing(&self) -> Option<DateTime<Utc>> {
-        return self.time_closing;
+        self.time_closing
     }
 
     /// Update the write timestamps for this chunk
