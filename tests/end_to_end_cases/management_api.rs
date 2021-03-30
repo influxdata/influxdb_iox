@@ -623,7 +623,7 @@ async fn test_close_partition_chunk_error() {
 
 /// Normalizes a set of Chunks for comparison by removing timestamps
 fn normalize_chunks(chunks: Vec<Chunk>) -> Vec<Chunk> {
-    let chunks = chunks
+    chunks
         .into_iter()
         .map(|summary| {
             let Chunk {
@@ -644,6 +644,4 @@ fn normalize_chunks(chunks: Vec<Chunk>) -> Vec<Chunk> {
             }
         })
         .collect::<Vec<_>>();
-
-    chunks
 }
