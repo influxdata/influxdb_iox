@@ -186,6 +186,9 @@ mod test {
             id: 42,
             estimated_bytes: 1234,
             storage: management::ChunkStorage::ObjectStore.into(),
+            time_of_first_write: None,
+            time_of_last_write: None,
+            time_closing: None,
         };
 
         let summary = ChunkSummary::try_from(proto).expect("conversion successful");
@@ -194,6 +197,9 @@ mod test {
             id: 42,
             estimated_bytes: 1234,
             storage: ChunkStorage::ObjectStore,
+            time_of_first_write: None,
+            time_of_last_write: None,
+            time_closing: None,
         };
 
         assert_eq!(
@@ -210,6 +216,9 @@ mod test {
             id: 42,
             estimated_bytes: 1234,
             storage: ChunkStorage::ObjectStore,
+            time_of_first_write: None,
+            time_of_last_write: None,
+            time_closing: None,
         };
 
         let proto = management::Chunk::try_from(summary).expect("conversion successful");
@@ -219,6 +228,9 @@ mod test {
             id: 42,
             estimated_bytes: 1234,
             storage: management::ChunkStorage::ObjectStore.into(),
+            time_of_first_write: None,
+            time_of_last_write: None,
+            time_closing: None,
         };
 
         assert_eq!(
