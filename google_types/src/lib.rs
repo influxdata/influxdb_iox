@@ -42,7 +42,7 @@ mod pb {
                 fn try_from(value: Timestamp) -> Result<Self, Self::Error> {
                     let Timestamp { seconds, nanos } = value;
 
-                    let dt = NaiveDateTime::from_timestamp(seconds.try_into()?, nanos.try_into()?);
+                    let dt = NaiveDateTime::from_timestamp(seconds, nanos.try_into()?);
                     Ok(chrono::DateTime::<Utc>::from_utc(dt, Utc))
                 }
             }
