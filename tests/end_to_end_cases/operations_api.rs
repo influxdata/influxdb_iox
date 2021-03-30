@@ -28,11 +28,15 @@ async fn test_operations() {
         .expect("list operations failed");
 
     assert_eq!(running_ops.len(), 1);
-    assert_eq!(running_ops[0].name(), operation.name);
+    assert_eq!(running_ops[0].as_ref().unwrap().name(), operation.name);
 
     let id = operation.name.parse().expect("not an integer");
 
-    let meta = operations_client.client_operation(id).await.metadata();
+    let meta = operations_client
+        .client_operation(id)
+        .await
+        .unwrap()
+        .metadata();
 
     let job = meta.job.expect("expected a job");
 

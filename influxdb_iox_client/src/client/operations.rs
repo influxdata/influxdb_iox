@@ -77,7 +77,7 @@ impl Client {
     }
 
     /// Get information of all client operation
-    pub async fn list_client_operations(&mut self) -> Result<Vec<ClientOperation>> {
+    pub async fn list_client_operations(&mut self) -> Result<Vec<Result<ClientOperation>>> {
         Ok(self
             .inner
             .list_operations(ListOperationsRequest::default())
@@ -86,7 +86,7 @@ impl Client {
             .into_inner()
             .operations
             .into_iter()
-            .map(|o| ClientOperation::try_new(o).unwrap())
+            .map(ClientOperation::try_new)
             .collect())
     }
 
