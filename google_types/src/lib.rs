@@ -37,21 +37,22 @@ mod pb {
                 }
             }
 
+            impl TryFrom<Timestamp> for chrono::DateTime<Utc> {
+                type Error = std::num::TryFromIntError;
+                fn try_from(value: Timestamp) -> Result<Self, Self::Error> {
+                    let Timestamp { seconds, nanos } = value;
+
+                    let dt = NaiveDateTime::from_timestamp(seconds.try_into()?, nanos.try_into()?);
+                    Ok(chrono::DateTime::<Utc>::from_utc(dt, Utc))
+                }
+            }
+
             impl From<chrono::DateTime<Utc>> for Timestamp {
                 fn from(value: chrono::DateTime<Utc>) -> Self {
                     Self {
                         seconds: value.timestamp(),
                         nanos: value.timestamp_subsec_nanos() as i32,
                     }
-                }
-            }
-
-            impl From<Timestamp> for chrono::DateTime<Utc> {
-                fn from(value: Timestamp) -> Self {
-                    let Timestamp { seconds, nanos } = value;
-
-                    let dt = NaiveDateTime::from_timestamp(seconds, nanos as u32);
-                    chrono::DateTime::<Utc>::from_utc(dt, Utc)
                 }
             }
         }

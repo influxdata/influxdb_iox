@@ -1,5 +1,8 @@
 //! Module contains a representation of chunk metadata
-use std::{convert::TryFrom, sync::Arc};
+use std::{
+    convert::{TryFrom, TryInto},
+    sync::Arc,
+};
 
 use crate::field_validation::FromField;
 use chrono::{DateTime, Utc};
@@ -132,22 +135,42 @@ impl TryFrom<management::Chunk> for ChunkSummary {
         // Use prost enum conversion
         let storage = proto.storage().scope("storage")?;
 
+        let time_of_first_write = proto
+            .time_of_first_write
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(|_| FieldViolation {
+                field: "time_of_first_write".to_string(),
+                description: "Timestamp must be positive".to_string(),
+            })?;
+
+        let time_of_last_write = proto
+            .time_of_last_write
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(|_| FieldViolation {
+                field: "time_of_last_write".to_string(),
+                description: "Timestamp must be positive".to_string(),
+            })?;
+
+        let time_closing = proto
+            .time_closing
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(|_| FieldViolation {
+                field: "time_closing".to_string(),
+                description: "Timestamp must be positive".to_string(),
+            })?;
+
         let management::Chunk {
             partition_key,
             id,
             estimated_bytes,
-            storage: _,
-            time_of_first_write,
-            time_of_last_write,
-            time_closing,
+            ..
         } = proto;
 
         let estimated_bytes = estimated_bytes as usize;
         let partition_key = Arc::new(partition_key);
-
-        let time_of_first_write = time_of_first_write.map(|t| t.into());
-        let time_of_last_write = time_of_last_write.map(|t| t.into());
-        let time_closing = time_closing.map(|t| t.into());
 
         Ok(Self {
             partition_key,
