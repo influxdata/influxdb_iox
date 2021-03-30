@@ -7,10 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use arrow_deps::arrow::datatypes::{
-    DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
-    SchemaRef as ArrowSchemaRef,
-};
+use arrow_deps::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema, SchemaRef as ArrowSchemaRef, TimeUnit};
 
 /// The name of the timestamp column in the InfluxDB datamodel
 pub const TIME_COLUMN_NAME: &str = "time";
@@ -631,7 +628,10 @@ impl From<&InfluxColumnType> for ArrowDataType {
         match t {
             InfluxColumnType::Tag => Self::Utf8,
             InfluxColumnType::Field(influxdb_field_type) => (*influxdb_field_type).into(),
-            InfluxColumnType::Timestamp => Self::Int64,
+            InfluxColumnType::Timestamp => {
+                let timezone = None;
+                Self::Timestamp(TimeUnit::Nanosecond, timezone)
+            },
         }
     }
 }
@@ -737,7 +737,7 @@ mod test {
             ArrowField::new("float_col", ArrowDataType::Float64, false),
             ArrowField::new("str_col", ArrowDataType::Utf8, false),
             ArrowField::new("bool_col", ArrowDataType::Boolean, false),
-            ArrowField::new("time_col", ArrowDataType::Int64, false),
+            ArrowField::new("time_col", ArrowDataType::Timestamp(TimeUnit::Nanosecond, None), false),
         ];
 
         let metadata: HashMap<_, _> = vec![
