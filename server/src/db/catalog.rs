@@ -32,12 +32,6 @@ pub enum Error {
         chunk_id: u32,
     },
 
-    #[snafu(display("chunk already exists: {}:{}", partition_key, chunk_id))]
-    ChunkAlreadyExists {
-        partition_key: String,
-        chunk_id: u32,
-    },
-
     #[snafu(display(
         "Internal unexpected chunk state for {}:{}  during {}. Expected {}, got {}",
         partition_key,
