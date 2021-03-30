@@ -2,6 +2,7 @@
 use std::{convert::TryFrom, sync::Arc};
 
 use crate::field_validation::FromField;
+use chrono::{DateTime, Utc};
 use generated_types::{google::FieldViolation, influxdata::iox::management::v1 as management};
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +37,39 @@ pub struct ChunkSummary {
 
     /// The total estimated size of this chunk, in bytes
     pub estimated_bytes: usize,
+
+    /// Time at which the first data was written into this chunk. Note
+    /// this is not the same as the timestamps on the data itself
+    pub time_of_first_write: Option<DateTime<Utc>>,
+
+    /// Most recent time at which data write was initiated into this
+    /// chunk. Note this is not the same as the timestamps on the data
+    /// itself
+    pub time_of_last_write: Option<DateTime<Utc>>,
+
+    /// Time at which this chunk was maked as closing. Note this is
+    /// not the same as the timestamps on the data itself
+    pub time_closing: Option<DateTime<Utc>>,
+}
+
+impl ChunkSummary {
+    /// Construct a ChunkSummary that has None for all timestamps
+    pub fn new_without_timestamps(
+        partition_key: Arc<String>,
+        id: u32,
+        storage: ChunkStorage,
+        estimated_bytes: usize,
+    ) -> Self {
+        Self {
+            partition_key,
+            id,
+            storage,
+            estimated_bytes,
+            time_of_first_write: None,
+            time_of_last_write: None,
+            time_closing: None,
+        }
+    }
 }
 
 /// Conversion code to management API chunk structure
@@ -46,6 +80,9 @@ impl From<ChunkSummary> for management::Chunk {
             id,
             storage,
             estimated_bytes,
+            time_of_first_write,
+            time_of_last_write,
+            time_closing,
         } = summary;
 
         let storage: management::ChunkStorage = storage.into();
@@ -98,11 +135,18 @@ impl TryFrom<management::Chunk> for ChunkSummary {
         let estimated_bytes = estimated_bytes as usize;
         let partition_key = Arc::new(partition_key);
 
+        let time_of_first_write = None;
+        let time_of_last_write = None;
+        let time_closing = None;
+
         Ok(Self {
             partition_key,
             id,
             storage,
             estimated_bytes,
+            time_of_first_write,
+            time_of_last_write,
+            time_closing,
         })
     }
 }

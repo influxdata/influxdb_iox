@@ -2,8 +2,11 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use data_types::chunk::ChunkSummary;
 use mutable_buffer::chunk::Chunk as MBChunk;
 use read_buffer::Database as ReadBufferDb;
+
+use crate::db::DBChunk;
 
 use super::{InternalChunkState, Result};
 
@@ -130,6 +133,16 @@ impl Chunk {
             self.time_of_first_write = Some(now);
         }
         self.time_of_last_write = Some(now);
+    }
+
+    /// Return ChunkSummary metadata for this chunk
+    pub fn summary(&self) -> ChunkSummary {
+        ChunkSummary {
+            time_of_first_write: self.time_of_first_write,
+            time_of_last_write: self.time_of_last_write,
+            time_closing: self.time_closing,
+            ..DBChunk::snapshot(self).summary()
+        }
     }
 
     /// Returns true if this chunk contains a table with the provided name

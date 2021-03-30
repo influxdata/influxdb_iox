@@ -383,7 +383,18 @@ impl Db {
         &self,
         partition_key: &str,
     ) -> impl Iterator<Item = ChunkSummary> {
-        self.chunks(partition_key).into_iter().map(|c| c.summary())
+        let chunks = match self.catalog.partition(partition_key) {
+            Some(partition) => {
+                let partition = partition.read();
+                partition.chunks().cloned().collect::<Vec<_>>()
+            }
+            None => vec![],
+        };
+
+        chunks.into_iter().map(|chunk| {
+            let chunk = chunk.read();
+            chunk.summary()
+        })
     }
 
     /// Returns the partition_keys in the requested sort order
@@ -885,6 +896,24 @@ mod tests {
         assert_eq!(read_buffer_chunk_ids(&db, partition_key), vec![1]);
     }
 
+    fn normalize_summaries(summaries: Vec<ChunkSummary>) -> Vec<ChunkSummary> {
+        let mut summaries = summaries
+            .into_iter()
+            .map(|summary| {
+                let ChunkSummary {
+                    partition_key,
+                    id,
+                    storage,
+                    estimated_bytes,
+                    ..
+                } = summary;
+                ChunkSummary::new_without_timestamps(partition_key, id, storage, estimated_bytes)
+            })
+            .collect::<Vec<_>>();
+        summaries.sort_unstable();
+        summaries
+    }
+
     #[tokio::test]
     async fn partition_chunk_summaries() {
         // Test that chunk id listing is hooked up
@@ -905,18 +934,17 @@ mod tests {
             Arc::new(s.to_string())
         }
 
-        let mut chunk_summaries = db
+        let chunk_summaries = db
             .partition_chunk_summaries("1970-01-05T15")
             .collect::<Vec<_>>();
+        let chunk_summaries = normalize_summaries(chunk_summaries);
 
-        chunk_summaries.sort_unstable();
-
-        let expected = vec![ChunkSummary {
-            partition_key: to_arc("1970-01-05T15"),
-            id: 0,
-            storage: ChunkStorage::OpenMutableBuffer,
-            estimated_bytes: 107,
-        }];
+        let expected = vec![ChunkSummary::new_without_timestamps(
+            to_arc("1970-01-05T15"),
+            0,
+            ChunkStorage::OpenMutableBuffer,
+            107,
+        )];
 
         assert_eq!(
             expected, chunk_summaries,
@@ -958,34 +986,34 @@ mod tests {
             Arc::new(s.to_string())
         }
 
-        let mut chunk_summaries = db.chunk_summaries().expect("expected summary to return");
-        chunk_summaries.sort_unstable();
+        let chunk_summaries = db.chunk_summaries().expect("expected summary to return");
+        let chunk_summaries = normalize_summaries(chunk_summaries);
 
         let expected = vec![
-            ChunkSummary {
-                partition_key: to_arc("1970-01-01T00"),
-                id: 0,
-                storage: ChunkStorage::ReadBuffer,
-                estimated_bytes: 1221,
-            },
-            ChunkSummary {
-                partition_key: to_arc("1970-01-01T00"),
-                id: 1,
-                storage: ChunkStorage::OpenMutableBuffer,
-                estimated_bytes: 101,
-            },
-            ChunkSummary {
-                partition_key: to_arc("1970-01-05T15"),
-                id: 0,
-                storage: ChunkStorage::ClosedMutableBuffer,
-                estimated_bytes: 133,
-            },
-            ChunkSummary {
-                partition_key: to_arc("1970-01-05T15"),
-                id: 1,
-                storage: ChunkStorage::OpenMutableBuffer,
-                estimated_bytes: 135,
-            },
+            ChunkSummary::new_without_timestamps(
+                to_arc("1970-01-01T00"),
+                0,
+                ChunkStorage::ReadBuffer,
+                1221,
+            ),
+            ChunkSummary::new_without_timestamps(
+                to_arc("1970-01-01T00"),
+                1,
+                ChunkStorage::OpenMutableBuffer,
+                101,
+            ),
+            ChunkSummary::new_without_timestamps(
+                to_arc("1970-01-05T15"),
+                0,
+                ChunkStorage::ClosedMutableBuffer,
+                133,
+            ),
+            ChunkSummary::new_without_timestamps(
+                to_arc("1970-01-05T15"),
+                1,
+                ChunkStorage::OpenMutableBuffer,
+                135,
+            ),
         ];
 
         assert_eq!(
