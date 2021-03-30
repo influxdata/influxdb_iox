@@ -1859,7 +1859,6 @@ version = "0.1.0"
 dependencies = [
  "arrow_deps",
  "async-trait",
- "chrono",
  "criterion",
  "data_types",
  "flatbuffers",

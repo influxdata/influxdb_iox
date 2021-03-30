@@ -500,6 +500,7 @@ impl Database for Db {
                     .unwrap_or_else(|| partition.create_open_chunk());
 
                 let mut chunk = chunk.write();
+                chunk.record_write();
                 let chunk_id = chunk.id();
 
                 let mb_chunk = chunk.mutable_buffer().expect("cannot mutate open chunk");
@@ -787,10 +788,6 @@ mod tests {
         let partition = partition.read();
         let chunk = partition.chunk(chunk_id).unwrap();
         let chunk = chunk.read();
-        let chunk = match chunk.state() {
-            ChunkState::Closing(c) => c,
-            state => panic!("Unexpected chunk state: {}", state.name()),
-        };
 
         println!(
             "start: {:?}, after_data_load: {:?}, after_rollover: {:?}",
@@ -799,11 +796,11 @@ mod tests {
         println!("Chunk: {:#?}", chunk);
 
         // then the chunk creation and rollover times are as expected
-        assert!(start < chunk.time_of_first_write.unwrap());
-        assert!(chunk.time_of_first_write.unwrap() < after_data_load);
-        assert!(chunk.time_of_first_write.unwrap() == chunk.time_of_last_write.unwrap());
-        assert!(after_data_load < chunk.time_closing.unwrap());
-        assert!(chunk.time_closing.unwrap() < after_rollover);
+        assert!(start < chunk.time_of_first_write().unwrap());
+        assert!(chunk.time_of_first_write().unwrap() < after_data_load);
+        assert!(chunk.time_of_first_write().unwrap() == chunk.time_of_last_write().unwrap());
+        assert!(after_data_load < chunk.time_closing().unwrap());
+        assert!(chunk.time_closing().unwrap() < after_rollover);
     }
 
     #[tokio::test]
