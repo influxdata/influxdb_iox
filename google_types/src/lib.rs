@@ -12,6 +12,7 @@
 mod pb {
     pub mod google {
         pub mod protobuf {
+            use chrono::{NaiveDateTime, Utc};
             use std::convert::{TryFrom, TryInto};
 
             include!(concat!(env!("OUT_DIR"), "/google.protobuf.rs"));
@@ -33,6 +34,24 @@ mod pb {
                         seconds: value.as_secs() as _,
                         nanos: value.subsec_nanos() as _,
                     }
+                }
+            }
+
+            impl From<chrono::DateTime<Utc>> for Timestamp {
+                fn from(value: chrono::DateTime<Utc>) -> Self {
+                    Self {
+                        seconds: value.timestamp(),
+                        nanos: value.timestamp_subsec_nanos() as i32,
+                    }
+                }
+            }
+
+            impl From<Timestamp> for chrono::DateTime<Utc> {
+                fn from(value: Timestamp) -> Self {
+                    let Timestamp { seconds, nanos } = value;
+
+                    let dt = NaiveDateTime::from_timestamp(seconds, nanos as u32);
+                    chrono::DateTime::<Utc>::from_utc(dt, Utc)
                 }
             }
         }

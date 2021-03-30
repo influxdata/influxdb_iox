@@ -47,7 +47,7 @@ pub struct ChunkSummary {
     /// itself
     pub time_of_last_write: Option<DateTime<Utc>>,
 
-    /// Time at which this chunk was maked as closing. Note this is
+    /// Time at which this chunk was marked as closing. Note this is
     /// not the same as the timestamps on the data itself
     pub time_closing: Option<DateTime<Utc>>,
 }
@@ -97,11 +97,18 @@ impl From<ChunkSummary> for management::Chunk {
             Err(partition_key) => partition_key.as_ref().clone(),
         };
 
+        let time_of_first_write = time_of_first_write.map(|t| t.into());
+        let time_of_last_write = time_of_last_write.map(|t| t.into());
+        let time_closing = time_closing.map(|t| t.into());
+
         Self {
             partition_key,
             id,
             storage,
             estimated_bytes,
+            time_of_first_write,
+            time_of_last_write,
+            time_closing,
         }
     }
 }
@@ -129,15 +136,18 @@ impl TryFrom<management::Chunk> for ChunkSummary {
             partition_key,
             id,
             estimated_bytes,
-            ..
+            storage: _,
+            time_of_first_write,
+            time_of_last_write,
+            time_closing,
         } = proto;
 
         let estimated_bytes = estimated_bytes as usize;
         let partition_key = Arc::new(partition_key);
 
-        let time_of_first_write = None;
-        let time_of_last_write = None;
-        let time_closing = None;
+        let time_of_first_write = time_of_first_write.map(|t| t.into());
+        let time_of_last_write = time_of_last_write.map(|t| t.into());
+        let time_closing = time_closing.map(|t| t.into());
 
         Ok(Self {
             partition_key,
