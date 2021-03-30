@@ -643,5 +643,5 @@ fn normalize_chunks(chunks: Vec<Chunk>) -> Vec<Chunk> {
                 time_closing: None,
             }
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
 }
