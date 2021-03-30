@@ -571,7 +571,6 @@ impl Database for Db {
                     }
                 };
                 let mut chunk = chunk.write();
-                // TODO update the last read/write time of this partition
                 chunk.mutable_buffer().unwrap().write_entry(&entry).unwrap()
             }
         }
