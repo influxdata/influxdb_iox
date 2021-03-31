@@ -24,6 +24,12 @@
 version: 2.1
 
 commands:
+  custom_checkout:
+    description: Check out the code with HTTPS rather than CircleCI's default of SSH
+    steps:
+      - run:
+          name: Check out the code
+          command: git clone https://github.com/influxdata/influxdb_iox.git .
   rust_nightly:
     description: Install nightly Rust toolchain
     steps:
@@ -60,7 +66,7 @@ jobs:
         # "1" means line tables only, which is useful for panic tracebacks.
         RUSTFLAGS: "-C debuginfo=1"
     steps:
-      - checkout
+      - custom_checkout
       - rust_nightly
       - cache_restore
       - run:
@@ -75,7 +81,7 @@ jobs:
         # "1" means line tables only, which is useful for panic tracebacks.
         RUSTFLAGS: "-C debuginfo=1"
     steps:
-      - checkout
+      - custom_checkout
       - rust_nightly
       - cache_restore
       - run:
@@ -91,7 +97,7 @@ jobs:
         # "1" means line tables only, which is useful for panic tracebacks.
         RUSTFLAGS: "-C debuginfo=1"
     steps:
-      - checkout
+      - custom_checkout
       - rust_nightly
       - cache_restore
       - run:
@@ -112,7 +118,7 @@ jobs:
         # "1" means line tables only, which is useful for panic tracebacks.
         RUSTFLAGS: "-C debuginfo=1"
     steps:
-      - checkout
+      - custom_checkout
       - rust_nightly
       - cache_restore
       - run:
@@ -128,7 +134,7 @@ jobs:
     docker:
       - image: bufbuild/buf:0.40.0
     steps:
-      - checkout
+      - custom_checkout
       - run:
           name: buf lint
           command: buf lint
@@ -156,7 +162,7 @@ jobs:
         # "1" means line tables only, which is useful for panic tracebacks.
         RUSTFLAGS: "-C debuginfo=1"
     steps:
-      - checkout
+      - custom_checkout
       - rust_nightly
       - cache_restore
       - run:
@@ -189,7 +195,7 @@ jobs:
     machine: true
     resource_class: xlarge
     steps:
-      - checkout
+      - custom_checkout
       - run: |
           echo "$QUAY_PASS" | docker login quay.io --username $QUAY_USER --password-stdin
       - run: |
