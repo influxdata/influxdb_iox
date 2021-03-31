@@ -1,9 +1,4 @@
-use std::{
-    cmp,
-    collections::BTreeMap,
-    iter::FromIterator,
-    sync::Arc,
-};
+use std::{cmp, collections::BTreeMap, iter::FromIterator, sync::Arc};
 
 use crate::{
     column,
@@ -16,13 +11,23 @@ use data_types::{
 };
 use internal_types::{
     entry::{self, ClockValue},
-    schema::{builder::SchemaBuilder, Schema, TIME_COLUMN_NAME},
+    schema::{builder::SchemaBuilder, Schema, TIME_COLUMN_NAME, TIME_DATA_TIMEZONE},
     selection::Selection,
 };
 
 use snafu::{OptionExt, ResultExt, Snafu};
 
-use arrow_deps::{arrow, arrow::{array::{ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray, TimestampNanosecondArray, UInt64Array}, datatypes::DataType as ArrowDataType, record_batch::RecordBatch}};
+use arrow_deps::{
+    arrow,
+    arrow::{
+        array::{
+            ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray,
+            TimestampNanosecondArray, UInt64Array,
+        },
+        datatypes::DataType as ArrowDataType,
+        record_batch::RecordBatch,
+    },
+};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -354,11 +359,11 @@ impl Table {
         for col in &selection.cols {
             let column = self.column(col.column_id)?;
 
-            let array = match column {
+            let array: ArrayRef = match column {
                 Column::String(vals, _) => {
-                    let iter = vals.iter().map(|s| s.as_ref().map(|s| s.as_str()));
+                    let iter = vals.iter().map(|s| s.as_deref());
                     let array = StringArray::from_iter(iter);
-                    Arc::new(array) as ArrayRef
+                    Arc::new(array)
                 }
                 Column::Tag(vals, _) => {
                     let iter = vals.iter().map(|id| {
@@ -371,29 +376,32 @@ impl Table {
                     });
 
                     let array = StringArray::from_iter(iter);
-                    Arc::new(array) as ArrayRef
+                    Arc::new(array)
                 }
                 Column::F64(vals, _) => {
                     let array = Float64Array::from_iter(vals.iter());
-                    Arc::new(array) as ArrayRef
+                    Arc::new(array)
                 }
                 Column::I64(vals, _) => {
                     if col.column_name == TIME_COLUMN_NAME {
-                        let array = TimestampNanosecondArray::from_iter(vals.iter());
-                        Arc::new(array) as ArrayRef
-                    }
-                    else {
+                        //let array = TimestampNanosecondArray::from_iter(vals.iter());
+                        let timezone = TIME_DATA_TIMEZONE();
+                        // TODO: there is no reason that this needs an owned copy of the Vec...
+                        // should file a ticket with arrow to add something to avoid the clone
+                        let array = TimestampNanosecondArray::from_opt_vec(vals.clone(), timezone);
+                        Arc::new(array)
+                    } else {
                         let array = Int64Array::from_iter(vals.iter());
-                        Arc::new(array) as ArrayRef
+                        Arc::new(array)
                     }
                 }
                 Column::U64(vals, _) => {
                     let array = UInt64Array::from_iter(vals.iter());
-                    Arc::new(array) as ArrayRef
+                    Arc::new(array)
                 }
                 Column::Bool(vals, _) => {
                     let array = BooleanArray::from_iter(vals.iter());
-                    Arc::new(array) as ArrayRef
+                    Arc::new(array)
                 }
             };
 
