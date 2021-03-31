@@ -192,14 +192,14 @@ fn elapsed_seconds(a: DateTime<Utc>, b: DateTime<Utc>) -> u32 {
 /// Note: Does not check the chunk is the correct state
 fn can_move(rules: &LifecycleRules, chunk: &Chunk, now: DateTime<Utc>) -> bool {
     match (rules.mutable_linger_seconds, chunk.time_of_last_write()) {
-        (Some(linger), Some(last_write)) if elapsed_seconds(now, last_write) > linger.get() => {
+        (Some(linger), Some(last_write)) if elapsed_seconds(now, last_write) >= linger.get() => {
             match (
                 rules.mutable_minimum_age_seconds,
                 chunk.time_of_first_write(),
             ) {
                 (Some(min_age), Some(first_write)) => {
                     // Chunk can be moved if it is old enough
-                    elapsed_seconds(now, first_write) > min_age.get()
+                    elapsed_seconds(now, first_write) >= min_age.get()
                 }
                 // If no minimum age set - permit chunk movement
                 (None, _) => true,

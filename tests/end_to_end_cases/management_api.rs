@@ -657,7 +657,7 @@ async fn test_chunk_lifecycle() {
     assert_eq!(chunks.len(), 1);
     assert_eq!(chunks[0].storage, ChunkStorage::OpenMutableBuffer as i32);
 
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     let chunks = management_client
         .list_chunks(&db_name)
