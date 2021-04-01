@@ -8,7 +8,7 @@ use std::sync::{
 };
 
 use async_trait::async_trait;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use snafu::{OptionExt, ResultExt, Snafu};
 use tracing::{debug, info};
 
@@ -158,7 +158,7 @@ const STARTING_SEQUENCE: u64 = 1;
 /// itself. The catalog state can be observed (but not mutated) by things
 /// outside of the Db
 pub struct Db {
-    pub rules: DatabaseRules,
+    pub rules: RwLock<DatabaseRules>,
 
     /// The metadata catalog
     catalog: Arc<Catalog>,
@@ -187,6 +187,7 @@ impl Db {
         wal_buffer: Option<Buffer>,
         jobs: Arc<JobRegistry>,
     ) -> Self {
+        let rules = RwLock::new(rules);
         let wal_buffer = wal_buffer.map(Mutex::new);
         let read_buffer = Arc::new(read_buffer);
         let catalog = Arc::new(Catalog::new());
@@ -378,7 +379,7 @@ impl Db {
         partition_key: String,
         chunk_id: u32,
     ) -> Tracker<Job> {
-        let name = self.rules.name.clone();
+        let name = self.rules.read().name.clone();
         let (tracker, registration) = self.jobs.register(Job::CloseChunk {
             db_name: name.clone(),
             partition_key: partition_key.clone(),
@@ -482,16 +483,9 @@ impl Db {
 
     /// Returns true if this database can accept writes
     pub fn writeable(&self) -> bool {
-        !self.rules.lifecycle_rules.immutable
+        !self.rules.read().lifecycle_rules.immutable
     }
 }
-
-impl PartialEq for Db {
-    fn eq(&self, other: &Self) -> bool {
-        self.rules == other.rules
-    }
-}
-impl Eq for Db {}
 
 #[async_trait]
 impl Database for Db {
@@ -520,9 +514,12 @@ impl Database for Db {
     }
 
     fn store_replicated_write(&self, write: &ReplicatedWrite) -> Result<(), Self::Error> {
-        if !self.writeable() {
+        let rules = self.rules.read();
+        let mutable_size_threshold = rules.lifecycle_rules.mutable_size_threshold;
+        if rules.lifecycle_rules.immutable {
             return DatabaseNotWriteable {}.fail();
         }
+        std::mem::drop(rules);
 
         let entries = match write.write_buffer_batch().and_then(|batch| batch.entries()) {
             Some(entries) => entries,
@@ -554,7 +551,7 @@ impl Database for Db {
 
                 let size = mb_chunk.size();
 
-                if let Some(threshold) = self.rules.lifecycle_rules.mutable_size_threshold {
+                if let Some(threshold) = mutable_size_threshold {
                     if size > threshold.get() {
                         chunk.set_closing().expect("cannot close open chunk")
                     }
@@ -629,6 +626,7 @@ mod tests {
             },
             ..DatabaseRules::new()
         };
+        let rules = RwLock::new(rules);
         let db = Db { rules, ..db };
         assert!(!db.writeable());
 
@@ -848,8 +846,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_chunk_closing() {
-        let mut db = make_db();
-        db.rules.lifecycle_rules.mutable_size_threshold = Some(NonZeroUsize::new(2).unwrap());
+        let db = make_db();
+        db.rules.write().lifecycle_rules.mutable_size_threshold =
+            Some(NonZeroUsize::new(2).unwrap());
 
         let mut writer = TestLPWriter::default();
         writer.write_lp_string(&db, "cpu bar=1 10").unwrap();

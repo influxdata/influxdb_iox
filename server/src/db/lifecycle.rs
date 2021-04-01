@@ -13,6 +13,7 @@ use super::{
     catalog::chunk::{Chunk, ChunkState},
     Db,
 };
+use data_types::database_rules::SortOrder;
 
 /// Handles the lifecycle of chunks within a Db
 pub struct LifecycleManager {
@@ -48,11 +49,11 @@ trait ChunkMover {
     }
 
     /// Returns the lifecycle policy
-    fn rules(&self) -> &LifecycleRules;
+    fn rules(&self) -> LifecycleRules;
 
     /// Returns a list of chunks sorted in the order
     /// they should prioritised
-    fn chunks(&self) -> Vec<Arc<RwLock<Chunk>>>;
+    fn chunks(&self, order: &SortOrder) -> Vec<Arc<RwLock<Chunk>>>;
 
     /// Returns a boolean indicating if a move is in progress
     fn is_move_active(&self) -> bool;
@@ -65,7 +66,8 @@ trait ChunkMover {
 
     /// The core policy logic
     fn check_for_work(&mut self, now: DateTime<Utc>) {
-        let chunks = self.chunks();
+        let rules = self.rules();
+        let chunks = self.chunks(&rules.sort_order);
 
         let mut buffer_size = 0;
 
@@ -83,7 +85,7 @@ trait ChunkMover {
             let chunk_guard = chunk.upgradable_read();
             buffer_size += Self::chunk_size(&*chunk_guard);
 
-            if !move_active && can_move(self.rules(), &*chunk_guard, now) {
+            if !move_active && can_move(&rules, &*chunk_guard, now) {
                 match chunk_guard.state() {
                     ChunkState::Open(_) => {
                         let mut chunk_guard = RwLockUpgradableReadGuard::upgrade(chunk_guard);
@@ -113,14 +115,14 @@ trait ChunkMover {
             // TODO: Find and recover cancelled move jobs (#1099)
         }
 
-        if let Some(soft_limit) = self.rules().buffer_size_soft {
+        if let Some(soft_limit) = rules.buffer_size_soft {
             let mut chunks = chunks.iter();
 
             while buffer_size > soft_limit.get() {
                 match chunks.next() {
                     Some(chunk) => {
                         let chunk_guard = chunk.read();
-                        if self.rules().drop_non_persisted
+                        if rules.drop_non_persisted
                             || matches!(chunk_guard.state(), ChunkState::Moved(_))
                         {
                             let partition_key = chunk_guard.key().to_string();
@@ -144,12 +146,12 @@ trait ChunkMover {
 }
 
 impl ChunkMover for LifecycleManager {
-    fn rules(&self) -> &LifecycleRules {
-        &self.db.rules.lifecycle_rules
+    fn rules(&self) -> LifecycleRules {
+        self.db.rules.read().lifecycle_rules.clone()
     }
 
-    fn chunks(&self) -> Vec<Arc<RwLock<Chunk>>> {
-        self.db.catalog.chunks_sorted_by(&self.rules().sort_order)
+    fn chunks(&self, sort_order: &SortOrder) -> Vec<Arc<RwLock<Chunk>>> {
+        self.db.catalog.chunks_sorted_by(sort_order)
     }
 
     fn is_move_active(&self) -> bool {
@@ -223,7 +225,11 @@ mod tests {
         DateTime::from_utc(chrono::NaiveDateTime::from_timestamp(secs, 0), Utc)
     }
 
-    fn new_chunk(id: u32, time_of_first_write: Option<i64>, time_of_last_write: Option<i64>) -> Chunk {
+    fn new_chunk(
+        id: u32,
+        time_of_first_write: Option<i64>,
+        time_of_last_write: Option<i64>,
+    ) -> Chunk {
         let mut chunk = Chunk::new_open("", id);
         chunk.set_timestamps(
             time_of_first_write.map(from_secs),
@@ -267,11 +273,11 @@ mod tests {
             20
         }
 
-        fn rules(&self) -> &LifecycleRules {
-            &self.rules
+        fn rules(&self) -> LifecycleRules {
+            self.rules.clone()
         }
 
-        fn chunks(&self) -> Vec<Arc<RwLock<Chunk>>> {
+        fn chunks(&self, _: &SortOrder) -> Vec<Arc<RwLock<Chunk>>> {
             self.chunks.clone()
         }
 
