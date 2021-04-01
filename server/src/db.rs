@@ -436,11 +436,6 @@ impl Db {
 
         info!("finished background worker");
     }
-
-    /// Returns true if this database can accept writes
-    pub fn writeable(&self) -> bool {
-        !self.rules.read().lifecycle_rules.immutable
-    }
 }
 
 #[async_trait]
@@ -584,7 +579,6 @@ mod tests {
         };
         let rules = RwLock::new(rules);
         let db = Db { rules, ..db };
-        assert!(!db.writeable());
 
         let mut writer = TestLPWriter::default();
         let res = writer.write_lp_string(&db, "cpu bar=1 10");
