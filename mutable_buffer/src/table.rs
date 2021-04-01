@@ -21,7 +21,7 @@ use internal_types::{
 
 use snafu::{OptionExt, ResultExt, Snafu};
 
-use arrow_deps::{arrow, arrow::{array::{ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray, Time64NanosecondArray, UInt64Array}, datatypes::DataType as ArrowDataType, record_batch::RecordBatch}};
+use arrow_deps::{arrow, arrow::{array::{ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray, TimestampNanosecondArray, UInt64Array}, datatypes::DataType as ArrowDataType, record_batch::RecordBatch}};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -359,7 +359,7 @@ impl Table {
                 }
                 Column::I64(vals, _) => {
                     if col.column_name == TIME_COLUMN_NAME {
-                        let array = Time64NanosecondArray::from_iter(vals.iter());
+                        let array = TimestampNanosecondArray::from_iter(vals.iter());
                         Arc::new(array) as ArrayRef
                     }
                     else {
