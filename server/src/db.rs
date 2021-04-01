@@ -469,7 +469,7 @@ impl Db {
         while !shutdown.is_cancelled() {
             self.worker_iterations.fetch_add(1, Ordering::Relaxed);
 
-            lifecycle_manager.poll();
+            lifecycle_manager.check_for_work();
 
             tokio::select! {
                 _ = interval.tick() => {},
