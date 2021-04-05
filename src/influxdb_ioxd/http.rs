@@ -396,7 +396,7 @@ async fn parse_body(req: hyper::Request<Body>) -> Result<Bytes, ApplicationError
     let body = body.freeze();
 
     // apply any content encoding needed
-    let body = if ungzip {
+    if ungzip {
         use std::io::Read;
         let decoder = flate2::read::GzDecoder::new(&body[..]);
 
@@ -407,12 +407,10 @@ async fn parse_body(req: hyper::Request<Body>) -> Result<Bytes, ApplicationError
         decoder
             .read_to_end(&mut decoded_data)
             .context(ReadingBodyAsGzip)?;
-        decoded_data.into()
+        Ok(decoded_data.into())
     } else {
-        body
-    };
-
-    Ok(body)
+        Ok(body)
+    }
 }
 
 #[observability_deps::instrument(level = "debug")]
