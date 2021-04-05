@@ -1,7 +1,8 @@
 use super::run::Config;
 use observability_deps::{
-    opentelemetry_prometheus,
+    opentelemetry, opentelemetry_prometheus,
     prometheus::{Encoder, TextEncoder},
+    tracing::log::warn,
 };
 use parking_lot::{const_rwlock, RwLock};
 
@@ -10,12 +11,36 @@ use parking_lot::{const_rwlock, RwLock};
 static PROMETHEUS_EXPORTER: RwLock<Option<opentelemetry_prometheus::PrometheusExporter>> =
     const_rwlock(None);
 
-/// Initializes metrics.
+/// Initializes metrics. See [`meter`] for example usage
+pub fn init_metrics(_config: &Config) {
+    // TODO add flags to config, to configure the OpenTelemetry exporter (OTLP)
+    // This sets the global meter provider, for other code to use
+    let exporter = opentelemetry_prometheus::exporter().init();
+    init_metrics_internal(exporter)
+}
+
+#[cfg(test)]
+pub fn init_metrics_for_test() {
+    // Plan to skip all config flags
+    let exporter = opentelemetry_prometheus::exporter().init();
+    init_metrics_internal(exporter)
+}
+
+pub fn init_metrics_internal(exporter: opentelemetry_prometheus::PrometheusExporter) {
+    let mut guard = PROMETHEUS_EXPORTER.write();
+    if guard.is_some() {
+        warn!("metrics were already initialized, overwriting configuration");
+    }
+    *guard = Some(exporter);
+}
+
+/// Returns the global IOx [`Meter`] for reporting metrics
 ///
 /// # Example
 ///
 /// ```
-/// let meter = opentelemetry::global::meter("iox");
+/// let meter = crate::influxdb_ioxd::metrics::meter();
+///
 /// let counter = meter
 ///     .u64_counter("a.counter")
 ///     .with_description("Counts things")
@@ -28,12 +53,8 @@ static PROMETHEUS_EXPORTER: RwLock<Option<opentelemetry_prometheus::PrometheusEx
 /// counter.add(100, &[KeyValue::new("key", "value")]);
 /// recorder.record(100, &[KeyValue::new("key", "value")]);
 /// ```
-pub fn init_metrics(_config: &Config) {
-    // TODO add flags to config, to configure the OpenTelemetry exporter (OTLP)
-    // This sets the global meter provider, for other code to use
-    let exporter = opentelemetry_prometheus::exporter().init();
-    let mut guard = PROMETHEUS_EXPORTER.write();
-    *guard = Some(exporter);
+pub fn meter() -> opentelemetry::metrics::Meter {
+    opentelemetry::global::meter("iox")
 }
 
 /// Gets current metrics state, in UTF-8 encoded Prometheus Exposition Format.

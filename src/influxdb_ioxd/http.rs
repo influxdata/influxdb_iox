@@ -396,7 +396,7 @@ async fn parse_body(req: hyper::Request<Body>) -> Result<Bytes, ApplicationError
     let body = body.freeze();
 
     // apply any content encoding needed
-    if ungzip {
+    let body = if ungzip {
         use std::io::Read;
         let decoder = flate2::read::GzDecoder::new(&body[..]);
 
@@ -407,10 +407,12 @@ async fn parse_body(req: hyper::Request<Body>) -> Result<Bytes, ApplicationError
         decoder
             .read_to_end(&mut decoded_data)
             .context(ReadingBodyAsGzip)?;
-        Ok(decoded_data.into())
+        decoded_data.into()
     } else {
-        Ok(body)
-    }
+        body
+    };
+
+    Ok(body)
 }
 
 #[observability_deps::instrument(level = "debug")]
@@ -437,18 +439,16 @@ where
         .collect::<Result<Vec<_>, influxdb_line_protocol::Error>>()
         .context(ParsingLineProtocol)?;
 
-    debug!(
-        "Inserting {} lines into database {} (org {} bucket {})",
-        lines.len(),
-        db_name,
-        write_info.org,
-        write_info.bucket
-    );
+    debug!(num_lines=lines.len(), %db_name, org=%write_info.org, bucket=%write_info.bucket, "inserting lines into database");
 
-    server
-        .write_lines(&db_name, &lines)
-        .await
-        .map_err(|e| match e {
+    server.write_lines(&db_name, &lines).await.map_err(|e| {
+        metrics::meter()
+            .u64_counter("ingest.lp.lines.errors")
+            .with_description("line protocol formatted lines which were rejected")
+            .init()
+            .add(lines.len() as u64, &[]);
+
+        match e {
             server::Error::DatabaseNotFound { .. } => ApplicationError::DatabaseNotFound {
                 name: db_name.to_string(),
             },
@@ -457,7 +457,21 @@ where
                 bucket_name: write_info.bucket.clone(),
                 source: Box::new(e),
             },
-        })?;
+        }
+    })?;
+
+    metrics::meter()
+        .u64_counter("ingest.lp.lines.success")
+        .with_description("line protocol formatted lines which were successfully loaded")
+        .init()
+        .add(lines.len() as u64, &[]);
+
+    metrics::meter()
+        .u64_counter("ingest.lp.bytes.success")
+        .with_description("line protocol formatted bytes which were successfully loaded")
+        .init()
+        .add(body.len() as u64, &[]);
+
     Ok(Response::builder()
         .status(StatusCode::NO_CONTENT)
         .body(Body::empty())
@@ -728,6 +742,7 @@ mod tests {
     use serde::de::DeserializeOwned;
     use server::{db::Db, ConnectionManagerImpl};
     use std::num::NonZeroU32;
+    use test_helpers::assert_contains;
 
     #[tokio::test]
     async fn test_health() {
@@ -791,6 +806,43 @@ mod tests {
             "+----------------+--------------+-------+-----------------+------------+",
         ];
         assert_table_eq!(expected, &batches);
+    }
+
+    #[tokio::test]
+    async fn test_write_metrics() {
+        metrics::init_metrics_for_test();
+        let test_storage = Arc::new(AppServer::new(
+            ConnectionManagerImpl {},
+            Arc::new(ObjectStore::new_in_memory(InMemory::new())),
+        ));
+        test_storage.set_id(1);
+        test_storage
+            .create_database("MyOrg_MyBucket", DatabaseRules::new())
+            .await
+            .unwrap();
+        let server_url = test_server(Arc::clone(&test_storage));
+
+        let client = Client::new();
+
+        let lp_data = "h2o_temperature,location=santa_monica,state=CA surface_degrees=65.2,bottom_degrees=50.4 1568756160";
+
+        // send good data
+        let bucket_name = "MyBucket";
+        let org_name = "MyOrg";
+        client
+            .post(&format!(
+                "{}/api/v2/write?bucket={}&org={}",
+                server_url, bucket_name, org_name
+            ))
+            .body(lp_data)
+            .send()
+            .await
+            .expect("sent data");
+
+        let metrics_string = String::from_utf8(metrics::metrics_as_text()).unwrap();
+        assert_contains!(&metrics_string, "ingest_lp_bytes_success 588");
+        assert_contains!(&metrics_string, "ingest_lp_lines_errors 0");
+        assert_contains!(&metrics_string, "ingest_lp_lines_success 6");
     }
 
     /// Sets up a test database with some data for testing the query endpoint
