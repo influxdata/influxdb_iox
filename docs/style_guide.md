@@ -251,3 +251,48 @@ close_writer.context(WritingError {
     message: String::from("Error while closing the table writer"),
 })?;
 ```
+
+## Tests
+
+### Don't return `Result` from test functions
+
+At the time of this writing, if you return `Result` from test functions to use `?` in the test
+function body and an `Err` value is returned, the test failure message is not particularly helpful.
+Therefore, prefer not having a return type for test functions and instead using `expect` or
+`unwrap` in test function bodies.
+
+*Good*:
+
+```rust
+#[test]
+fn google_cloud() {
+    let config = Config::new();
+    let integration = ObjectStore::new_google_cloud_storage(GoogleCloudStorage::new(
+        config.service_account,
+        config.bucket,
+    ));
+
+    put_get_delete_list(&integration).unwrap();
+    list_with_delimiter(&integration).unwrap();
+}
+```
+
+*Bad*:
+
+```rust
+type TestError = Box<dyn std::error::Error + Send + Sync + 'static>;
+type Result<T, E = TestError> = std::result::Result<T, E>;
+
+#[test]
+fn google_cloud() -> Result<()> {
+    let config = Config::new();
+    let integration = ObjectStore::new_google_cloud_storage(GoogleCloudStorage::new(
+        config.service_account,
+        config.bucket,
+    ));
+
+    put_get_delete_list(&integration)?;
+    list_with_delimiter(&integration)?;
+    Ok(())
+}
+```
