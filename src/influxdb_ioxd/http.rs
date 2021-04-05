@@ -29,7 +29,10 @@ use bytes::{Bytes, BytesMut};
 use futures::{self, StreamExt};
 use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use hyper::{Body, Method, Request, Response, StatusCode};
-use observability_deps::tracing::{self, debug, error, info};
+use observability_deps::{
+    opentelemetry::KeyValue,
+    tracing::{self, debug, error, info},
+};
 use routerify::{prelude::*, Middleware, RequestInfo, Router, RouterError, RouterService};
 use serde::Deserialize;
 use snafu::{OptionExt, ResultExt, Snafu};
@@ -439,12 +442,18 @@ where
 
     debug!(num_lines=lines.len(), %db_name, org=%write_info.org, bucket=%write_info.bucket, "inserting lines into database");
 
+    let metric_kv = [
+        KeyValue::new("db_name", db_name.to_string()),
+        KeyValue::new("org", write_info.org.to_string()),
+        KeyValue::new("bucket", write_info.bucket.to_string()),
+    ];
+
     server.write_lines(&db_name, &lines).await.map_err(|e| {
         metrics::meter()
             .u64_counter("ingest.lp.lines.errors")
             .with_description("line protocol formatted lines which were rejected")
             .init()
-            .add(lines.len() as u64, &[]);
+            .add(lines.len() as u64, &metric_kv);
 
         match e {
             server::Error::DatabaseNotFound { .. } => ApplicationError::DatabaseNotFound {
@@ -462,13 +471,13 @@ where
         .u64_counter("ingest.lp.lines.success")
         .with_description("line protocol formatted lines which were successfully loaded")
         .init()
-        .add(lines.len() as u64, &[]);
+        .add(lines.len() as u64, &metric_kv);
 
     metrics::meter()
         .u64_counter("ingest.lp.bytes.success")
         .with_description("line protocol formatted bytes which were successfully loaded")
         .init()
-        .add(body.len() as u64, &[]);
+        .add(body.len() as u64, &metric_kv);
 
     Ok(Response::builder()
         .status(StatusCode::NO_CONTENT)
@@ -815,7 +824,7 @@ mod tests {
         ));
         test_storage.set_id(1);
         test_storage
-            .create_database("MyOrg_MyBucket", DatabaseRules::new())
+            .create_database("MetricsOrg_MetricsBucket", DatabaseRules::new())
             .await
             .unwrap();
         let server_url = test_server(Arc::clone(&test_storage));
@@ -825,8 +834,8 @@ mod tests {
         let lp_data = "h2o_temperature,location=santa_monica,state=CA surface_degrees=65.2,bottom_degrees=50.4 1568756160";
 
         // send good data
-        let bucket_name = "MyBucket";
-        let org_name = "MyOrg";
+        let org_name = "MetricsOrg";
+        let bucket_name = "MetricsBucket";
         client
             .post(&format!(
                 "{}/api/v2/write?bucket={}&org={}",
@@ -837,13 +846,19 @@ mod tests {
             .await
             .expect("sent data");
 
-        // TODO: check values. Note we can't check the absolute metric
-        // values here because the other tests may have written
-        // values concurrently.
         let metrics_string = String::from_utf8(metrics::metrics_as_text()).unwrap();
-        assert_contains!(&metrics_string, "ingest_lp_bytes_success");
-        assert_contains!(&metrics_string, "ingest_lp_lines_errors");
-        assert_contains!(&metrics_string, "ingest_lp_lines_success");
+        assert_contains!(
+            &metrics_string,
+            r#"ingest_lp_lines_success{bucket="MetricsBucket",db_name="MetricsOrg_MetricsBucket",org="MetricsOrg"} 1"#
+        );
+        assert_contains!(
+            &metrics_string,
+            r#"ingest_lp_lines_errors{bucket="NotMyBucket",db_name="MyOrg_NotMyBucket",org="MyOrg"} 0"#
+        );
+        assert_contains!(
+            &metrics_string,
+            r#"lp_bytes_success{bucket="MetricsBucket",db_name="MetricsOrg_MetricsBucket",org="MetricsOrg"} 98"#
+        );
     }
 
     /// Sets up a test database with some data for testing the query endpoint
