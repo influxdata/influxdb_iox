@@ -22,6 +22,7 @@ members = [
     "mem_qe",
     "mutable_buffer",
     "object_store",
+    "observer",
     "packers",
     "panic_logging",
     "query",
