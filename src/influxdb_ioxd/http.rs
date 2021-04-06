@@ -21,6 +21,7 @@ use data_types::{
 use influxdb_iox_client::format::QueryOutputFormat;
 use influxdb_line_protocol::parse_lines;
 use object_store::ObjectStoreApi;
+use once_cell::sync::Lazy;
 use query::{frontend::sql::SQLQueryPlanner, Database, DatabaseStore};
 use server::{ConnectionManager, Server as AppServer};
 
@@ -30,7 +31,7 @@ use futures::{self, StreamExt};
 use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use hyper::{Body, Method, Request, Response, StatusCode};
 use observability_deps::{
-    opentelemetry::KeyValue,
+    opentelemetry::{metrics::Counter, KeyValue},
     tracing::{self, debug, error, info},
 };
 use routerify::{prelude::*, Middleware, RequestInfo, Router, RouterError, RouterService};
@@ -301,6 +302,39 @@ impl ApplicationError {
     }
 }
 
+/// Contains module-wide metrics
+struct HttpMetrics {
+    /// How many line protocol lines were parsed but rejected
+    lp_lines_errors: Counter<u64>,
+    /// How many line protocol lines were parsed and successfully loaded
+    lp_lines_success: Counter<u64>,
+    /// How many bytes of protocol line were parsed and successfully loaded
+    lp_bytes_success: Counter<u64>,
+}
+
+static METRICS: Lazy<HttpMetrics> = Lazy::new(HttpMetrics::new);
+
+impl HttpMetrics {
+    fn new() -> Self {
+        Self {
+            lp_lines_errors: metrics::meter()
+                .u64_counter("ingest.lp.lines.errors")
+                .with_description("line protocol formatted lines which were rejected")
+                .init(),
+
+            lp_lines_success: metrics::meter()
+                .u64_counter("ingest.lp.lines.success")
+                .with_description("line protocol formatted lines which were successfully loaded")
+                .init(),
+
+            lp_bytes_success: metrics::meter()
+                .u64_counter("ingest.lp.bytes.success")
+                .with_description("line protocol formatted bytes which were successfully loaded")
+                .init(),
+        }
+    }
+}
+
 const MAX_SIZE: usize = 10_485_760; // max write request size of 10MB
 
 fn router<M>(server: Arc<AppServer<M>>) -> Router<Body, ApplicationError>
@@ -449,11 +483,7 @@ where
     ];
 
     server.write_lines(&db_name, &lines).await.map_err(|e| {
-        metrics::meter()
-            .u64_counter("ingest.lp.lines.errors")
-            .with_description("line protocol formatted lines which were rejected")
-            .init()
-            .add(lines.len() as u64, &metric_kv);
+        METRICS.lp_lines_errors.add(lines.len() as u64, &metric_kv);
 
         match e {
             server::Error::DatabaseNotFound { .. } => ApplicationError::DatabaseNotFound {
@@ -467,17 +497,8 @@ where
         }
     })?;
 
-    metrics::meter()
-        .u64_counter("ingest.lp.lines.success")
-        .with_description("line protocol formatted lines which were successfully loaded")
-        .init()
-        .add(lines.len() as u64, &metric_kv);
-
-    metrics::meter()
-        .u64_counter("ingest.lp.bytes.success")
-        .with_description("line protocol formatted bytes which were successfully loaded")
-        .init()
-        .add(body.len() as u64, &metric_kv);
+    METRICS.lp_lines_success.add(lines.len() as u64, &metric_kv);
+    METRICS.lp_bytes_success.add(body.len() as u64, &metric_kv);
 
     Ok(Response::builder()
         .status(StatusCode::NO_CONTENT)
@@ -822,9 +843,11 @@ mod tests {
             ConnectionManagerImpl {},
             Arc::new(ObjectStore::new_in_memory(InMemory::new())),
         ));
-        test_storage.set_id(1);
+        test_storage.set_id(NonZeroU32::new(1).unwrap()).unwrap();
         test_storage
-            .create_database("MetricsOrg_MetricsBucket", DatabaseRules::new())
+            .create_database(DatabaseRules::new(
+                DatabaseName::new("MetricsOrg_MetricsBucket").unwrap(),
+            ))
             .await
             .unwrap();
         let server_url = test_server(Arc::clone(&test_storage));
