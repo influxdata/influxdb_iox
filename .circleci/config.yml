@@ -133,6 +133,15 @@ jobs:
           name: buf lint
           command: buf lint
 
+  editor-config-lint:
+    docker:
+      - image: greut/eclint:v0.2.8
+    steps:
+      - checkout
+      - run:
+          name: eclint
+          command: eclint
+
   # Compile a cargo "release" profile binary for branches that end in `/perf`
   #
   # Uses the latest ci_image (influxdb/rust below) to build a release binary and
@@ -208,6 +217,7 @@ workflows:
       - fmt
       - lint
       - protobuf-lint
+      - editor-config-lint
       - test
       - build
 

@@ -5,7 +5,7 @@ about: Create a report to help us improve
 
 <!--
 
-Thank you for reporting a bug in InfluxDB IOx. 
+Thank you for reporting a bug in InfluxDB IOx.
 
 Have you read the contributing section of the README? Please do if you haven't.
 https://github.com/influxdata/influxdb_iox/blob/main/README.md

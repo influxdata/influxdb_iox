@@ -11,7 +11,7 @@ composed together to build a feature set custom to the application's needs.
 ### The `tracing` framework
 
 Rust has the excellent [`tracing` crate] to facilitate collection of application
-events with associated contextual information. 
+events with associated contextual information.
 
 The most user visible components provided are the `debug!()`, `info!()`, etc
 function-like macros, and the `#[tracing::instrument]` attribute macro.

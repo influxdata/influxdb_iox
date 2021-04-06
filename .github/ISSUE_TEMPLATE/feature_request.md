@@ -5,7 +5,7 @@ about: Opening a feature request kicks off a discussion
 
 <!--
 
-Thank you for suggesting an idea to improve InfluxDB IOx. 
+Thank you for suggesting an idea to improve InfluxDB IOx.
 
 Have you read the contributing section of the README? Please do if you haven't.
 https://github.com/influxdata/influxdb_iox/blob/main/README.md
