@@ -456,7 +456,7 @@ impl Db {
         // Create a storage to save data of this chunk
         // Todo: this must be gotten from server or somewhere
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
-        let storage = Storage::new(store, 100, self.rules.read().name.clone()); // todo: replace with actual writer_id & db_name
+        let storage = Storage::new(store, 100, self.rules.read().name.to_string()); // todo: replace with actual writer_id & db_name
 
         for stats in table_stats {
             debug!(%partition_key, %chunk_id, table=%stats.name, "loading table to object store");
