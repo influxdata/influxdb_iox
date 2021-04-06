@@ -136,7 +136,7 @@ trait ChunkMover {
                         }
                     }
                     None => {
-                        error!("failed to find chunk to evict");
+                        debug!("failed to find chunk to evict");
                         break;
                     }
                 }
