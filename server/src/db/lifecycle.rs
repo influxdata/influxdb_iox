@@ -143,7 +143,8 @@ trait ChunkMover {
                         }
                     }
                     None => {
-                        warn!(db_name=self.db_name(), "soft limited exceeded, but no chunks found that can be evicted. Check lifecycle rules");
+                        warn!(db_name=self.db_name(), soft_limit, buffer_size,
+                              "soft limited exceeded, but no chunks found that can be evicted. Check lifecycle rules");
                         break;
                     }
                 }
