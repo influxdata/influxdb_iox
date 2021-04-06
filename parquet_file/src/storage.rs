@@ -77,7 +77,6 @@ impl Storage {
         //    <writer id>/<database>/data/<partition key>/<chunk id>/<table
         // name>.parquet
 
-        // let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
         let mut path = self.object_store.new_path();
         path.push_dir(self.writer_id.to_string());
         path.push_dir(self.db_name.clone());

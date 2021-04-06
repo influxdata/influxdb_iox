@@ -118,20 +118,6 @@ pub enum Error {
         source: parquet_file::storage::Error,
     },
 
-    // #[snafu(display("Error opening Parquet Writer: {}", source))]
-    // OpeningParquetWriter {
-    //     source: parquet::errors::ParquetError,
-    // },
-
-    // #[snafu(display("Error writing Parquet to memory: {}", source))]
-    // WritingParquetToMemory {
-    //     source: parquet::errors::ParquetError,
-    // },
-
-    // #[snafu(display("Error closing Parquet Writer: {}", source))]
-    // ClosingParquetWriter {
-    //     source: parquet::errors::ParquetError,
-    // },
     #[snafu(display("Unknown Mutable Buffer Chunk {}", chunk_id))]
     UnknownMutableBufferChunk { chunk_id: u32 },
 
@@ -473,14 +459,14 @@ impl Db {
         // Create a storage to save data of this chunk
         // Todo: this must be gotten from server or somewhere
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
-        let storage = Storage::new(store, 100, "db_name".to_string()); // todo: replace with actual writer_id & db_name
+        let storage = Storage::new(store, 100, self.rules.read().name.clone()); // todo: replace with actual writer_id & db_name
 
         for stats in table_stats {
             debug!(%partition_key, %chunk_id, table=%stats.name, "loading table to object store");
 
             let predicate = read_buffer::Predicate::default();
 
-            // Get RecordrdBatchStream of data from the read buffer chunk
+            // Get RecordBatchStream of data from the read buffer chunk
             // TODO: When we have the rb_chunk, the following code will be replaced with one
             // line let stream = rb_chunk.read_filter()
             let read_results = read_buffer
