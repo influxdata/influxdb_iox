@@ -2,7 +2,7 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use observability_deps::tracing::{error, info};
+use observability_deps::tracing::{debug, info};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 
 use data_types::{database_rules::LifecycleRules, error::ErrorLogger, job::Job};
