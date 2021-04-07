@@ -1,10 +1,68 @@
 use super::run::Config;
 use observability_deps::{
-    opentelemetry, opentelemetry_prometheus,
+    opentelemetry::{self, metrics::Counter},
+    opentelemetry_prometheus,
     prometheus::{Encoder, TextEncoder},
     tracing::log::warn,
 };
+use once_cell::sync::Lazy;
 use parking_lot::{const_rwlock, RwLock};
+
+///! IOx metrics interface
+
+/// Contains the counters for system wide metrics.
+///
+/// These are gouped into a single crate-wide reference to keep all
+/// metrics definitions close together, so it is be clear what the
+/// realm of possibilities for IOx metrics is.
+///
+/// We think this structure will also make it easier to document and
+/// refactor metrics easier.
+pub struct SystemMetrics {
+    /// How many line protocol lines were parsed but rejected
+    pub lp_lines_errors: Counter<u64>,
+    /// How many line protocol lines were parsed and successfully loaded
+    pub lp_lines_success: Counter<u64>,
+    /// How many bytes of protocol line were parsed and successfully loaded
+    pub lp_bytes_success: Counter<u64>,
+}
+
+/// crate wide metrics
+///
+/// To use:
+///
+/// ```
+/// use metrics::IOXD_METRICS;
+///
+/// // Record that 64 lines of line protocol were processed
+/// let metric_kv = [
+///   KeyValue::new("db_name", "my awesome db name"),
+/// ];
+///
+/// IOXD_METRICS.lp_lines_success.add(lines.len() as u64, &metric_kv);
+/// ```
+pub static IOXD_METRICS: Lazy<SystemMetrics> = Lazy::new(SystemMetrics::new);
+
+impl SystemMetrics {
+    fn new() -> Self {
+        Self {
+            lp_lines_errors: meter()
+                .u64_counter("ingest.lp.lines.errors")
+                .with_description("line protocol formatted lines which were rejected")
+                .init(),
+
+            lp_lines_success: meter()
+                .u64_counter("ingest.lp.lines.success")
+                .with_description("line protocol formatted lines which were successfully loaded")
+                .init(),
+
+            lp_bytes_success: meter()
+                .u64_counter("ingest.lp.bytes.success")
+                .with_description("line protocol formatted bytes which were successfully loaded")
+                .init(),
+        }
+    }
+}
 
 // TODO(jacobmarble): better way to write-once-read-many without a lock
 // TODO(jacobmarble): generic OTel exporter, rather than just prometheus
@@ -34,7 +92,8 @@ pub fn init_metrics_internal(exporter: opentelemetry_prometheus::PrometheusExpor
     *guard = Some(exporter);
 }
 
-/// Returns the global IOx [`Meter`] for reporting metrics
+/// Returns a global [`Meter`] for reporting metrics. See
+/// [`IOXD_METRICS`] for specific crate wide counters.
 ///
 /// # Example
 ///
@@ -53,7 +112,7 @@ pub fn init_metrics_internal(exporter: opentelemetry_prometheus::PrometheusExpor
 /// counter.add(100, &[KeyValue::new("key", "value")]);
 /// recorder.record(100, &[KeyValue::new("key", "value")]);
 /// ```
-pub fn meter() -> opentelemetry::metrics::Meter {
+fn meter() -> opentelemetry::metrics::Meter {
     opentelemetry::global::meter("iox")
 }
 
