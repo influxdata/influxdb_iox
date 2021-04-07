@@ -842,6 +842,17 @@ mod tests {
             .await
             .expect("sent data");
 
+        // Generate an error
+        client
+            .post(&format!(
+                "{}/api/v2/write?bucket=NotMyBucket&org=NotMyOrg",
+                server_url,
+            ))
+            .body(lp_data)
+            .send()
+            .await
+            .unwrap();
+
         let metrics_string = String::from_utf8(metrics::metrics_as_text()).unwrap();
         assert_contains!(
             &metrics_string,
@@ -849,7 +860,7 @@ mod tests {
         );
         assert_contains!(
             &metrics_string,
-            r#"ingest_lp_lines_errors{bucket="NotMyBucket",db_name="MyOrg_NotMyBucket",org="MyOrg"} 0"#
+            r#"ingest_lp_lines_errors{bucket="NotMyBucket",db_name="NotMyOrg_NotMyBucket",org="NotMyOrg"} 1"#
         );
         assert_contains!(
             &metrics_string,
