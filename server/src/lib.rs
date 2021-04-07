@@ -194,6 +194,7 @@ pub struct Server<M: ConnectionManager> {
     jobs: Arc<JobRegistry>,
 }
 
+//impl<M: ConnectionManager + std::marker::Send + Sync> Server<M> {
 impl<M: ConnectionManager> Server<M> {
     pub fn new(connection_manager: M, store: Arc<ObjectStore>) -> Self {
         let jobs = Arc::new(JobRegistry::new());
@@ -225,7 +226,9 @@ impl<M: ConnectionManager> Server<M> {
     }
 
     /// Tells the server the set of rules for a database.
-    pub async fn create_database(&self, rules: DatabaseRules) -> Result<()> {
+    pub async fn create_database(&self, rules: DatabaseRules,
+        server_id: NonZeroU32,
+        object_store: Arc<ObjectStore>) -> Result<()> {
         // Return an error if this server hasn't yet been setup with an id
         self.require_id()?;
         let db_reservation = self.config.create_db(rules)?;
@@ -233,7 +236,7 @@ impl<M: ConnectionManager> Server<M> {
         self.persist_database_rules(db_reservation.rules().clone())
             .await?;
 
-        db_reservation.commit();
+        db_reservation.commit(server_id, object_store);
 
         Ok(())
     }
@@ -286,6 +289,7 @@ impl<M: ConnectionManager> Server<M> {
             .map(|mut path| {
                 let store = Arc::clone(&self.store);
                 let config = Arc::clone(&self.config);
+                let server_id = self.require_id().unwrap(); //todo: return error instead
 
                 path.set_file_name(DB_RULES_FILE_NAME);
 
@@ -311,7 +315,7 @@ impl<M: ConnectionManager> Server<M> {
                         }
                         Ok(rules) => match config.create_db(rules) {
                             Err(e) => error!("error adding database to config: {}", e),
-                            Ok(handle) => handle.commit(),
+                            Ok(handle) => handle.commit(server_id, store),
                         },
                     }
                 })
@@ -540,7 +544,7 @@ where
         let db = match self.db(&db_name) {
             Some(db) => db,
             None => {
-                self.create_database(DatabaseRules::new(db_name.clone()))
+                self.create_database(DatabaseRules::new(db_name.clone()), self.require_id()?, Arc::clone(&self.store))
                     .await?;
                 self.db(&db_name).expect("db not inserted")
             }
@@ -664,7 +668,7 @@ mod tests {
         let server = Server::new(manager, store);
 
         let rules = DatabaseRules::new(DatabaseName::new("foo").unwrap());
-        let resp = server.create_database(rules).await.unwrap_err();
+        let resp = server.create_database(rules, server.require_id()?, server.store).await.unwrap_err();
         assert!(matches!(resp, Error::IdNotSet));
 
         let lines = parsed_lines("cpu foo=1 10");
@@ -695,7 +699,7 @@ mod tests {
 
         // Create a database
         server
-            .create_database(rules.clone())
+            .create_database(rules.clone(), server.require_id().unwrap(), server.store)
             .await
             .expect("failed to create database");
 
@@ -720,7 +724,7 @@ mod tests {
 
         let db2 = DatabaseName::new("db_awesome").unwrap();
         server
-            .create_database(DatabaseRules::new(db2.clone()))
+            .create_database(DatabaseRules::new(db2.clone()), server.require_id().unwrap(), server.store)
             .await
             .expect("failed to create 2nd db");
 
@@ -748,13 +752,13 @@ mod tests {
 
         // Create a database
         server
-            .create_database(DatabaseRules::new(name.clone()))
+            .create_database(DatabaseRules::new(name.clone()), server.require_id().unwrap(), server.store)
             .await
             .expect("failed to create database");
 
         // Then try and create another with the same name
         let got = server
-            .create_database(DatabaseRules::new(name.clone()))
+            .create_database(DatabaseRules::new(name.clone()), server.require_id().unwrap(), server.store)
             .await
             .unwrap_err();
 
@@ -777,7 +781,7 @@ mod tests {
         for name in &names {
             let name = DatabaseName::new(name.to_string()).unwrap();
             server
-                .create_database(DatabaseRules::new(name))
+                .create_database(DatabaseRules::new(name), server.require_id().unwrap(), server.store)
                 .await
                 .expect("failed to create database");
         }
@@ -795,7 +799,7 @@ mod tests {
         let server = Server::new(manager, store);
         server.set_id(NonZeroU32::new(1).unwrap()).unwrap();
         server
-            .create_database(DatabaseRules::new(DatabaseName::new("foo").unwrap()))
+            .create_database(DatabaseRules::new(DatabaseName::new("foo").unwrap()), server.require_id().unwrap(), server.store)
             .await?;
 
         let line = "cpu bar=1 10";
@@ -839,7 +843,7 @@ mod tests {
 
         let db_name = DatabaseName::new("foo").unwrap();
         server
-            .create_database(DatabaseRules::new(db_name.clone()))
+            .create_database(DatabaseRules::new(db_name.clone()), server.require_id().unwrap(), server.store)
             .await?;
 
         let line = "cpu bar=1 10";
@@ -910,7 +914,7 @@ mod tests {
             lifecycle_rules: Default::default(),
             shard_config: None,
         };
-        server.create_database(rules).await.unwrap();
+        server.create_database(rules, server.require_id().unwrap(), server.store).await.unwrap();
 
         let lines = parsed_lines("disk,host=a used=10.1 12");
         server.write_lines(db_name.as_str(), &lines).await.unwrap();

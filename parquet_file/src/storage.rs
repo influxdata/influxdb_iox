@@ -16,6 +16,7 @@ use parking_lot::Mutex;
 use snafu::{OptionExt, ResultExt, Snafu};
 use std::{
     io::{Cursor, Seek, SeekFrom, Write},
+    num::NonZeroU32,
     sync::Arc,
 };
 
@@ -52,12 +53,12 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Clone)]
 pub struct Storage {
     object_store: Arc<ObjectStore>,
-    writer_id: u32,
+    writer_id: NonZeroU32,
     db_name: String,
 }
 
 impl Storage {
-    pub fn new(store: Arc<ObjectStore>, id: u32, db: String) -> Self {
+    pub fn new(store: Arc<ObjectStore>, id: NonZeroU32, db: String) -> Self {
         Self {
             object_store: store,
             writer_id: id,

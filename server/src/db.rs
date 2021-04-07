@@ -2,9 +2,12 @@
 //! instances of the mutable buffer, read buffer, and object store
 
 use std::any::Any;
-use std::sync::{
-    atomic::{AtomicU64, AtomicUsize, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
+    num::NonZeroU32,
 };
 
 use async_trait::async_trait;
@@ -23,6 +26,7 @@ use data_types::{
     chunk::ChunkSummary, database_rules::DatabaseRules, partition_metadata::PartitionSummary,
 };
 use internal_types::{data::ReplicatedWrite, selection::Selection};
+//use object_store::{memory::InMemory, ObjectStore};
 use object_store::{memory::InMemory, ObjectStore};
 use parquet_file::{chunk::Chunk, storage::Storage};
 use query::{Database, DEFAULT_SCHEMA};
@@ -191,6 +195,10 @@ const STARTING_SEQUENCE: u64 = 1;
 pub struct Db {
     pub rules: RwLock<DatabaseRules>,
 
+    pub server_id: NonZeroU32,  // this is also the Query Server ID
+
+    pub store: Arc<ObjectStore>,
+
     /// The metadata catalog
     catalog: Arc<Catalog>,
 
@@ -217,17 +225,23 @@ pub struct Db {
 impl Db {
     pub fn new(
         rules: DatabaseRules,
+        server_id: NonZeroU32,
+        object_store: Arc<ObjectStore>,
         read_buffer: ReadBufferDb,
         wal_buffer: Option<Buffer>,
         jobs: Arc<JobRegistry>,
     ) -> Self {
         let rules = RwLock::new(rules);
+        let server_id = server_id;
+        let store = Arc::clone(&object_store);
         let wal_buffer = wal_buffer.map(Mutex::new);
         let read_buffer = Arc::new(read_buffer);
         let catalog = Arc::new(Catalog::new());
         let system_tables = Arc::new(SystemSchemaProvider::new(Arc::clone(&catalog)));
         Self {
             rules,
+            server_id,
+            store,
             catalog,
             read_buffer,
             wal_buffer,
@@ -454,9 +468,7 @@ impl Db {
         // Create a parquet chunk for this chunk
         let mut parquet_chunk = Chunk::new(partition_key.to_string(), chunk_id);
         // Create a storage to save data of this chunk
-        // Todo: this must be gotten from server or somewhere
-        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
-        let storage = Storage::new(store, 100, self.rules.read().name.to_string()); // todo: replace with actual writer_id & db_name
+        let storage = Storage::new(Arc::clone(&self.store), self.server_id, self.rules.read().name.to_string());
 
         for stats in table_stats {
             debug!(%partition_key, %chunk_id, table=%stats.name, "loading table to object store");
@@ -732,10 +744,13 @@ mod tests {
     #[tokio::test]
     async fn write_no_mutable_buffer() {
         // Validate that writes are rejected if there is no mutable buffer
-        let db = make_db();
-        db.rules.write().lifecycle_rules.immutable = true;
 
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+        let db = make_db(writer_id, store);
+
+        db.rules.write().lifecycle_rules.immutable = true;
         let res = writer.write_lp_string(&db, "cpu bar=1 10");
         assert_contains!(
             res.unwrap_err().to_string(),
@@ -745,8 +760,11 @@ mod tests {
 
     #[tokio::test]
     async fn read_write() {
-        let db = Arc::new(make_db());
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+        let db = make_db(writer_id, store);
+        
         writer.write_lp_string(db.as_ref(), "cpu bar=1 10").unwrap();
 
         let batches = run_query(db, "select * from cpu").await;
@@ -763,9 +781,13 @@ mod tests {
 
     #[tokio::test]
     async fn write_with_rollover() {
-        let db = Arc::new(make_db());
         let mut writer = TestLPWriter::default();
-        writer.write_lp_string(db.as_ref(), "cpu bar=1 10").unwrap();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+        let db = make_db(writer_id, store);
+
+        //writer.write_lp_string(db.as_ref(), "cpu bar=1 10").unwrap();
+        writer.write_lp_string(&db, "cpu bar=1 10").unwrap();
         assert_eq!(vec!["1970-01-01T00"], db.partition_keys().unwrap());
 
         let mb_chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
