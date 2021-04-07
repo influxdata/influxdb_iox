@@ -70,10 +70,7 @@ impl TableSummary {
     }
 
     pub fn size(&self) -> usize {
-        let size: usize= self.columns
-                .iter()
-                .map(|c| c.size())
-                .sum();
+        let size: usize = self.columns.iter().map(|c| c.size()).sum();
         size + self.name.len() + mem::size_of::<Self>()
     }
     pub fn has_table(&self, table_name: &str) -> bool {
@@ -120,9 +117,7 @@ impl ColumnSummary {
 
     /// Return size in bytes of this Column
     pub fn size(&self) -> usize {
-        mem::size_of::<Self>() + 
-            self.name.len() +
-            mem::size_of_val(&self.stats)
+        mem::size_of::<Self>() + self.name.len() + mem::size_of_val(&self.stats)
     }
 
     // Updates statistics from other if the same type, otherwise a noop

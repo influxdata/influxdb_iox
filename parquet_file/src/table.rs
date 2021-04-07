@@ -30,7 +30,9 @@ impl Table {
     /// Return the approximate memory size of the chunk, in bytes including the
     /// dictionary, tables, and their rows.
     pub fn size(&self) -> usize {
-        mem::size_of::<Self>() + self.table_summary.size() + mem::size_of_val(&self.object_store_path)
+        mem::size_of::<Self>()
+            + self.table_summary.size()
+            + mem::size_of_val(&self.object_store_path)
     }
 
     /// Return name of this table

@@ -3,8 +3,8 @@
 use query::{test::TestLPWriter, PartitionChunk};
 
 use async_trait::async_trait;
-use std::{num::NonZeroU32, sync::Arc};
 use object_store::{memory::InMemory, ObjectStore};
+use std::{num::NonZeroU32, sync::Arc};
 
 use crate::db::Db;
 
@@ -33,7 +33,6 @@ impl DBSetup for NoData {
         let db = make_db(writer_id, Arc::clone(&store));
 
         let partition_key = "1970-01-01T00";
-        let db = make_db(writer_id, Arc::clone(&store));
         let scenario1 = DBScenario {
             scenario_name: "New, Empty Database".into(),
             db,
@@ -51,7 +50,7 @@ impl DBSetup for NoData {
 
         // a scenario where the database has had data loaded and then deleted
         let mut writer = TestLPWriter::default();
-        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
         let db = make_db(writer_id, Arc::clone(&store));
 
         let data = "cpu,region=west user=23.2 100";
@@ -180,9 +179,8 @@ pub struct TwoMeasurementsManyFieldsOneChunk {}
 #[async_trait]
 impl DBSetup for TwoMeasurementsManyFieldsOneChunk {
     async fn make(&self) -> Vec<DBScenario> {
-
         let mut writer = TestLPWriter::default();
-        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
         let db = make_db(writer_id, Arc::clone(&store));
 
@@ -241,7 +239,7 @@ impl DBSetup for EndToEndTest {
         let lp_data = lp_lines.join("\n");
 
         let mut writer = TestLPWriter::default();
-        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
         let db = make_db(writer_id, Arc::clone(&store));
 
@@ -265,7 +263,7 @@ impl DBSetup for EndToEndTest {
 pub(crate) async fn make_one_chunk_scenarios(partition_key: &str, data: &str) -> Vec<DBScenario> {
     let mut writer = TestLPWriter::default();
     let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
-    let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+    let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
     let db = make_db(writer_id, Arc::clone(&store));
 
     writer.write_lp_string(&db, data).unwrap();
@@ -310,7 +308,7 @@ pub async fn make_two_chunk_scenarios(
     data2: &str,
 ) -> Vec<DBScenario> {
     let mut writer = TestLPWriter::default();
-    let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+    let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
     let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
     let db = make_db(writer_id, Arc::clone(&store));
 
@@ -323,7 +321,7 @@ pub async fn make_two_chunk_scenarios(
 
     // spread across 2 mutable buffer chunks
     let mut writer = TestLPWriter::default();
-    let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+    let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
     let db = make_db(writer_id, Arc::clone(&store));
 
     writer.write_lp_string(&db, data1).unwrap();
@@ -336,7 +334,7 @@ pub async fn make_two_chunk_scenarios(
 
     // spread across 1 mutable buffer, 1 read buffer chunks
     let mut writer = TestLPWriter::default();
-    let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+    let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
     let db = make_db(writer_id, Arc::clone(&store));
 
     writer.write_lp_string(&db, data1).unwrap();
@@ -352,7 +350,7 @@ pub async fn make_two_chunk_scenarios(
 
     // in 2 read buffer chunks
     let mut writer = TestLPWriter::default();
-    let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+    let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
     let db = make_db(writer_id, Arc::clone(&store));
 
     writer.write_lp_string(&db, data1).unwrap();

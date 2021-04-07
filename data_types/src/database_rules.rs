@@ -741,6 +741,14 @@ impl TryFrom<management::partition_template::Part> for TemplatePart {
     }
 }
 
+/// ShardId maps to a nodegroup that holds the the shard.
+pub type ShardId = u16;
+
+/// Assigns a given line to a specific shard id.
+pub trait Sharder {
+    fn shard(&self, line: &ParsedLine<'_>) -> Result<ShardId>;
+}
+
 /// ShardConfig defines rules for assigning a line/row to an individual
 /// host or a group of hosts. A shard
 /// is a logical concept, but the usage is meant to split data into
@@ -966,35 +974,28 @@ mod tests {
 
     use super::*;
 
-    type TestError = Box<dyn std::error::Error + Send + Sync + 'static>;
-    type Result<T = (), E = TestError> = std::result::Result<T, E>;
-
     #[test]
-    fn partition_key_with_table() -> Result {
+    fn partition_key_with_table() {
         let template = PartitionTemplate {
             parts: vec![TemplatePart::Table],
         };
 
         let line = parse_line("cpu foo=1 10");
         assert_eq!("cpu", template.partition_key(&line, &Utc::now()).unwrap());
-
-        Ok(())
     }
 
     #[test]
-    fn partition_key_with_int_field() -> Result {
+    fn partition_key_with_int_field() {
         let template = PartitionTemplate {
             parts: vec![TemplatePart::Column("foo".to_string())],
         };
 
         let line = parse_line("cpu foo=1 10");
         assert_eq!("foo_1", template.partition_key(&line, &Utc::now()).unwrap());
-
-        Ok(())
     }
 
     #[test]
-    fn partition_key_with_float_field() -> Result {
+    fn partition_key_with_float_field() {
         let template = PartitionTemplate {
             parts: vec![TemplatePart::Column("foo".to_string())],
         };
@@ -1004,12 +1005,10 @@ mod tests {
             "foo_1.1",
             template.partition_key(&line, &Utc::now()).unwrap()
         );
-
-        Ok(())
     }
 
     #[test]
-    fn partition_key_with_string_field() -> Result {
+    fn partition_key_with_string_field() {
         let template = PartitionTemplate {
             parts: vec![TemplatePart::Column("foo".to_string())],
         };
@@ -1019,12 +1018,10 @@ mod tests {
             "foo_asdf",
             template.partition_key(&line, &Utc::now()).unwrap()
         );
-
-        Ok(())
     }
 
     #[test]
-    fn partition_key_with_bool_field() -> Result {
+    fn partition_key_with_bool_field() {
         let template = PartitionTemplate {
             parts: vec![TemplatePart::Column("bar".to_string())],
         };
@@ -1034,12 +1031,10 @@ mod tests {
             "bar_true",
             template.partition_key(&line, &Utc::now()).unwrap()
         );
-
-        Ok(())
     }
 
     #[test]
-    fn partition_key_with_tag_column() -> Result {
+    fn partition_key_with_tag_column() {
         let template = PartitionTemplate {
             parts: vec![TemplatePart::Column("region".to_string())],
         };
@@ -1049,24 +1044,20 @@ mod tests {
             "region_west",
             template.partition_key(&line, &Utc::now()).unwrap()
         );
-
-        Ok(())
     }
 
     #[test]
-    fn partition_key_with_missing_column() -> Result {
+    fn partition_key_with_missing_column() {
         let template = PartitionTemplate {
             parts: vec![TemplatePart::Column("not_here".to_string())],
         };
 
         let line = parse_line("cpu,foo=asdf bar=true 10");
         assert_eq!("", template.partition_key(&line, &Utc::now()).unwrap());
-
-        Ok(())
     }
 
     #[test]
-    fn partition_key_with_time() -> Result {
+    fn partition_key_with_time() {
         let template = PartitionTemplate {
             parts: vec![TemplatePart::TimeFormat("%Y-%m-%d %H:%M:%S".to_string())],
         };
@@ -1076,12 +1067,10 @@ mod tests {
             "2020-10-10 13:54:57",
             template.partition_key(&line, &Utc::now()).unwrap()
         );
-
-        Ok(())
     }
 
     #[test]
-    fn partition_key_with_default_time() -> Result {
+    fn partition_key_with_default_time() {
         let format_string = "%Y-%m-%d %H:%M:%S";
         let template = PartitionTemplate {
             parts: vec![TemplatePart::TimeFormat(format_string.to_string())],
@@ -1093,12 +1082,10 @@ mod tests {
             default_time.format(format_string).to_string(),
             template.partition_key(&line, &default_time).unwrap()
         );
-
-        Ok(())
     }
 
     #[test]
-    fn partition_key_with_many_parts() -> Result {
+    fn partition_key_with_many_parts() {
         let template = PartitionTemplate {
             parts: vec![
                 TemplatePart::Table,
@@ -1115,8 +1102,6 @@ mod tests {
             "cpu-region_west-usage_system_53.1-2020-10-10 13:54:57",
             template.partition_key(&line, &Utc::now()).unwrap()
         );
-
-        Ok(())
     }
 
     fn parsed_lines(lp: &str) -> Vec<ParsedLine<'_>> {

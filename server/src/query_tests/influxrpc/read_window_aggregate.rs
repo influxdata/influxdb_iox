@@ -11,7 +11,7 @@ use query::{
     predicate::{Predicate, PredicateBuilder},
     test::TestLPWriter,
 };
-use std::num::NonZeroU32;
+use std::{num::NonZeroU32, sync::Arc};
 
 /// runs read_window_aggregate(predicate) and compares it to the expected
 /// output
@@ -163,7 +163,7 @@ impl DBSetup for MeasurementForWindowAggregateMonths {
         // partition keys are: ["2020-03-02T00", "2020-03-01T00", "2020-04-01T00",
         // "2020-04-02T00"]
         let mut writer = TestLPWriter::default();
-        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
         let db = make_db(writer_id, Arc::clone(&store));
 
@@ -175,7 +175,7 @@ impl DBSetup for MeasurementForWindowAggregateMonths {
         };
 
         let mut writer = TestLPWriter::default();
-        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
         let db = make_db(writer_id, Arc::clone(&store));
         let data = lp_lines.join("\n");
         writer.write_lp_string(&db, &data).unwrap();
@@ -189,7 +189,7 @@ impl DBSetup for MeasurementForWindowAggregateMonths {
         };
 
         let mut writer = TestLPWriter::default();
-        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
         let db = make_db(writer_id, Arc::clone(&store));
         let data = lp_lines.join("\n");
         writer.write_lp_string(&db, &data).unwrap();

@@ -11,7 +11,7 @@ use bytes::Bytes;
 use observability_deps::tracing::{error, info};
 use parking_lot::Mutex;
 use snafu::{ResultExt, Snafu};
-use std::num::NonZeroU32;
+//use std::num::NonZeroU32;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -282,6 +282,7 @@ mod tests {
     use mutable_buffer::chunk::Chunk as ChunkWB;
     use object_store::memory::InMemory;
     use query::{test::TestLPWriter, Database};
+    use tracker::MemRegistry;
 
     #[tokio::test]
     async fn snapshot() {
@@ -294,12 +295,11 @@ mem,host=A,region=west used=45 1
 
         let mut writer = TestLPWriter::default();
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
-        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
-        let db = make_db(writer_id, store);
-        
+        let writer_id = std::num::NonZeroU32::new(1).unwrap();
+        let db = make_db(writer_id, Arc::clone(&store));
+
         writer.write_lp_string(&db, &lp).unwrap();
 
-    
         let (tx, rx) = tokio::sync::oneshot::channel();
         let mut metadata_path = store.new_path();
         metadata_path.push_dir("meta");
@@ -354,9 +354,10 @@ mem,host=A,region=west used=45 1
             },
         ];
 
+        let registry = MemRegistry::new();
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
         let chunk = Arc::new(DBChunk::MutableBuffer {
-            chunk: Arc::new(ChunkWB::new(11)),
+            chunk: Arc::new(ChunkWB::new(11, &registry)),
             partition_key: Arc::new("key".to_string()),
             open: false,
         });
@@ -392,7 +393,7 @@ mem,host=A,region=west used=45 1
     }
 
     /// Create a Database with a local store
-    pub fn make_db(server_id: NonZeroU32, object_store: Arc<ObjectStore>) -> Db {
+    pub fn make_db(server_id: std::num::NonZeroU32, object_store: Arc<ObjectStore>) -> Db {
         Db::new(
             DatabaseRules::new(DatabaseName::new("placeholder").unwrap()),
             server_id,

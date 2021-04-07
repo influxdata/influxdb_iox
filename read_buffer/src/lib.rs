@@ -1,7 +1,7 @@
 #![deny(rust_2018_idioms)]
 #![warn(clippy::clone_on_ref_ptr, clippy::use_self)]
 #![allow(dead_code, clippy::too_many_arguments)]
-pub(crate) mod chunk;
+pub mod chunk;
 pub(crate) mod column;
 pub(crate) mod row_group;
 mod schema;
@@ -116,7 +116,7 @@ impl Database {
             Entry::Vacant(e) => {
                 e.insert(Partition::new(
                     partition_key,
-                    Chunk::new(chunk_id, Table::new(table_name.to_owned(), row_group)),
+                    Chunk::new_with_table(chunk_id, Table::new(table_name.to_owned(), row_group)),
                 ));
             }
         };
@@ -211,16 +211,16 @@ impl Database {
     }
 
     /// Returns the total estimated size in bytes of the database.
-    pub fn size(&self) -> u64 {
+    pub fn size(&self) -> usize {
         let base_size = std::mem::size_of::<Self>();
 
         let partition_data = self.data.read().unwrap();
-        base_size as u64
+        base_size
             + partition_data
                 .partitions
                 .iter()
-                .map(|(name, partition)| name.len() as u64 + partition.size())
-                .sum::<u64>()
+                .map(|(name, partition)| name.len() + partition.size() as usize)
+                .sum::<usize>()
     }
 
     pub fn rows(&self) -> u64 {
@@ -276,6 +276,8 @@ impl Database {
     ///
     /// `read_filter` is lazy - it does not execute against the next chunk until
     /// the results for the previous one have been emitted.
+    ///
+    /// Note(edd): to be deprecated
     pub fn read_filter<'a>(
         &self,
         partition_key: &str,
@@ -306,7 +308,7 @@ impl Database {
                     // but just gets pointers to the necessary data for
                     // execution.
                     let chunk_result = chunk
-                        .read_filter(table_name, &predicate, &select_columns)
+                        .read_filter(table_name, predicate.clone(), select_columns)
                         .context(ChunkError)?;
                     chunk_table_results.push(chunk_result);
                 }
@@ -490,6 +492,8 @@ impl Database {
     /// predicate. Columns can be limited via a selection, which means callers
     /// that know they are only interested in certain columns can specify those
     /// and reduce total execution time.
+    ///
+    /// TODO(edd): to be deprecated
     pub fn column_names(
         &self,
         partition_key: &str,
@@ -522,7 +526,9 @@ impl Database {
             // the dst buffer is pushed into each chunk's `column_names`
             // implementation ensuring that we short-circuit any tables where
             // we have already determined column names.
-            chunk.column_names(table_name, &predicate, only_columns, dst)
+            chunk
+                .column_names(table_name, predicate.clone(), only_columns, dst)
+                .unwrap()
         });
 
         Ok(Some(names))
@@ -533,6 +539,8 @@ impl Database {
     ///
     /// `columns` must only contain columns that have the InfluxData tag
     /// semantic type.
+    ///
+    /// TODO(edd): to be deprecated
     pub fn column_values(
         &self,
         partition_key: &str,
@@ -541,15 +549,6 @@ impl Database {
         predicate: Predicate,
         columns: Selection<'_>,
     ) -> Result<BTreeMap<String, BTreeSet<String>>> {
-        let columns = match columns {
-            Selection::All => {
-                return UnsupportedOperation {
-                    msg: "column_values does not support All columns".to_owned(),
-                }
-                .fail();
-            }
-            Selection::Some(columns) => columns,
-        };
         let partition_data = self.data.read().unwrap();
 
         let partition = partition_data
@@ -576,7 +575,7 @@ impl Database {
         let mut values = BTreeMap::new();
         for chunk in filtered_chunks {
             values = chunk
-                .column_values(table_name, &predicate, columns, values)
+                .column_values(table_name, predicate.clone(), columns, values)
                 .context(ChunkError)?;
         }
 
@@ -646,10 +645,13 @@ impl Partition {
         match chunk_data.chunks.entry(chunk_id) {
             Entry::Occupied(mut chunk_entry) => {
                 let chunk = chunk_entry.get_mut();
-                chunk.upsert_table(table_name, row_group);
+                chunk.upsert_table_with_row_group(table_name, row_group);
             }
             Entry::Vacant(chunk_entry) => {
-                chunk_entry.insert(Chunk::new(chunk_id, Table::new(table_name, row_group)));
+                chunk_entry.insert(Chunk::new_with_table(
+                    chunk_id,
+                    Table::new(table_name, row_group),
+                ));
             }
         };
     }
@@ -698,6 +700,8 @@ impl Partition {
     /// returns TableSummaries for all the tables in all row groups in
     /// this partition.  Note that there can be more than one
     /// TableSummary for each table
+    ///
+    /// TODO(edd): to deprecate
     pub fn table_summaries(&self, chunk_ids: &[u32]) -> Vec<TableSummary> {
         let chunk_data = self.data.read().unwrap();
         chunk_ids
@@ -719,16 +723,18 @@ impl Partition {
 
     /// The total estimated size in bytes of the `Partition` and all contained
     /// data.
-    pub fn size(&self) -> u64 {
+    ///
+    /// TODO(edd): to be deprecated
+    pub fn size(&self) -> usize {
         let base_size = std::mem::size_of::<Self>() + self.key.len();
 
         let chunk_data = self.data.read().unwrap();
-        base_size as u64
+        (base_size as u64
             + chunk_data
                 .chunks
                 .values()
-                .map(|chunk| std::mem::size_of::<u32>() as u64 + chunk.size())
-                .sum::<u64>()
+                .map(|chunk| std::mem::size_of::<u32>() as u64 + chunk.size() as u64)
+                .sum::<u64>()) as usize
     }
 
     /// The total estimated size in bytes of the specified chunk id
@@ -737,7 +743,7 @@ impl Partition {
         chunk_data
             .chunks
             .get(&chunk_id)
-            .map(|chunk| chunk.size())
+            .map(|chunk| chunk.size() as u64)
             .unwrap_or(0) // treat unknown chunks as zero size
     }
 }
@@ -1677,12 +1683,6 @@ mod test {
                 ("env", &["stag"]) // column_values returns non-null values.
             ])
         );
-
-        // Error when All column selection provided.
-        assert!(matches!(
-            db.column_values("x", "x", &[22, 40], Predicate::default(), Selection::All),
-            Err(Error::UnsupportedOperation { .. })
-        ));
 
         // Error when unsupported column pushed down.
         assert!(matches!(

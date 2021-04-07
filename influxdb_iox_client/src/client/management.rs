@@ -1,4 +1,3 @@
-
 use thiserror::Error;
 
 use self::generated_types::{management_service_client::ManagementServiceClient, *};
@@ -207,8 +206,6 @@ pub enum ClosePartitionChunkError {
 /// client
 ///     .create_database(DatabaseRules{
 ///     name: "bananas".to_string(),
-///     server_id: NonZeroU32::new(1)::unwrap(),
-///     object_store: Arc::new(ObjectStore::new_in_memory(InMemory::new())),
 ///     ..Default::default()
 /// })
 ///     .await
@@ -261,11 +258,8 @@ impl Client {
     pub async fn create_database(
         &mut self,
         rules: DatabaseRules,
-        // server_id: NonZeroU32,
-        // object_store: ObjectStore,
     ) -> Result<(), CreateDatabaseError> {
         self.inner
-            //.create_database(CreateDatabaseRequest { rules: Some(rules) }, server_id, object_store)
             .create_database(CreateDatabaseRequest { rules: Some(rules) })
             .await
             .map_err(|status| match status.code() {

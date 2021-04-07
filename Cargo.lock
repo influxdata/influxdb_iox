@@ -1878,6 +1878,7 @@ dependencies = [
  "string-interner",
  "test_helpers",
  "tokio",
+ "tracker",
 ]
 
 [[package]]
@@ -2322,6 +2323,7 @@ dependencies = [
  "object_store",
  "parking_lot",
  "snafu",
+ "tracker",
 ]
 
 [[package]]

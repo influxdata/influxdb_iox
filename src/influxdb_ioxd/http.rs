@@ -729,11 +729,8 @@ mod tests {
     use server::{db::Db, ConnectionManagerImpl};
     use std::num::NonZeroU32;
 
-    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-    type Result<T, E = Error> = std::result::Result<T, E>;
-
     #[tokio::test]
-    async fn test_health() -> Result<()> {
+    async fn test_health() {
         let test_storage = Arc::new(AppServer::new(
             ConnectionManagerImpl {},
             Arc::new(ObjectStore::new_in_memory(InMemory::new())),
@@ -745,21 +742,20 @@ mod tests {
 
         // Print the response so if the test fails, we have a log of what went wrong
         check_response("health", response, StatusCode::OK, "OK").await;
-        Ok(())
     }
 
     #[tokio::test]
-    async fn test_write() -> Result<()> {
+    async fn test_write() {
         let test_storage = Arc::new(AppServer::new(
             ConnectionManagerImpl {},
             Arc::new(ObjectStore::new_in_memory(InMemory::new())),
         ));
         test_storage.set_id(NonZeroU32::new(1).unwrap()).unwrap();
         test_storage
-            .create_database(DatabaseRules::new(
-                DatabaseName::new("MyOrg_MyBucket").unwrap()),
-                test_storage.require_id()?,
-                Arc::clone(&test_storage.store)
+            .create_database(
+                DatabaseRules::new(DatabaseName::new("MyOrg_MyBucket").unwrap()),
+                test_storage.require_id().unwrap(),
+                Arc::clone(&test_storage.store),
             )
             .await
             .unwrap();
@@ -797,8 +793,6 @@ mod tests {
             "+----------------+--------------+-------+-----------------+------------+",
         ];
         assert_table_eq!(expected, &batches);
-
-        Ok(())
     }
 
     /// Sets up a test database with some data for testing the query endpoint
@@ -811,10 +805,10 @@ mod tests {
         ));
         test_storage.set_id(NonZeroU32::new(1).unwrap()).unwrap();
         test_storage
-            .create_database(DatabaseRules::new(
-                DatabaseName::new("MyOrg_MyBucket").unwrap()),
+            .create_database(
+                DatabaseRules::new(DatabaseName::new("MyOrg_MyBucket").unwrap()),
                 test_storage.require_id().unwrap(),
-                Arc::clone(&test_storage.store)
+                Arc::clone(&test_storage.store),
             )
             .await
             .unwrap();
@@ -841,7 +835,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_query_pretty() -> Result<()> {
+    async fn test_query_pretty() {
         let (client, server_url) = setup_test_data().await;
 
         // send query data
@@ -873,12 +867,10 @@ mod tests {
         assert_eq!(get_content_type(&response), "text/plain");
 
         check_response("query", response, StatusCode::OK, res).await;
-
-        Ok(())
     }
 
     #[tokio::test]
-    async fn test_query_csv() -> Result<()> {
+    async fn test_query_csv() {
         let (client, server_url) = setup_test_data().await;
 
         // send query data
@@ -895,12 +887,10 @@ mod tests {
         let res = "bottom_degrees,location,state,surface_degrees,time\n\
                    50.4,santa_monica,CA,65.2,1568756160\n";
         check_response("query", response, StatusCode::OK, res).await;
-
-        Ok(())
     }
 
     #[tokio::test]
-    async fn test_query_json() -> Result<()> {
+    async fn test_query_json() {
         let (client, server_url) = setup_test_data().await;
 
         // send a second line of data to demontrate how that works
@@ -934,8 +924,6 @@ mod tests {
         // Note two json records: one record on each line
         let res = r#"[{"bottom_degrees":50.4,"location":"santa_monica","state":"CA","surface_degrees":65.2,"time":1568756160},{"location":"Boston","state":"MA","surface_degrees":50.2,"time":1568756160}]"#;
         check_response("query", response, StatusCode::OK, res).await;
-
-        Ok(())
     }
 
     fn gzip_str(s: &str) -> Vec<u8> {
@@ -947,17 +935,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_gzip_write() -> Result<()> {
+    async fn test_gzip_write() {
         let test_storage = Arc::new(AppServer::new(
             ConnectionManagerImpl {},
             Arc::new(ObjectStore::new_in_memory(InMemory::new())),
         ));
         test_storage.set_id(NonZeroU32::new(1).unwrap()).unwrap();
         test_storage
-            .create_database(DatabaseRules::new(
-                DatabaseName::new("MyOrg_MyBucket").unwrap()),
+            .create_database(
+                DatabaseRules::new(DatabaseName::new("MyOrg_MyBucket").unwrap()),
                 test_storage.require_id().unwrap(),
-                Arc::clone(&test_storage.store)
+                Arc::clone(&test_storage.store),
             )
             .await
             .unwrap();
@@ -996,8 +984,6 @@ mod tests {
             "+----------------+--------------+-------+-----------------+------------+",
         ];
         assert_table_eq!(expected, &batches);
-
-        Ok(())
     }
 
     #[tokio::test]
@@ -1008,10 +994,10 @@ mod tests {
         ));
         test_storage.set_id(NonZeroU32::new(1).unwrap()).unwrap();
         test_storage
-            .create_database(DatabaseRules::new(
-                DatabaseName::new("MyOrg_MyBucket").unwrap()),
+            .create_database(
+                DatabaseRules::new(DatabaseName::new("MyOrg_MyBucket").unwrap()),
                 test_storage.require_id().unwrap(),
-                Arc::clone(&test_storage.store)
+                Arc::clone(&test_storage.store),
             )
             .await
             .unwrap();
@@ -1062,7 +1048,14 @@ mod tests {
             shard_config: None,
         };
 
-        server.create_database(rules, server.require_id().unwrap(), Arc::clone(&server.store)).await.unwrap();
+        server
+            .create_database(
+                rules,
+                server.require_id().unwrap(),
+                Arc::clone(&server.store),
+            )
+            .await
+            .unwrap();
 
         let base_url = format!(
             "{}/iox/api/v1/databases/{}/wal/meta",

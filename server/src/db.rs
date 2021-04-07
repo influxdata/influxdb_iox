@@ -3,11 +3,11 @@
 
 use std::any::Any;
 use std::{
+    num::NonZeroU32,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
-    num::NonZeroU32,
 };
 
 use async_trait::async_trait;
@@ -26,12 +26,11 @@ use data_types::{
     chunk::ChunkSummary, database_rules::DatabaseRules, partition_metadata::PartitionSummary,
 };
 use internal_types::{data::ReplicatedWrite, selection::Selection};
-//use object_store::{memory::InMemory, ObjectStore};
-use object_store::{memory::InMemory, ObjectStore};
+use object_store::ObjectStore;
 use parquet_file::{chunk::Chunk, storage::Storage};
 use query::{Database, DEFAULT_SCHEMA};
 use read_buffer::Database as ReadBufferDb;
-use tracker::task::{TrackedFutureExt, Tracker};
+use tracker::{MemRegistry, TaskTracker, TrackedFutureExt};
 
 use super::{buffer::Buffer, JobRegistry};
 use data_types::job::Job;
@@ -195,7 +194,7 @@ const STARTING_SEQUENCE: u64 = 1;
 pub struct Db {
     pub rules: RwLock<DatabaseRules>,
 
-    pub server_id: NonZeroU32,  // this is also the Query Server ID
+    pub server_id: NonZeroU32, // this is also the Query Server ID
 
     pub store: Arc<ObjectStore>,
 
@@ -214,12 +213,27 @@ pub struct Db {
     /// A handle to the global jobs registry for long running tasks
     jobs: Arc<JobRegistry>,
 
+    /// Memory registries used for tracking memory usage by this Db
+    memory_registries: MemoryRegistries,
+
     /// The system schema provider
     system_tables: Arc<SystemSchemaProvider>,
 
+    /// Used to allocated sequence numbers for writes
     sequence: AtomicU64,
 
+    /// Number of iterations of the worker loop for this Db
     worker_iterations: AtomicUsize,
+}
+
+#[derive(Debug, Default)]
+struct MemoryRegistries {
+    mutable_buffer: Arc<MemRegistry>,
+
+    // TODO: Wire into read buffer
+    read_buffer: Arc<MemRegistry>,
+
+    parquet: Arc<MemRegistry>,
 }
 
 impl Db {
@@ -247,6 +261,7 @@ impl Db {
             wal_buffer,
             jobs,
             system_tables,
+            memory_registries: Default::default(),
             sequence: AtomicU64::new(STARTING_SEQUENCE),
             worker_iterations: AtomicUsize::new(0),
         }
@@ -271,7 +286,7 @@ impl Db {
             .context(RollingOverPartition { partition_key })?;
 
         // make a new chunk to track the newly created chunk in this partition
-        partition.create_open_chunk();
+        partition.create_open_chunk(self.memory_registries.mutable_buffer.as_ref());
 
         return Ok(DBChunk::snapshot(&chunk));
     }
@@ -466,9 +481,17 @@ impl Db {
         let table_stats = read_buffer.table_summaries(partition_key, &[chunk_id]);
 
         // Create a parquet chunk for this chunk
-        let mut parquet_chunk = Chunk::new(partition_key.to_string(), chunk_id);
+        let mut parquet_chunk = Chunk::new(
+            partition_key.to_string(),
+            chunk_id,
+            self.memory_registries.parquet.as_ref(),
+        );
         // Create a storage to save data of this chunk
-        let storage = Storage::new(Arc::clone(&self.store), self.server_id, self.rules.read().name.to_string());
+        let storage = Storage::new(
+            Arc::clone(&self.store),
+            self.server_id,
+            self.rules.read().name.to_string(),
+        );
 
         for stats in table_stats {
             debug!(%partition_key, %chunk_id, table=%stats.name, "loading table to object store");
@@ -531,7 +554,7 @@ impl Db {
         self: &Arc<Self>,
         partition_key: String,
         chunk_id: u32,
-    ) -> Tracker<Job> {
+    ) -> TaskTracker<Job> {
         let name = self.rules.read().name.clone();
         let (tracker, registration) = self.jobs.register(Job::CloseChunk {
             db_name: name.to_string(),
@@ -662,9 +685,9 @@ impl Database for Db {
                 let mut partition = partition.write();
                 partition.update_last_write_at();
 
-                let chunk = partition
-                    .open_chunk()
-                    .unwrap_or_else(|| partition.create_open_chunk());
+                let chunk = partition.open_chunk().unwrap_or_else(|| {
+                    partition.create_open_chunk(self.memory_registries.mutable_buffer.as_ref())
+                });
 
                 let mut chunk = chunk.write();
                 chunk.record_write();
@@ -731,6 +754,7 @@ mod tests {
         database_rules::{Order, Sort, SortOrder},
         partition_metadata::{ColumnSummary, StatValues, Statistics, TableSummary},
     };
+    use object_store::memory::InMemory;
     use query::{
         exec::Executor, frontend::sql::SQLQueryPlanner, test::TestLPWriter, PartitionChunk,
     };
@@ -747,7 +771,7 @@ mod tests {
 
         let mut writer = TestLPWriter::default();
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
-        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
         let db = make_db(writer_id, store);
 
         db.rules.write().lifecycle_rules.immutable = true;
@@ -762,9 +786,9 @@ mod tests {
     async fn read_write() {
         let mut writer = TestLPWriter::default();
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
-        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
-        let db = make_db(writer_id, store);
-        
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = Arc::new(make_db(writer_id, store));
+
         writer.write_lp_string(db.as_ref(), "cpu bar=1 10").unwrap();
 
         let batches = run_query(db, "select * from cpu").await;
@@ -783,11 +807,11 @@ mod tests {
     async fn write_with_rollover() {
         let mut writer = TestLPWriter::default();
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
-        let writer_id: NonZeroU32 = NonZeroU32::new(writer.writer_id).unwrap();
-        let db = make_db(writer_id, store);
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = Arc::new(make_db(writer_id, store));
 
         //writer.write_lp_string(db.as_ref(), "cpu bar=1 10").unwrap();
-        writer.write_lp_string(&db, "cpu bar=1 10").unwrap();
+        writer.write_lp_string(db.as_ref(), "cpu bar=1 10").unwrap();
         assert_eq!(vec!["1970-01-01T00"], db.partition_keys().unwrap());
 
         let mb_chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
@@ -826,8 +850,10 @@ mod tests {
 
     #[tokio::test]
     async fn write_with_missing_tags_are_null() {
-        let db = Arc::new(make_db());
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = Arc::new(make_db(writer_id, store));
 
         // Note the `region` tag is introduced in the second line, so
         // the values in prior rows for the region column are
@@ -863,8 +889,11 @@ mod tests {
     #[tokio::test]
     async fn read_from_read_buffer() {
         // Test that data can be loaded into the ReadBuffer
-        let db = Arc::new(make_db());
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = Arc::new(make_db(writer_id, store));
+
         writer.write_lp_string(db.as_ref(), "cpu bar=1 10").unwrap();
         writer.write_lp_string(db.as_ref(), "cpu bar=2 20").unwrap();
 
@@ -911,11 +940,13 @@ mod tests {
 
     #[tokio::test]
     async fn write_updates_last_write_at() {
-        let db = make_db();
-        let before_create = Utc::now();
-
-        let partition_key = "1970-01-01T00";
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = make_db(writer_id, store);
+
+        let before_create = Utc::now();
+        let partition_key = "1970-01-01T00";
         writer.write_lp_string(&db, "cpu bar=1 10").unwrap();
         let after_write = Utc::now();
 
@@ -940,10 +971,11 @@ mod tests {
     #[tokio::test]
     async fn test_chunk_timestamps() {
         let start = Utc::now();
-        let db = make_db();
-
-        // Given data loaded into two chunks
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = make_db(writer_id, store);
+
         writer.write_lp_string(&db, "cpu bar=1 10").unwrap();
         let after_data_load = Utc::now();
 
@@ -973,11 +1005,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_chunk_closing() {
-        let db = make_db();
+        let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = make_db(writer_id, store);
+
         db.rules.write().lifecycle_rules.mutable_size_threshold =
             Some(NonZeroUsize::new(2).unwrap());
 
-        let mut writer = TestLPWriter::default();
         writer.write_lp_string(&db, "cpu bar=1 10").unwrap();
         writer.write_lp_string(&db, "cpu bar=1 20").unwrap();
 
@@ -995,8 +1030,11 @@ mod tests {
 
     #[tokio::test]
     async fn chunks_sorted_by_times() {
-        let db = make_db();
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap(); // 1 is not set so cannot be used here
+        let db = make_db(writer_id, store);
+
         writer.write_lp_string(&db, "cpu val=1 1").unwrap();
         writer
             .write_lp_string(&db, "mem val=2 400000000000001")
@@ -1033,9 +1071,12 @@ mod tests {
     #[tokio::test]
     async fn chunk_id_listing() {
         // Test that chunk id listing is hooked up
-        let db = make_db();
-        let partition_key = "1970-01-01T00";
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = make_db(writer_id, store);
+
+        let partition_key = "1970-01-01T00";
         writer.write_lp_string(&db, "cpu bar=1 10").unwrap();
         writer.write_lp_string(&db, "cpu bar=1 20").unwrap();
 
@@ -1085,8 +1126,10 @@ mod tests {
     #[tokio::test]
     async fn partition_chunk_summaries() {
         // Test that chunk id listing is hooked up
-        let db = make_db();
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = make_db(writer_id, store);
 
         writer.write_lp_string(&db, "cpu bar=1 1").unwrap();
         db.rollover_partition("1970-01-01T00").await.unwrap();
@@ -1112,6 +1155,15 @@ mod tests {
             107,
         )];
 
+        let size: usize = db
+            .chunk_summaries()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.estimated_bytes)
+            .sum();
+
+        assert_eq!(db.memory_registries.mutable_buffer.bytes(), size);
+
         assert_eq!(
             expected, chunk_summaries,
             "expected:\n{:#?}\n\nactual:{:#?}\n\n",
@@ -1121,8 +1173,10 @@ mod tests {
 
     #[tokio::test]
     async fn partition_chunk_summaries_timestamp() {
-        let db = make_db();
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = make_db(writer_id, store);
 
         let start = Utc::now();
         writer.write_lp_string(&db, "cpu bar=1 1").unwrap();
@@ -1174,8 +1228,10 @@ mod tests {
     #[tokio::test]
     async fn chunk_summaries() {
         // Test that chunk id listing is hooked up
-        let db = make_db();
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = make_db(writer_id, store);
 
         // get three chunks: one open, one closed in mb and one close in rb
         writer.write_lp_string(&db, "cpu bar=1 1").unwrap();
@@ -1212,7 +1268,7 @@ mod tests {
                 to_arc("1970-01-01T00"),
                 0,
                 ChunkStorage::ReadBuffer,
-                1221,
+                1269,
             ),
             ChunkSummary::new_without_timestamps(
                 to_arc("1970-01-01T00"),
@@ -1234,6 +1290,10 @@ mod tests {
             ),
         ];
 
+        assert_eq!(db.memory_registries.mutable_buffer.bytes(), 101 + 133 + 135);
+        // TODO: Instrument read buffer
+        //assert_eq!(db.memory_registries.read_buffer.bytes(), 1269);
+
         assert_eq!(
             expected, chunk_summaries,
             "expected:\n{:#?}\n\nactual:{:#?}\n\n",
@@ -1244,8 +1304,10 @@ mod tests {
     #[tokio::test]
     async fn partition_summaries() {
         // Test that chunk id listing is hooked up
-        let db = make_db();
         let mut writer = TestLPWriter::default();
+        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
+        let writer_id: NonZeroU32 = NonZeroU32::new(1).unwrap();
+        let db = make_db(writer_id, store);
 
         writer.write_lp_string(&db, "cpu bar=1 1").unwrap();
         let chunk_id = db.rollover_partition("1970-01-01T00").await.unwrap().id();
