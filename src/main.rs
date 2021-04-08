@@ -1,4 +1,5 @@
-//! Entrypoint of InfluxDB IOx binary
+//! Entrypoint of InfluxDB IOx binary. It is awesome
+
 #![deny(rust_2018_idioms)]
 #![warn(
     missing_debug_implementations,
