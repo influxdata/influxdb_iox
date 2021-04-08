@@ -34,25 +34,27 @@ impl crate::command::Command for RemoteLoad {
             return Ok(false);
         }
 
-        // If we have a currently selected database, route the query here
-        if let Some(current_database) = self.current_database.as_ref() {
-            println!(
-                "NOTE: Running query on remote database {}",
-                current_database
-            );
+        if !commands[0].eq_ignore_ascii_case("remote") {
+            // If we have a currently selected database, route the query here
+            if let Some(current_database) = self.current_database.as_ref() {
+                println!(
+                    "NOTE: Running query on remote database {}",
+                    current_database
+                );
 
-            let batches = scrape_query(&mut context.flight_client, current_database, line)
-                .await
-                .map_err(|e| format!("Error running remote query: {}", e))?;
+                let batches = scrape_query(&mut context.flight_client, current_database, line)
+                    .await
+                    .map_err(|e| format!("Error running remote query: {}", e))?;
 
-            let format = influxdb_iox_client::format::QueryOutputFormat::Pretty;
-            let formatted_results = format
-                .format(&batches)
-                .map_err(|e| format!("Error formatting results from remote server: {}", e))?;
-            println!("{}", formatted_results);
-            Ok(true)
-        } else if !commands[0].eq_ignore_ascii_case("remote") {
-            return Ok(false);
+                let format = influxdb_iox_client::format::QueryOutputFormat::Pretty;
+                let formatted_results = format
+                    .format(&batches)
+                    .map_err(|e| format!("Error formatting results from remote server: {}", e))?;
+                println!("{}", formatted_results);
+                Ok(true)
+            } else {
+                return Ok(false);
+            }
         } else if commands.len() == 1 {
             println!(
                 r#"Unknown REMOTE command. Perhaps you meant:
