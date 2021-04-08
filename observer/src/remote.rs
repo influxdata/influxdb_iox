@@ -14,32 +14,117 @@ use arrow_deps::{
 use crate::context::Context;
 
 #[derive(Debug, Default)]
-pub struct RemoteLoad {}
+pub struct RemoteLoad {
+    // current list of remote database names
+    databases: Vec<String>,
+
+    // currently active database, if any
+    current_database: Option<String>,
+}
 
 #[async_trait]
 impl crate::command::Command for RemoteLoad {
     async fn matches(
-        &self,
+        &mut self,
         line: &str,
         context: &mut Context,
     ) -> std::result::Result<bool, String> {
-        let commands = line.split(' ').collect::<Vec<_>>();
+        let commands = line.split(' ').map(|c| c.trim()).collect::<Vec<_>>();
         if commands.is_empty() {
             return Ok(false);
         }
-        if !commands[0].eq_ignore_ascii_case("remote") {
-            return Ok(false);
-        }
 
-        if commands.len() == 2 && commands[1].eq_ignore_ascii_case("load") {
-            self.refresh_remote_system_tables(context).await
+        // If we have a currently selected database, route the query here
+        if let Some(current_database) = self.current_database.as_ref() {
+            println!(
+                "NOTE: Running query on remote database {}",
+                current_database
+            );
+
+            let batches = scrape_query(&mut context.flight_client, current_database, line)
+                .await
+                .map_err(|e| format!("Error running remote query: {}", e))?;
+
+            let format = influxdb_iox_client::format::QueryOutputFormat::Pretty;
+            let formatted_results = format
+                .format(&batches)
+                .map_err(|e| format!("Error formatting results from remote server: {}", e))?;
+            println!("{}", formatted_results);
+            Ok(true)
+        } else if !commands[0].eq_ignore_ascii_case("remote") {
+            return Ok(false);
+        } else if commands.len() == 1 {
+            println!(
+                r#"Unknown REMOTE command. Perhaps you meant:
+
+REMOTE LOAD: Load databases and system tables from remote server
+
+REMOTE LIST DATABASES: List remote known databases
+
+REMOTE SHOW : show the currently active remote database, if any
+
+REMOTE SET: clear remote database; All subsequent queries are sent to the local aggregated views
+
+REMOTE SET <DATABASE>: Set a remote database; All subsquent queries are sent to that database
+
+"#
+            );
+            Ok(false)
+            // REMOTE LOAD
+        } else if commands.len() == 2 && eq(commands[1], "load") {
+            self.refresh_database_list(context).await?;
+            self.refresh_remote_system_tables(context).await?;
+            Ok(true)
+            // REMOTE LIST DATABASES
+        } else if commands.len() == 3 && eq(commands[1], "list") && eq(commands[2], "databases") {
+            if self.databases.is_empty() {
+                println!("No databases. Perhaps you need to run REMOTE LOAD?");
+            } else {
+                println!("{}", self.databases.join("\n"));
+            }
+            Ok(true)
+            // REMOTE SHOW
+        } else if commands.len() == 2 && eq(commands[1], "show") {
+            match self.current_database.as_ref() {
+                Some(current_database) => println!("Routing requests to: {}", current_database),
+                None => println!("No remote database set. Use REMOTE SET DATABASE to do so"),
+            };
+            Ok(true)
+            // REMOTE SET
+        } else if commands.len() == 2 && eq(commands[1], "set") {
+            self.current_database = None;
+            println!("Using local aggregated views");
+            Ok(true)
+            // REMOTE SET <DATABASE>
+        } else if commands.len() == 3 && eq(commands[1], "set") {
+            let current_database = commands[2].to_string();
+            println!("Setting remote database to {}", current_database);
+            self.current_database = Some(current_database);
+            Ok(true)
         } else {
             Ok(false)
         }
     }
 }
 
+fn eq(part: &str, command: &str) -> bool {
+    part.eq_ignore_ascii_case(command)
+}
+
 impl RemoteLoad {
+    // Loads the list of databases
+    async fn refresh_database_list(
+        &mut self,
+        context: &mut Context,
+    ) -> std::result::Result<bool, String> {
+        self.databases = context
+            .management_client
+            .list_databases()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+
     // Loads all system tables
     async fn refresh_remote_system_tables(
         &self,
@@ -47,42 +132,44 @@ impl RemoteLoad {
     ) -> std::result::Result<bool, String> {
         let start = Instant::now();
 
-        let databases = context
-            .management_client
-            .list_databases()
-            .await
-            .expect("Error listing databases");
         println!(
             "Aggregating system tables from {} databases",
-            databases.len()
+            self.databases.len()
         );
 
         // The basic idea is to find all databases, and create a synthetic
         // system tables that have the information from all of them
 
-        let tasks = databases.into_iter().map(|db_name| {
-            let connection = context.connection.clone();
-            tokio::task::spawn(async move {
-                let mut client = influxdb_iox_client::flight::Client::new(connection);
-                let batches = scrape_query(&mut client, &db_name, "select * from system.chunks")
-                    .await
-                    .expect("selecting from system.chunks");
+        let tasks = self
+            .databases
+            .iter()
+            .map(|db_name| db_name.to_string())
+            .map(|db_name| {
+                let connection = context.connection.clone();
+                tokio::task::spawn(async move {
+                    let mut client = influxdb_iox_client::flight::Client::new(connection);
+                    let batches =
+                        scrape_query(&mut client, &db_name, "select * from system.chunks")
+                            .await
+                            .expect("selecting from system.chunks");
 
-                let chunks_table = RemoteSystemTable::Chunks {
-                    db_name: db_name.clone(),
-                    batches,
-                };
+                    let chunks_table = RemoteSystemTable::Chunks {
+                        db_name: db_name.clone(),
+                        batches,
+                    };
 
-                let batches = scrape_query(&mut client, &db_name, "select * from system.columns")
-                    .await
-                    .expect("selecting from system.columns");
+                    let batches =
+                        scrape_query(&mut client, &db_name, "select * from system.columns")
+                            .await
+                            .expect("selecting from system.columns");
 
-                let columns_table = RemoteSystemTable::Columns { db_name, batches };
+                    let columns_table = RemoteSystemTable::Columns { db_name, batches };
 
-                let result: Result<Vec<RemoteSystemTable>> = Ok(vec![chunks_table, columns_table]);
-                result
-            })
-        });
+                    let result: Result<Vec<RemoteSystemTable>> =
+                        Ok(vec![chunks_table, columns_table]);
+                    result
+                })
+            });
 
         // now, get the results and combine them
         let mut builder = AggregatedTableBuilder::new();

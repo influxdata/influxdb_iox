@@ -9,6 +9,8 @@ pub struct Context {
     pub connection: Connection,
     /// A preconfigured management client
     pub management_client: influxdb_iox_client::management::Client,
+    /// A preconfigured flight client
+    pub flight_client: influxdb_iox_client::flight::Client,
 }
 
 impl Context {
@@ -18,9 +20,12 @@ impl Context {
 
         let management_client = influxdb_iox_client::management::Client::new(connection.clone());
 
+        let flight_client = influxdb_iox_client::flight::Client::new(connection.clone());
+
         Self {
             ctx,
             connection,
+            flight_client,
             management_client,
         }
     }

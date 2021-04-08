@@ -12,7 +12,7 @@ pub struct LocalQuery {}
 #[async_trait]
 impl crate::command::Command for LocalQuery {
     async fn matches(
-        &self,
+        &mut self,
         line: &str,
         context: &mut Context,
     ) -> std::result::Result<bool, String> {

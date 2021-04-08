@@ -71,7 +71,7 @@ async fn repl(mut context: Context) {
     rl.load_history(".history").ok();
 
     // The order of the commands is the order we try to run them in
-    let commands: Vec<Box<dyn Command>> = vec![
+    let mut commands: Vec<Box<dyn Command>> = vec![
         Box::new(RemoteLoad::default()),
         Box::new(LocalQuery::default()),
     ];
@@ -87,7 +87,7 @@ async fn repl(mut context: Context) {
                 request.push_str(line.trim_end());
                 rl.add_history_entry(request.clone());
 
-                run_command(&mut context, &request, &commands).await;
+                run_command(&mut context, &request, &mut commands).await;
                 request = "".to_owned();
             }
             Ok(ref line) => {
@@ -108,8 +108,8 @@ fn is_exit_command(line: &str) -> bool {
     line == "quit" || line == "exit"
 }
 
-async fn run_command(ctx: &mut Context, request: &str, commands: &[Box<dyn Command>]) {
-    let request = request.strip_suffix(";").unwrap_or(request);
+async fn run_command(ctx: &mut Context, request: &str, commands: &mut [Box<dyn Command>]) {
+    let request = request.strip_suffix(";").unwrap_or(request).trim_end();
 
     for command in commands {
         match command.matches(request, ctx).await {
