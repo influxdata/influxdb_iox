@@ -42,6 +42,7 @@ impl crate::command::Command for RemoteLoad {
                     current_database
                 );
 
+                let start = Instant::now();
                 let batches = scrape_query(&mut context.flight_client, current_database, line)
                     .await
                     .map_err(|e| format!("Error running remote query: {}", e))?;
@@ -51,6 +52,9 @@ impl crate::command::Command for RemoteLoad {
                     .format(&batches)
                     .map_err(|e| format!("Error formatting results from remote server: {}", e))?;
                 println!("{}", formatted_results);
+
+                println!("Query execution complete in {:?}", Instant::now() - start);
+
                 Ok(true)
             } else {
                 return Ok(false);
