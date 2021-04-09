@@ -28,6 +28,7 @@ members = [
     "read_buffer",
     "server",
     "test_helpers",
+    "tracker",
     "observability_deps",
     "wal",
 ]
@@ -57,6 +58,7 @@ panic_logging = { path = "panic_logging" }
 query = { path = "query" }
 read_buffer = { path = "read_buffer" }
 server = { path = "server" }
+tracker = { path = "tracker" }
 observability_deps = { path = "observability_deps" }
 wal = { path = "wal" }
 
@@ -72,7 +74,9 @@ flate2 = "1.0"
 futures = "0.3.1"
 http = "0.2.0"
 hyper = "0.14"
+once_cell = { version = "1.4.0", features = ["parking_lot"] }
 parking_lot = "0.11.1"
+itertools = "0.9.0"
 # used by arrow/datafusion anyway
 prettytable-rs = "0.8"
 prost = "0.7"
@@ -84,6 +88,7 @@ serde_urlencoded = "0.7.0"
 snafu = "0.6.9"
 structopt = "0.3.21"
 thiserror = "1.0.23"
+tikv-jemallocator = "0.4.0"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "parking_lot", "signal"] }
 tokio-stream = { version = "0.1.2", features = ["net"] }
 tokio-util = { version = "0.6.3" }
@@ -95,7 +100,6 @@ tonic-health = "0.3.0"
 influxdb2_client = { path = "influxdb2_client" }
 influxdb_iox_client = { path = "influxdb_iox_client", features = ["flight"] }
 test_helpers = { path = "test_helpers" }
-once_cell = { version = "1.4.0", features = ["parking_lot"] }
 parking_lot = "0.11.1"
 
 # Crates.io dependencies, in alphabetical order

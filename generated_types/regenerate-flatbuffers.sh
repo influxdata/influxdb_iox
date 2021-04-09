@@ -3,7 +3,7 @@
 # The commit where the Rust `flatbuffers` crate version was changed to the version in `Cargo.lock`
 # Update this, rerun this script, and check in the changes in the generated code when the
 # `flatbuffers` crate version is updated.
-FB_COMMIT="86401e078d0746d2381735415f8c2dfe849f3f52"
+FB_COMMIT="261cf3b20473abdf95fc34da0827e4986f065c39"
 
 # Change to the generated_types crate directory, where this script is located
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -38,15 +38,11 @@ echo "run: bazel build :flatc ..."
 bazel build :flatc
 popd
 
-WAL_FBS="$DIR/protos/wal.fbs"
-WAL_RS_DIR="$DIR/src"
-
-$FLATC --rust -o $WAL_RS_DIR $WAL_FBS
-
-ENTRY_FBS="$DIR/protos/influxdata/iox/write/v1/entry.fbs"
-ENTRY_RS_DIR="$DIR/src"
-
-$FLATC --rust -o $ENTRY_RS_DIR $ENTRY_FBS
+RUST_DIR="$DIR/src"
+while read -r FBS_FILE; do
+    echo "Compiling ${FBS_file}"
+    $FLATC --rust -o $RUST_DIR $FBS_FILE
+done < <(git ls-files $DIR/*.fbs)
 
 cargo fmt
 popd

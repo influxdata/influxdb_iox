@@ -1224,8 +1224,8 @@ pub mod influxdata {
                         args: &'args ColumnArgs<'args>,
                     ) -> flatbuffers::WIPOffset<Column<'bldr>> {
                         let mut builder = ColumnBuilder::new(_fbb);
-                        if let Some(x) = args.null_bitmask {
-                            builder.add_null_bitmask(x);
+                        if let Some(x) = args.null_mask {
+                            builder.add_null_mask(x);
                         }
                         if let Some(x) = args.values {
                             builder.add_values(x);
@@ -1242,7 +1242,7 @@ pub mod influxdata {
                     pub const VT_LOGICAL_COLUMN_TYPE: flatbuffers::VOffsetT = 6;
                     pub const VT_VALUES_TYPE: flatbuffers::VOffsetT = 8;
                     pub const VT_VALUES: flatbuffers::VOffsetT = 10;
-                    pub const VT_NULL_BITMASK: flatbuffers::VOffsetT = 12;
+                    pub const VT_NULL_MASK: flatbuffers::VOffsetT = 12;
 
                     #[inline]
                     pub fn name(&self) -> Option<&'a str> {
@@ -1273,10 +1273,10 @@ pub mod influxdata {
                             )
                     }
                     #[inline]
-                    pub fn null_bitmask(&self) -> Option<&'a [u8]> {
+                    pub fn null_mask(&self) -> Option<&'a [u8]> {
                         self._tab
                             .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u8>>>(
-                                Column::VT_NULL_BITMASK,
+                                Column::VT_NULL_MASK,
                                 None,
                             )
                             .map(|v| v.safe_slice())
@@ -1363,7 +1363,7 @@ pub mod influxdata {
           _ => Ok(()),
         }
      })?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>(&"null_bitmask", Self::VT_NULL_BITMASK, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>(&"null_mask", Self::VT_NULL_MASK, false)?
      .finish();
                         Ok(())
                     }
@@ -1373,7 +1373,7 @@ pub mod influxdata {
                     pub logical_column_type: LogicalColumnType,
                     pub values_type: ColumnValues,
                     pub values: Option<flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>>,
-                    pub null_bitmask: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
+                    pub null_mask: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
                 }
                 impl<'a> Default for ColumnArgs<'a> {
                     #[inline]
@@ -1383,7 +1383,7 @@ pub mod influxdata {
                             logical_column_type: LogicalColumnType::IOx,
                             values_type: ColumnValues::NONE,
                             values: None,
-                            null_bitmask: None,
+                            null_mask: None,
                         }
                     }
                 }
@@ -1427,13 +1427,13 @@ pub mod influxdata {
                         );
                     }
                     #[inline]
-                    pub fn add_null_bitmask(
+                    pub fn add_null_mask(
                         &mut self,
-                        null_bitmask: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u8>>,
+                        null_mask: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u8>>,
                     ) {
                         self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
-                            Column::VT_NULL_BITMASK,
-                            null_bitmask,
+                            Column::VT_NULL_MASK,
+                            null_mask,
                         );
                     }
                     #[inline]
@@ -1507,7 +1507,7 @@ pub mod influxdata {
                                 ds.field("values", &x)
                             }
                         };
-                        ds.field("null_bitmask", &self.null_bitmask());
+                        ds.field("null_mask", &self.null_mask());
                         ds.finish()
                     }
                 }
@@ -2498,8 +2498,8 @@ pub mod influxdata {
                     ) -> flatbuffers::WIPOffset<SequencedEntry<'bldr>> {
                         let mut builder = SequencedEntryBuilder::new(_fbb);
                         builder.add_clock_value(args.clock_value);
-                        if let Some(x) = args.entry {
-                            builder.add_entry(x);
+                        if let Some(x) = args.entry_bytes {
+                            builder.add_entry_bytes(x);
                         }
                         builder.add_writer_id(args.writer_id);
                         builder.finish()
@@ -2507,7 +2507,7 @@ pub mod influxdata {
 
                     pub const VT_CLOCK_VALUE: flatbuffers::VOffsetT = 4;
                     pub const VT_WRITER_ID: flatbuffers::VOffsetT = 6;
-                    pub const VT_ENTRY: flatbuffers::VOffsetT = 8;
+                    pub const VT_ENTRY_BYTES: flatbuffers::VOffsetT = 8;
 
                     #[inline]
                     pub fn clock_value(&self) -> u64 {
@@ -2522,11 +2522,13 @@ pub mod influxdata {
                             .unwrap()
                     }
                     #[inline]
-                    pub fn entry(&self) -> Option<Entry<'a>> {
-                        self._tab.get::<flatbuffers::ForwardsUOffset<Entry>>(
-                            SequencedEntry::VT_ENTRY,
-                            None,
-                        )
+                    pub fn entry_bytes(&self) -> Option<&'a [u8]> {
+                        self._tab
+                            .get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u8>>>(
+                                SequencedEntry::VT_ENTRY_BYTES,
+                                None,
+                            )
+                            .map(|v| v.safe_slice())
                     }
                 }
 
@@ -2538,21 +2540,17 @@ pub mod influxdata {
                     ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
                         use self::flatbuffers::Verifiable;
                         v.visit_table(pos)?
-                            .visit_field::<u64>(&"clock_value", Self::VT_CLOCK_VALUE, false)?
-                            .visit_field::<u32>(&"writer_id", Self::VT_WRITER_ID, false)?
-                            .visit_field::<flatbuffers::ForwardsUOffset<Entry>>(
-                                &"entry",
-                                Self::VT_ENTRY,
-                                false,
-                            )?
-                            .finish();
+     .visit_field::<u64>(&"clock_value", Self::VT_CLOCK_VALUE, false)?
+     .visit_field::<u32>(&"writer_id", Self::VT_WRITER_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>(&"entry_bytes", Self::VT_ENTRY_BYTES, false)?
+     .finish();
                         Ok(())
                     }
                 }
                 pub struct SequencedEntryArgs<'a> {
                     pub clock_value: u64,
                     pub writer_id: u32,
-                    pub entry: Option<flatbuffers::WIPOffset<Entry<'a>>>,
+                    pub entry_bytes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
                 }
                 impl<'a> Default for SequencedEntryArgs<'a> {
                     #[inline]
@@ -2560,7 +2558,7 @@ pub mod influxdata {
                         SequencedEntryArgs {
                             clock_value: 0,
                             writer_id: 0,
-                            entry: None,
+                            entry_bytes: None,
                         }
                     }
                 }
@@ -2580,10 +2578,13 @@ pub mod influxdata {
                             .push_slot::<u32>(SequencedEntry::VT_WRITER_ID, writer_id, 0);
                     }
                     #[inline]
-                    pub fn add_entry(&mut self, entry: flatbuffers::WIPOffset<Entry<'b>>) {
-                        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Entry>>(
-                            SequencedEntry::VT_ENTRY,
-                            entry,
+                    pub fn add_entry_bytes(
+                        &mut self,
+                        entry_bytes: flatbuffers::WIPOffset<flatbuffers::Vector<'b, u8>>,
+                    ) {
+                        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+                            SequencedEntry::VT_ENTRY_BYTES,
+                            entry_bytes,
                         );
                     }
                     #[inline]
@@ -2608,7 +2609,7 @@ pub mod influxdata {
                         let mut ds = f.debug_struct("SequencedEntry");
                         ds.field("clock_value", &self.clock_value());
                         ds.field("writer_id", &self.writer_id());
-                        ds.field("entry", &self.entry());
+                        ds.field("entry_bytes", &self.entry_bytes());
                         ds.finish()
                     }
                 }
