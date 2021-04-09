@@ -742,7 +742,7 @@ impl TryFrom<management::partition_template::Part> for TemplatePart {
 }
 
 /// ShardId maps to a nodegroup that holds the the shard.
-pub type ShardId = u16;
+pub type ShardId = u32;
 
 /// Assigns a given line to a specific shard id.
 pub trait Sharder {

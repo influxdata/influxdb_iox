@@ -623,6 +623,7 @@ pub mod influxdata {
                         args: &'args EntryArgs,
                     ) -> flatbuffers::WIPOffset<Entry<'bldr>> {
                         let mut builder = EntryBuilder::new(_fbb);
+                        builder.add_shard_id(args.shard_id);
                         if let Some(x) = args.operation {
                             builder.add_operation(x);
                         }
@@ -632,6 +633,7 @@ pub mod influxdata {
 
                     pub const VT_OPERATION_TYPE: flatbuffers::VOffsetT = 4;
                     pub const VT_OPERATION: flatbuffers::VOffsetT = 6;
+                    pub const VT_SHARD_ID: flatbuffers::VOffsetT = 8;
 
                     #[inline]
                     pub fn operation_type(&self) -> Operation {
@@ -646,6 +648,10 @@ pub mod influxdata {
                                 Entry::VT_OPERATION,
                                 None,
                             )
+                    }
+                    #[inline]
+                    pub fn shard_id(&self) -> u32 {
+                        self._tab.get::<u32>(Entry::VT_SHARD_ID, Some(0)).unwrap()
                     }
                     #[inline]
                     #[allow(non_snake_case)]
@@ -683,6 +689,7 @@ pub mod influxdata {
           _ => Ok(()),
         }
      })?
+     .visit_field::<u32>(&"shard_id", Self::VT_SHARD_ID, false)?
      .finish();
                         Ok(())
                     }
@@ -690,6 +697,7 @@ pub mod influxdata {
                 pub struct EntryArgs {
                     pub operation_type: Operation,
                     pub operation: Option<flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>>,
+                    pub shard_id: u32,
                 }
                 impl<'a> Default for EntryArgs {
                     #[inline]
@@ -697,6 +705,7 @@ pub mod influxdata {
                         EntryArgs {
                             operation_type: Operation::NONE,
                             operation: None,
+                            shard_id: 0,
                         }
                     }
                 }
@@ -722,6 +731,10 @@ pub mod influxdata {
                             Entry::VT_OPERATION,
                             operation,
                         );
+                    }
+                    #[inline]
+                    pub fn add_shard_id(&mut self, shard_id: u32) {
+                        self.fbb_.push_slot::<u32>(Entry::VT_SHARD_ID, shard_id, 0);
                     }
                     #[inline]
                     pub fn new(
@@ -764,6 +777,7 @@ pub mod influxdata {
                                 ds.field("operation", &x)
                             }
                         };
+                        ds.field("shard_id", &self.shard_id());
                         ds.finish()
                     }
                 }

@@ -115,6 +115,7 @@ fn build_sharded_entry(
         &entry_fb::EntryArgs {
             operation_type: entry_fb::Operation::write,
             operation: Some(write_operations.as_union_value()),
+            shard_id,
         },
     );
 
@@ -1726,7 +1727,7 @@ mod tests {
         assert_eq!(&values, &[None, Some(23.2), None]);
     }
 
-    fn sharder(count: u16) -> TestSharder {
+    fn sharder(count: ShardId) -> TestSharder {
         TestSharder {
             count,
             n: std::cell::RefCell::new(0),
@@ -1735,12 +1736,12 @@ mod tests {
 
     // For each line passed to shard returns a shard id from [0, count) in order
     struct TestSharder {
-        count: u16,
-        n: std::cell::RefCell<u16>,
+        count: ShardId,
+        n: std::cell::RefCell<ShardId>,
     }
 
     impl Sharder for TestSharder {
-        fn shard(&self, _line: &ParsedLine<'_>) -> Result<u16, DataError> {
+        fn shard(&self, _line: &ParsedLine<'_>) -> Result<ShardId, DataError> {
             let n = *self.n.borrow();
             self.n.replace(n + 1);
             Ok(n % self.count)

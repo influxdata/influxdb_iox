@@ -37,6 +37,7 @@ table DeleteOperations {
 
 table Entry {
   operation: Operation;
+  shard_id: uint32;
 }
 
 // A write to a  partition. If the IOx server creating this PartitionWrite has

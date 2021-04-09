@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use criterion::{criterion_group, criterion_main, Criterion};
-use data_types::database_rules::{Error as DataError, Partitioner, Sharder};
+use data_types::database_rules::{Error as DataError, Partitioner, ShardId, Sharder};
 use influxdb_line_protocol::ParsedLine;
 use internal_types::entry::{lines_to_sharded_entries, SequencedEntry};
 
@@ -43,7 +43,7 @@ criterion_group!(benches, sequenced_entry);
 
 criterion_main!(benches);
 
-fn sharder(count: u16) -> TestSharder {
+fn sharder(count: ShardId) -> TestSharder {
     TestSharder {
         count,
         n: std::cell::RefCell::new(0),
@@ -52,12 +52,12 @@ fn sharder(count: u16) -> TestSharder {
 
 // For each line passed to shard returns a shard id from [0, count) in order
 struct TestSharder {
-    count: u16,
-    n: std::cell::RefCell<u16>,
+    count: ShardId,
+    n: std::cell::RefCell<ShardId>,
 }
 
 impl Sharder for TestSharder {
-    fn shard(&self, _line: &ParsedLine<'_>) -> Result<u16, DataError> {
+    fn shard(&self, _line: &ParsedLine<'_>) -> Result<ShardId, DataError> {
         let n = *self.n.borrow();
         self.n.replace(n + 1);
         Ok(n % self.count)
