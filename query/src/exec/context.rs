@@ -163,12 +163,14 @@ impl IOxExecutionContext {
         // executors threads for extended periods of time. Thus use a
         // dedicated tokio runtime to run them.
 
-
-
-        // According to stack overflow, to get a new runtime, we need to spawn our own thread
-        // https://stackoverflow.com/questions/62536566/how-can-i-create-a-tokio-runtime-inside-another-tokio-runtime-without-getting-th
+        // According to stack overflow, to get a new runtime, we need to spawn our own
+        // thread https://stackoverflow.com/questions/62536566/how-can-i-create-a-tokio-runtime-inside-another-tokio-runtime-without-getting-th
         // If you try to do thus from a async context you see:
-        // thread 'plan::stringset::tests::test_builder_plan' panicked at 'Cannot drop a runtime in a context where blocking is not allowed. This happens when a runtime is dropped from within an asynchronous context.', /Users/alamb/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.4.0/src/runtime/blocking/shutdown.rs:51:21
+        // thread 'plan::stringset::tests::test_builder_plan' panicked at 'Cannot drop a
+        // runtime in a context where blocking is not allowed. This happens when a
+        // runtime is dropped from within an asynchronous context.',
+        // /Users/alamb/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.4.0/src/
+        // runtime/blocking/shutdown.rs:51:21
 
         use std::thread;
 
@@ -192,8 +194,9 @@ impl IOxExecutionContext {
             let res = runtime.block_on(collect(physical_plan));
             println!("collect invocation complete on executor thread");
             res
-        }).join().expect("executor Thread panicked")
-
+        })
+        .join()
+        .expect("executor Thread panicked")
     }
 
     /// Executes the physical plan and produces a RecordBatchStream to stream
