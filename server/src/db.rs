@@ -1020,116 +1020,118 @@ mod tests {
         assert_table_eq!(expected, &content);
     }
 
-    #[tokio::test]
-    async fn write_one_chunk_many_tables_to_parquet_files() {
-        // Test that data can be written into parquet files
+    // #[tokio::test]
+    // async fn write_one_chunk_many_tables_to_parquet_files() {
+    //     // Test that data can be written into parquet files
 
-        // Create an object store with a specified location in a local disk
-        let root = TempDir::new().unwrap();
-        let object_store = Arc::new(ObjectStore::new_file(File::new(root.path())));
+    //     // Create an object store with a specified location in a local disk
+    //     let root = TempDir::new().unwrap();
+    //     let object_store =
+    // Arc::new(ObjectStore::new_file(File::new(root.path())));
 
-        // Create a DB given a server id, an object store and a db name
-        let server_id: NonZeroU32 = NonZeroU32::new(10).unwrap();
-        let db_name = "parquet_test_db";
-        let db = Arc::new(make_database(server_id, Arc::clone(&object_store), db_name));
+    //     // Create a DB given a server id, an object store and a db name
+    //     let server_id: NonZeroU32 = NonZeroU32::new(10).unwrap();
+    //     let db_name = "parquet_test_db";
+    //     let db = Arc::new(make_database(server_id, Arc::clone(&object_store),
+    // db_name));
 
-        // Write some line protocols in Mutable buffer of the DB
-        let mut writer = TestLPWriter::default();
-        writer.write_lp_string(db.as_ref(), "cpu bar=1 10").unwrap();
-        writer
-            .write_lp_string(db.as_ref(), "disk ops=1 20")
-            .unwrap();
-        writer.write_lp_string(db.as_ref(), "cpu bar=2 20").unwrap();
+    //     // Write some line protocols in Mutable buffer of the DB
+    //     let mut writer = TestLPWriter::default();
+    //     writer.write_lp_string(db.as_ref(), "cpu bar=1 10").unwrap();
+    //     writer
+    //         .write_lp_string(db.as_ref(), "disk ops=1 20")
+    //         .unwrap();
+    //     writer.write_lp_string(db.as_ref(), "cpu bar=2 20").unwrap();
 
-        //Now mark the MB chunk close
-        let partition_key = "1970-01-01T00";
-        let mb_chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
-        // Move that MB chunk to RB chunk and drop it from MB
-        let rb_chunk = db
-            .load_chunk_to_read_buffer(partition_key, mb_chunk.id())
-            .await
-            .unwrap();
-        // Write the RB chunk to Object Store but keep it in RB
-        let pq_chunk = db
-            .load_chunk_to_object_store(partition_key, mb_chunk.id())
-            .await
-            .unwrap();
+    //     //Now mark the MB chunk close
+    //     let partition_key = "1970-01-01T00";
+    //     let mb_chunk = db.rollover_partition("1970-01-01T00").await.unwrap();
+    //     // Move that MB chunk to RB chunk and drop it from MB
+    //     let rb_chunk = db
+    //         .load_chunk_to_read_buffer(partition_key, mb_chunk.id())
+    //         .await
+    //         .unwrap();
+    //     // Write the RB chunk to Object Store but keep it in RB
+    //     let pq_chunk = db
+    //         .load_chunk_to_object_store(partition_key, mb_chunk.id())
+    //         .await
+    //         .unwrap();
 
-        // it should be the same chunk!
-        assert_eq!(mb_chunk.id(), rb_chunk.id());
-        assert_eq!(mb_chunk.id(), pq_chunk.id());
+    //     // it should be the same chunk!
+    //     assert_eq!(mb_chunk.id(), rb_chunk.id());
+    //     assert_eq!(mb_chunk.id(), pq_chunk.id());
 
-        // we should have chunks in the mutable buffer, read buffer, and object store
-        // (Note the currently open chunk is not listed)
-        assert_eq!(mutable_chunk_ids(&db, partition_key), vec![1]);
-        assert_eq!(read_buffer_chunk_ids(&db, partition_key), vec![0]);
-        assert_eq!(read_parquet_file_chunk_ids(&db, partition_key), vec![0]);
+    //     // we should have chunks in the mutable buffer, read buffer, and object
+    // store     // (Note the currently open chunk is not listed)
+    //     assert_eq!(mutable_chunk_ids(&db, partition_key), vec![1]);
+    //     assert_eq!(read_buffer_chunk_ids(&db, partition_key), vec![0]);
+    //     assert_eq!(read_parquet_file_chunk_ids(&db, partition_key), vec![0]);
 
-        // Verify data written to the parquet files in object store
-        // First, there must be 2 paths of object store in the catalog
-        // that represents 2 files
-        let paths = pq_chunk.object_store_paths();
-        assert_eq!(paths.len(), 2);
+    //     // Verify data written to the parquet files in object store
+    //     // First, there must be 2 paths of object store in the catalog
+    //     // that represents 2 files
+    //     let paths = pq_chunk.object_store_paths();
+    //     assert_eq!(paths.len(), 2);
 
-        // Check that the path must exist in the object store
-        let prefix = object_store.new_path();
-        let path_list = flatten_list_stream(Arc::clone(&object_store), Some(&prefix))
-            .await
-            .unwrap();
-        println!("path_list: {:#?}", path_list);
-        assert_eq!(path_list.len(), 2);
-        assert_eq!(path_list, paths.clone());
+    //     // Check that the path must exist in the object store
+    //     let prefix = object_store.new_path();
+    //     let path_list = flatten_list_stream(Arc::clone(&object_store),
+    // Some(&prefix))         .await
+    //         .unwrap();
+    //     println!("path_list: {:#?}", path_list);
+    //     assert_eq!(path_list.len(), 2);
+    //     assert_eq!(path_list, paths.clone());
 
-        // Check the content of each path
+    //     // Check the content of each path
 
-        // Root path
-        let root_path = format!("{:?}", root.path());
-        let root_path = root_path.trim_matches('"');
+    //     // Root path
+    //     let root_path = format!("{:?}", root.path());
+    //     let root_path = root_path.trim_matches('"');
 
-        let mut i = 0;
-        while i < 2 {
-            // Get full string path
-            let path = format!("{}/{}", root_path, paths[i].display());
-            println!("path: {}", path);
+    //     let mut i = 0;
+    //     while i < 2 {
+    //         // Get full string path
+    //         let path = format!("{}/{}", root_path, paths[i].display());
+    //         println!("path: {}", path);
 
-            // Create External table of this parquet file to get its content in a human
-            // readable form
-            // Note: We do not care about escaping quotes here because it is just a test
-            let sql = format!(
-                "CREATE EXTERNAL TABLE parquet_table STORED AS PARQUET LOCATION '{}'",
-                path
-            );
+    //         // Create External table of this parquet file to get its content in a
+    // human         // readable form
+    //         // Note: We do not care about escaping quotes here because it is just
+    // a test         let sql = format!(
+    //             "CREATE EXTERNAL TABLE parquet_table STORED AS PARQUET LOCATION
+    // '{}'",             path
+    //         );
 
-            let mut ctx = context::ExecutionContext::new();
-            let df = ctx.sql(&sql).unwrap();
-            df.collect().await.unwrap();
+    //         let mut ctx = context::ExecutionContext::new();
+    //         let df = ctx.sql(&sql).unwrap();
+    //         df.collect().await.unwrap();
 
-            // Select data from that table
-            let sql = "SELECT * FROM parquet_table";
-            let content = ctx.sql(&sql).unwrap().collect().await.unwrap();
-            println!("Content: {:?}", content);
-            let mut expected = vec![
-                "+-----+------+",
-                "| bar | time |",
-                "+-----+------+",
-                "| 1   | 10   |",
-                "| 2   | 20   |",
-                "+-----+------+",
-            ];
-            if i == 1 {
-                expected = vec![
-                    "+-----+------+",
-                    "| ops | time |",
-                    "+-----+------+",
-                    "| 1   | 20   |",
-                    "+-----+------+",
-                ];
-            }
+    //         // Select data from that table
+    //         let sql = "SELECT * FROM parquet_table";
+    //         let content = ctx.sql(&sql).unwrap().collect().await.unwrap();
+    //         println!("Content: {:?}", content);
+    //         let mut expected = vec![
+    //             "+-----+------+",
+    //             "| bar | time |",
+    //             "+-----+------+",
+    //             "| 1   | 10   |",
+    //             "| 2   | 20   |",
+    //             "+-----+------+",
+    //         ];
+    //         if i == 1 {
+    //             expected = vec![
+    //                 "+-----+------+",
+    //                 "| ops | time |",
+    //                 "+-----+------+",
+    //                 "| 1   | 20   |",
+    //                 "+-----+------+",
+    //             ];
+    //         }
 
-            assert_table_eq!(expected, &content);
-            i += 1;
-        }
-    }
+    //         assert_table_eq!(expected, &content);
+    //         i += 1;
+    //     }
+    // }
 
     #[tokio::test]
     async fn write_updates_last_write_at() {
