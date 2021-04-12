@@ -154,13 +154,46 @@ impl IOxExecutionContext {
         self.inner.create_physical_plan(&plan)
     }
 
-    /// Executes the logical plan using DataFusion and produces RecordBatches
+    /// Executes the logical plan using DataFusion on a separate
+    /// thread pool and produces RecordBatches
     pub async fn collect(&self, physical_plan: Arc<dyn ExecutionPlan>) -> Result<Vec<RecordBatch>> {
         self.counters.inc_plans_run();
 
-        debug!("Running plan, physical:\n{:?}", physical_plan);
+        // DataFusion plans are "CPU" bound and thus can consume tokio
+        // executors threads for extended periods of time. Thus use a
+        // dedicated tokio runtime to run them.
 
-        collect(physical_plan).await
+
+
+        // According to stack overflow, to get a new runtime, we need to spawn our own thread
+        // https://stackoverflow.com/questions/62536566/how-can-i-create-a-tokio-runtime-inside-another-tokio-runtime-without-getting-th
+        // If you try to do thus from a async context you see:
+        // thread 'plan::stringset::tests::test_builder_plan' panicked at 'Cannot drop a runtime in a context where blocking is not allowed. This happens when a runtime is dropped from within an asynchronous context.', /Users/alamb/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.4.0/src/runtime/blocking/shutdown.rs:51:21
+
+        use std::thread;
+
+        // This is definitely not cool long term, but short term just
+        // block this tokio executor while the plan is running
+        println!("Starting to run plan on separate thread...");
+
+        thread::spawn(|| {
+            // build runtime
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(4)
+                .thread_name("datafusion-executor")
+                .build()
+                .expect("Creating tokio runtime");
+
+            // By entering the context, we all `tokio::spawn` to this executor.
+            let _guard = runtime.enter();
+            debug!("Running plan, physical:\n{:?}", physical_plan);
+
+            println!("Starting collect invocation on executor thread");
+            let res = runtime.block_on(collect(physical_plan));
+            println!("collect invocation complete on executor thread");
+            res
+        }).join().expect("executor Thread panicked")
+
     }
 
     /// Executes the physical plan and produces a RecordBatchStream to stream
