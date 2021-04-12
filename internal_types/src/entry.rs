@@ -2,7 +2,7 @@
 //! from line protocol and the `DatabaseRules` configuration.
 
 use crate::schema::TIME_COLUMN_NAME;
-use data_types::database_rules::{Error as DataError, Partitioner, ShardId, Sharder};
+use data_types::database_rules::{Error as DataError, Partitioner, ShardId, Sharder, WriterId};
 use generated_types::entry as entry_fb;
 use influxdb_line_protocol::{FieldValue, ParsedLine};
 
@@ -337,8 +337,10 @@ pub struct PartitionWrite<'a> {
 }
 
 impl<'a> PartitionWrite<'a> {
-    pub fn key(&self) -> Option<&str> {
-        self.fb.key()
+    pub fn key(&self) -> &str {
+        self.fb
+            .key()
+            .expect("key must be present in the flatbuffer PartitionWrite")
     }
 
     pub fn table_batches(&self) -> Vec<TableBatch<'_>> {
@@ -360,8 +362,10 @@ pub struct TableBatch<'a> {
 }
 
 impl<'a> TableBatch<'a> {
-    pub fn name(&self) -> Option<&str> {
-        self.fb.name()
+    pub fn name(&self) -> &str {
+        self.fb
+            .name()
+            .expect("name must be present in flatbuffers TableWriteBatch")
     }
 
     pub fn columns(&self) -> Vec<Column<'_>> {
@@ -420,16 +424,30 @@ impl<'a> TableBatch<'a> {
 #[derive(Debug)]
 pub struct Column<'a> {
     fb: entry_fb::Column<'a>,
-    row_count: usize,
+    pub row_count: usize,
 }
 
 impl<'a> Column<'a> {
-    pub fn name(&self) -> Option<&str> {
-        self.fb.name()
+    pub fn name(&self) -> &str {
+        self.fb
+            .name()
+            .expect("name must be present in flatbuffers Column")
     }
 
     pub fn logical_type(&self) -> entry_fb::LogicalColumnType {
         self.fb.logical_column_type()
+    }
+
+    pub fn is_tag(&self) -> bool {
+        self.fb.logical_column_type() == entry_fb::LogicalColumnType::Tag
+    }
+
+    pub fn is_field(&self) -> bool {
+        self.fb.logical_column_type() == entry_fb::LogicalColumnType::Field
+    }
+
+    pub fn is_time(&self) -> bool {
+        self.fb.logical_column_type() == entry_fb::LogicalColumnType::Time
     }
 
     pub fn values(&self) -> TypedValuesIterator<'a> {
@@ -554,12 +572,22 @@ impl<'a> TypedValuesIterator<'a> {
             _ => None,
         }
     }
+
+    pub fn type_description(&self) -> &str {
+        match self {
+            Self::Bool(_) => "bool",
+            Self::I64(_) => "i64",
+            Self::F64(_) => "f64",
+            Self::U64(_) => "u64",
+            Self::String(_) => "String",
+        }
+    }
 }
 
 /// Iterator over the flatbuffers BoolValues
 #[derive(Debug)]
 pub struct BoolIterator<'a> {
-    row_count: usize,
+    pub row_count: usize,
     position: usize,
     null_mask: Option<&'a [u8]>,
     values: &'a [bool],
@@ -589,7 +617,7 @@ impl<'a> Iterator for BoolIterator<'a> {
 /// Iterator over the flatbuffers I64Values, F64Values, and U64Values.
 #[derive(Debug)]
 pub struct ValIterator<'a, T: Follow<'a> + Follow<'a, Inner = T>> {
-    row_count: usize,
+    pub row_count: usize,
     position: usize,
     null_mask: Option<&'a [u8]>,
     values_iter: VectorIter<'a, T>,
@@ -615,7 +643,7 @@ impl<'a, T: Follow<'a> + Follow<'a, Inner = T>> Iterator for ValIterator<'a, T> 
 /// Iterator over the flatbuffers StringValues
 #[derive(Debug)]
 pub struct StringIterator<'a> {
-    row_count: usize,
+    pub row_count: usize,
     position: usize,
     null_mask: Option<&'a [u8]>,
     values: VectorIter<'a, ForwardsUOffset<&'a str>>,
@@ -1087,6 +1115,19 @@ enum ColumnRaw<'a> {
     Bool(Vec<bool>),
 }
 
+#[derive(Debug, PartialOrd, PartialEq, Copy, Clone)]
+pub struct ClockValue(u64);
+
+impl ClockValue {
+    pub fn get(&self) -> u64 {
+        self.0
+    }
+
+    pub fn new(v: u64) -> Self {
+        Self { 0: v }
+    }
+}
+
 #[self_referencing]
 #[derive(Debug)]
 pub struct SequencedEntry {
@@ -1101,7 +1142,7 @@ pub struct SequencedEntry {
 
 impl SequencedEntry {
     pub fn new_from_entry_bytes(
-        clock_value: u64,
+        clock_value: ClockValue,
         writer_id: u32,
         entry_bytes: &[u8],
     ) -> Result<Self> {
@@ -1118,7 +1159,7 @@ impl SequencedEntry {
         let sequenced_entry = entry_fb::SequencedEntry::create(
             &mut fbb,
             &entry_fb::SequencedEntryArgs {
-                clock_value,
+                clock_value: clock_value.get(),
                 writer_id,
                 entry_bytes: Some(entry_bytes),
             },
@@ -1151,11 +1192,11 @@ impl SequencedEntry {
         }
     }
 
-    pub fn clock_value(&self) -> u64 {
-        self.fb().clock_value()
+    pub fn clock_value(&self) -> ClockValue {
+        ClockValue::new(self.fb().clock_value())
     }
 
-    pub fn writer_id(&self) -> u32 {
+    pub fn writer_id(&self) -> WriterId {
         self.fb().writer_id()
     }
 }
@@ -1180,10 +1221,81 @@ impl TryFrom<Vec<u8>> for SequencedEntry {
     }
 }
 
+pub mod test_helpers {
+    use super::*;
+    use influxdb_line_protocol::parse_lines;
+
+    /// Converts the line protocol to a vec of ShardedEntry with a single shard
+    /// and a single partition
+    pub fn lp_to_entry(lp: &str) -> Entry {
+        let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
+
+        lines_to_sharded_entries(&lines, &sharder(1), &partitioner(1))
+            .unwrap()
+            .pop()
+            .unwrap()
+            .entry
+    }
+
+    /// Returns a test sharder that will assign shard ids from [0, count)
+    /// incrementing for each line.
+    pub fn sharder(count: u16) -> TestSharder {
+        TestSharder {
+            count,
+            n: std::cell::RefCell::new(0),
+        }
+    }
+
+    // For each line passed to shard returns a shard id from [0, count) in order
+    #[derive(Debug)]
+    pub struct TestSharder {
+        count: u16,
+        n: std::cell::RefCell<u16>,
+    }
+
+    impl Sharder for TestSharder {
+        fn shard(&self, _line: &ParsedLine<'_>) -> Result<u16, DataError> {
+            let n = *self.n.borrow();
+            self.n.replace(n + 1);
+            Ok(n % self.count)
+        }
+    }
+
+    /// Returns a test partitioner that will assign partition keys in the form
+    /// key_# where # is replaced by a number `[0, count)` incrementing for
+    /// each line.
+    pub fn partitioner(count: u8) -> TestPartitioner {
+        TestPartitioner {
+            count,
+            n: std::cell::RefCell::new(0),
+        }
+    }
+
+    // For each line passed to partition_key returns a key with a number from
+    // `[0, count)`
+    #[derive(Debug)]
+    pub struct TestPartitioner {
+        count: u8,
+        n: std::cell::RefCell<u8>,
+    }
+
+    impl Partitioner for TestPartitioner {
+        fn partition_key(
+            &self,
+            _line: &ParsedLine<'_>,
+            _default_time: &DateTime<Utc>,
+        ) -> data_types::database_rules::Result<String> {
+            let n = *self.n.borrow();
+            self.n.replace(n + 1);
+            Ok(format!("key_{}", n % self.count))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::test_helpers::*;
     use super::*;
-
     use influxdb_line_protocol::parse_lines;
 
     #[test]
@@ -1219,8 +1331,8 @@ mod tests {
 
         let partition_writes = sharded_entries[0].entry.partition_writes().unwrap();
         assert_eq!(partition_writes.len(), 2);
-        assert_eq!(partition_writes[0].key().unwrap(), "key_0");
-        assert_eq!(partition_writes[1].key().unwrap(), "key_1");
+        assert_eq!(partition_writes[0].key(), "key_0");
+        assert_eq!(partition_writes[1].key(), "key_1");
     }
 
     #[test]
@@ -1242,9 +1354,9 @@ mod tests {
         let table_batches = partition_writes[0].table_batches();
 
         assert_eq!(table_batches.len(), 3);
-        assert_eq!(table_batches[0].name().unwrap(), "cpu");
-        assert_eq!(table_batches[1].name().unwrap(), "disk");
-        assert_eq!(table_batches[2].name().unwrap(), "mem");
+        assert_eq!(table_batches[0].name(), "cpu");
+        assert_eq!(table_batches[1].name(), "disk");
+        assert_eq!(table_batches[2].name(), "mem");
     }
 
     #[test]
@@ -1263,22 +1375,22 @@ mod tests {
 
         assert_eq!(columns.len(), 5);
 
-        assert_eq!(columns[0].name().unwrap(), "host");
+        assert_eq!(columns[0].name(), "host");
         assert_eq!(columns[0].logical_type(), entry_fb::LogicalColumnType::Tag);
 
-        assert_eq!(columns[1].name().unwrap(), "region");
+        assert_eq!(columns[1].name(), "region");
         assert_eq!(columns[1].logical_type(), entry_fb::LogicalColumnType::Tag);
 
-        assert_eq!(columns[2].name().unwrap(), "time");
+        assert_eq!(columns[2].name(), "time");
         assert_eq!(columns[2].logical_type(), entry_fb::LogicalColumnType::Time);
 
-        assert_eq!(columns[3].name().unwrap(), "val");
+        assert_eq!(columns[3].name(), "val");
         assert_eq!(
             columns[3].logical_type(),
             entry_fb::LogicalColumnType::Field
         );
 
-        assert_eq!(columns[4].name().unwrap(), "val2");
+        assert_eq!(columns[4].name(), "val2");
         assert_eq!(
             columns[4].logical_type(),
             entry_fb::LogicalColumnType::Field
@@ -1312,17 +1424,17 @@ mod tests {
         assert_eq!(columns.len(), 7);
 
         let col = columns.get(0).unwrap();
-        assert_eq!(col.name().unwrap(), "bval");
+        assert_eq!(col.name(), "bval");
         let values = col.values().bool_values().unwrap();
         assert_eq!(&values, &[Some(true), Some(false)]);
 
         let col = columns.get(1).unwrap();
-        assert_eq!(col.name().unwrap(), "fval");
+        assert_eq!(col.name(), "fval");
         let values = col.values().f64_values().unwrap();
         assert_eq!(&values, &[Some(1.2), Some(2.2)]);
 
         let col = columns.get(2).unwrap();
-        assert_eq!(col.name().unwrap(), "host");
+        assert_eq!(col.name(), "host");
         let values = match col.values() {
             TypedValuesIterator::String(v) => v,
             _ => panic!("wrong type"),
@@ -1331,12 +1443,12 @@ mod tests {
         assert_eq!(&values, &[Some("a"), Some("b")]);
 
         let col = columns.get(3).unwrap();
-        assert_eq!(col.name().unwrap(), "ival");
+        assert_eq!(col.name(), "ival");
         let values = col.values().i64_values().unwrap();
         assert_eq!(&values, &[Some(23), Some(22)]);
 
         let col = columns.get(4).unwrap();
-        assert_eq!(col.name().unwrap(), "sval");
+        assert_eq!(col.name(), "sval");
         let values = match col.values() {
             TypedValuesIterator::String(v) => v,
             _ => panic!("wrong type"),
@@ -1345,12 +1457,12 @@ mod tests {
         assert_eq!(&values, &[Some("hi"), Some("world")]);
 
         let col = columns.get(5).unwrap();
-        assert_eq!(col.name().unwrap(), TIME_COLUMN_NAME);
+        assert_eq!(col.name(), TIME_COLUMN_NAME);
         let values = col.values().i64_values().unwrap();
         assert_eq!(&values, &[Some(1), Some(2)]);
 
         let col = columns.get(6).unwrap();
-        assert_eq!(col.name().unwrap(), "uval");
+        assert_eq!(col.name(), "uval");
         let values = col.values().u64_values().unwrap();
         assert_eq!(&values, &[Some(7), Some(1)]);
     }
@@ -1383,13 +1495,13 @@ mod tests {
         assert_eq!(columns.len(), 7);
 
         let col = columns.get(0).unwrap();
-        assert_eq!(col.name().unwrap(), "bool");
+        assert_eq!(col.name(), "bool");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Field);
         let values = col.values().bool_values().unwrap();
         assert_eq!(&values, &[None, None, Some(true)]);
 
         let col = columns.get(1).unwrap();
-        assert_eq!(col.name().unwrap(), "host");
+        assert_eq!(col.name(), "host");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Tag);
         let values = match col.values() {
             TypedValuesIterator::String(v) => v,
@@ -1399,7 +1511,7 @@ mod tests {
         assert_eq!(&values, &[Some("a"), Some("a"), None]);
 
         let col = columns.get(2).unwrap();
-        assert_eq!(col.name().unwrap(), "region");
+        assert_eq!(col.name(), "region");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Tag);
         let values = match col.values() {
             TypedValuesIterator::String(v) => v,
@@ -1409,7 +1521,7 @@ mod tests {
         assert_eq!(&values, &[None, Some("west"), None]);
 
         let col = columns.get(3).unwrap();
-        assert_eq!(col.name().unwrap(), "string");
+        assert_eq!(col.name(), "string");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Field);
         let values = match col.values() {
             TypedValuesIterator::String(v) => v,
@@ -1419,19 +1531,19 @@ mod tests {
         assert_eq!(&values, &[None, None, Some("hello")]);
 
         let col = columns.get(4).unwrap();
-        assert_eq!(col.name().unwrap(), TIME_COLUMN_NAME);
+        assert_eq!(col.name(), TIME_COLUMN_NAME);
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Time);
         let values = col.values().i64_values().unwrap();
         assert_eq!(&values, &[Some(983), Some(2343), Some(222)]);
 
         let col = columns.get(5).unwrap();
-        assert_eq!(col.name().unwrap(), "val");
+        assert_eq!(col.name(), "val");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Field);
         let values = col.values().i64_values().unwrap();
         assert_eq!(&values, &[Some(23), None, Some(21)]);
 
         let col = columns.get(6).unwrap();
-        assert_eq!(col.name().unwrap(), "val2");
+        assert_eq!(col.name(), "val2");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Field);
         let values = col.values().f64_values().unwrap();
         assert_eq!(&values, &[None, Some(23.2), None]);
@@ -1504,7 +1616,7 @@ mod tests {
 
         assert_eq!(batch.row_count(), 1);
         let col = columns.get(1).unwrap();
-        assert_eq!(col.name().unwrap(), "val");
+        assert_eq!(col.name(), "val");
         let values = col.values().i64_values().unwrap();
         assert_eq!(&values, &[Some(1)]);
 
@@ -1535,7 +1647,7 @@ mod tests {
 
         assert_eq!(batch.row_count(), 8);
         let col = columns.get(1).unwrap();
-        assert_eq!(col.name().unwrap(), "val");
+        assert_eq!(col.name(), "val");
         let values = col.values().i64_values().unwrap();
         assert_eq!(
             &values,
@@ -1579,7 +1691,7 @@ mod tests {
 
         assert_eq!(batch.row_count(), 9);
         let col = columns.get(1).unwrap();
-        assert_eq!(col.name().unwrap(), "val");
+        assert_eq!(col.name(), "val");
         let values = col.values().i64_values().unwrap();
         assert_eq!(
             &values,
@@ -1618,7 +1730,7 @@ mod tests {
         let columns = batch.columns();
 
         let col = columns.get(0).unwrap();
-        assert_eq!(col.name().unwrap(), TIME_COLUMN_NAME);
+        assert_eq!(col.name(), TIME_COLUMN_NAME);
         let values = col.values().i64_values().unwrap();
         assert!(values[0].unwrap() > t);
         assert_eq!(values[1], Some(123));
@@ -1658,8 +1770,10 @@ mod tests {
             lines_to_sharded_entries(&lines, &sharder(1), &partitioner(1)).unwrap();
 
         let entry_bytes = sharded_entries.first().unwrap().entry.data();
-        let sequenced_entry = SequencedEntry::new_from_entry_bytes(23, 2, entry_bytes).unwrap();
-        assert_eq!(sequenced_entry.clock_value(), 23);
+        let clock_value = ClockValue::new(23);
+        let sequenced_entry =
+            SequencedEntry::new_from_entry_bytes(clock_value, 2, entry_bytes).unwrap();
+        assert_eq!(sequenced_entry.clock_value(), clock_value);
         assert_eq!(sequenced_entry.writer_id(), 2);
 
         let partition_writes = sequenced_entry.partition_writes().unwrap();
@@ -1672,13 +1786,13 @@ mod tests {
         assert_eq!(columns.len(), 7);
 
         let col = columns.get(0).unwrap();
-        assert_eq!(col.name().unwrap(), "bool");
+        assert_eq!(col.name(), "bool");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Field);
         let values = col.values().bool_values().unwrap();
         assert_eq!(&values, &[None, None, Some(true)]);
 
         let col = columns.get(1).unwrap();
-        assert_eq!(col.name().unwrap(), "host");
+        assert_eq!(col.name(), "host");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Tag);
         let values = match col.values() {
             TypedValuesIterator::String(v) => v,
@@ -1688,7 +1802,7 @@ mod tests {
         assert_eq!(&values, &[Some("a"), Some("a"), None]);
 
         let col = columns.get(2).unwrap();
-        assert_eq!(col.name().unwrap(), "region");
+        assert_eq!(col.name(), "region");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Tag);
         let values = match col.values() {
             TypedValuesIterator::String(v) => v,
@@ -1698,7 +1812,7 @@ mod tests {
         assert_eq!(&values, &[None, Some("west"), None]);
 
         let col = columns.get(3).unwrap();
-        assert_eq!(col.name().unwrap(), "string");
+        assert_eq!(col.name(), "string");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Field);
         let values = match col.values() {
             TypedValuesIterator::String(v) => v,
@@ -1708,68 +1822,21 @@ mod tests {
         assert_eq!(&values, &[None, None, Some("hello")]);
 
         let col = columns.get(4).unwrap();
-        assert_eq!(col.name().unwrap(), TIME_COLUMN_NAME);
+        assert_eq!(col.name(), TIME_COLUMN_NAME);
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Time);
         let values = col.values().i64_values().unwrap();
         assert_eq!(&values, &[Some(983), Some(2343), Some(222)]);
 
         let col = columns.get(5).unwrap();
-        assert_eq!(col.name().unwrap(), "val");
+        assert_eq!(col.name(), "val");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Field);
         let values = col.values().i64_values().unwrap();
         assert_eq!(&values, &[Some(23), None, Some(21)]);
 
         let col = columns.get(6).unwrap();
-        assert_eq!(col.name().unwrap(), "val2");
+        assert_eq!(col.name(), "val2");
         assert_eq!(col.logical_type(), entry_fb::LogicalColumnType::Field);
         let values = col.values().f64_values().unwrap();
         assert_eq!(&values, &[None, Some(23.2), None]);
-    }
-
-    fn sharder(count: u16) -> TestSharder {
-        TestSharder {
-            count,
-            n: std::cell::RefCell::new(0),
-        }
-    }
-
-    // For each line passed to shard returns a shard id from [0, count) in order
-    struct TestSharder {
-        count: u16,
-        n: std::cell::RefCell<u16>,
-    }
-
-    impl Sharder for TestSharder {
-        fn shard(&self, _line: &ParsedLine<'_>) -> Result<u16, DataError> {
-            let n = *self.n.borrow();
-            self.n.replace(n + 1);
-            Ok(n % self.count)
-        }
-    }
-
-    fn partitioner(count: u8) -> TestPartitioner {
-        TestPartitioner {
-            count,
-            n: std::cell::RefCell::new(0),
-        }
-    }
-
-    // For each line passed to partition_key returns a key with a number from [0,
-    // count)
-    struct TestPartitioner {
-        count: u8,
-        n: std::cell::RefCell<u8>,
-    }
-
-    impl Partitioner for TestPartitioner {
-        fn partition_key(
-            &self,
-            _line: &ParsedLine<'_>,
-            _default_time: &DateTime<Utc>,
-        ) -> data_types::database_rules::Result<String> {
-            let n = *self.n.borrow();
-            self.n.replace(n + 1);
-            Ok(format!("key_{}", n % self.count))
-        }
     }
 }
