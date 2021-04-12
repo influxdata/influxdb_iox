@@ -1881,6 +1881,7 @@ dependencies = [
  "criterion",
  "data_types",
  "flatbuffers",
+ "futures",
  "generated_types",
  "influxdb_line_protocol",
  "internal_types",

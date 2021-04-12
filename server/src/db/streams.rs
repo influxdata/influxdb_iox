@@ -48,6 +48,7 @@ pub(crate) struct MutableBufferChunkStream {
 }
 
 impl MutableBufferChunkStream {
+    #[allow(dead_code)]
     pub fn new(chunk: Arc<MBChunk>, schema: SchemaRef, table_name: impl Into<String>) -> Self {
         Self {
             chunk,
