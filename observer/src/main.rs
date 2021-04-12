@@ -12,11 +12,11 @@
 //! ```shell
 //!  ./target/debug/influxdb_iox --host http://localhost:1234 database query 844910ece80be8bc_4bed41a6ff7f0ee0 "select * from system.chunks"
 use command::Command;
-use structopt::StructOpt;
 use context::Context;
 use query::LocalQuery;
 use remote::RemoteLoad;
 use rustyline::Editor;
+use structopt::StructOpt;
 
 use influxdb_iox_client::connection::{Builder, Connection};
 
@@ -24,7 +24,6 @@ mod command;
 mod context;
 mod query;
 mod remote;
-
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -35,19 +34,13 @@ mod remote;
 Examples:
     # connect
     observer --host http
-"#)]
+"#
+)]
 struct Config {
     /// gRPC address of IOx server to connect to
-    #[structopt(
-        short,
-        long,
-        global = true,
-        default_value = "http://127.0.0.1:8082"
-)]
-host: String,
+    #[structopt(short, long, global = true, default_value = "http://127.0.0.1:8082")]
+    host: String,
 }
-
-
 
 #[tokio::main]
 async fn main() {
