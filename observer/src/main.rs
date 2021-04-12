@@ -12,6 +12,7 @@
 //! ```shell
 //!  ./target/debug/influxdb_iox --host http://localhost:1234 database query 844910ece80be8bc_4bed41a6ff7f0ee0 "select * from system.chunks"
 use command::Command;
+use structopt::StructOpt;
 use context::Context;
 use query::LocalQuery;
 use remote::RemoteLoad;
@@ -24,14 +25,43 @@ mod context;
 mod query;
 mod remote;
 
+
+#[derive(Debug, StructOpt)]
+#[structopt(
+    name = "observer",
+    about = "InfluxDB IOx interactive SQL Client",
+    long_about = r#"InfluxDB IOx interactive SQL Client
+
+Examples:
+    # connect
+    observer --host http
+"#)]
+struct Config {
+    /// gRPC address of IOx server to connect to
+    #[structopt(
+        short,
+        long,
+        global = true,
+        default_value = "http://127.0.0.1:8082"
+)]
+host: String,
+}
+
+
+
 #[tokio::main]
 async fn main() {
-    let url = "http://localhost:1234";
+    let config = Config::from_args();
+    let url = &config.host;
     println!("Connecting to {}...", url);
-    let connection = Builder::default()
-        .build(url)
-        .await
-        .expect("Can't connect to IOx in tools. Is port forwarding setup?");
+
+    let connection = match Builder::default().build(url).await {
+        Ok(c) => c,
+        Err(e) => {
+            eprint!("Can not connect to IOx at {}: {}", url, e);
+            return;
+        }
+    };
 
     println!("Connected to IOx at {}", url);
 

@@ -2145,8 +2145,10 @@ version = "0.1.0"
 dependencies = [
  "arrow_deps",
  "async-trait",
+ "clap",
  "influxdb_iox_client",
  "rustyline",
+ "structopt",
  "tokio",
 ]
 

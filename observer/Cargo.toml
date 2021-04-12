@@ -13,3 +13,5 @@ async-trait = "0.1"
 influxdb_iox_client = { path = "../influxdb_iox_client", features=["flight"] }
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
 rustyline = "8.0.0"
+clap = "2.33.1"
+structopt = "0.3.21"
