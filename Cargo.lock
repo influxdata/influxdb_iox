@@ -2646,6 +2646,7 @@ dependencies = [
  "futures",
  "influxdb_line_protocol",
  "internal_types",
+ "libc",
  "observability_deps",
  "parking_lot",
  "snafu",
