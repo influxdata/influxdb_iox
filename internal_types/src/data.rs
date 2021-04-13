@@ -4,7 +4,7 @@
 use crate::schema::TIME_COLUMN_NAME;
 use data_types::database_rules::Partitioner;
 use generated_types::wal as wb;
-use influxdb_line_protocol::{FieldValue, ParsedLine};
+use influxdb_line_protocol::{parse_lines, FieldValue, ParsedLine};
 
 use std::{collections::BTreeMap, convert::TryFrom, fmt};
 
@@ -206,6 +206,18 @@ pub fn lines_to_replicated_write(
     let (mut data, idx) = fbb.collapse();
     ReplicatedWrite::try_from(data.split_off(idx))
         .expect("Flatbuffer data just constructed should be valid")
+}
+
+/// Create a replicated write from a line protocol file
+pub fn replicated_write_from_file(
+    path: impl AsRef<std::path::Path>,
+    partitioner: &impl Partitioner,
+) -> Result<ReplicatedWrite, Box<dyn std::error::Error>> {
+    let file = std::fs::read_to_string(path).map_err(Box::new)?;
+    let lines: Result<Vec<_>, _> = parse_lines(&file).collect();
+    let lines = lines.map_err(Box::new)?;
+
+    Ok(lines_to_replicated_write(0, 0, &lines, partitioner))
 }
 
 pub fn split_lines_into_write_entry_partitions(

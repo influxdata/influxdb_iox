@@ -105,8 +105,8 @@ mod config;
 pub mod db;
 pub mod snapshot;
 
-#[cfg(test)]
-mod query_tests;
+#[allow(dead_code)]
+pub mod query_tests;
 
 type DatabaseError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
