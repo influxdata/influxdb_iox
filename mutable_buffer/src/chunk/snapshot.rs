@@ -1,12 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
-use futures::Stream;
-
-use arrow_deps::arrow::datatypes::SchemaRef;
-use arrow_deps::arrow::{error::Result as ArrowResult, record_batch::RecordBatch};
-use arrow_deps::datafusion::physical_plan::{RecordBatchStream, SendableRecordBatchStream};
+use arrow_deps::arrow::record_batch::RecordBatch;
 use data_types::timestamp::TimestampRange;
 use internal_types::schema::{Schema, TIME_COLUMN_NAME};
 use internal_types::selection::Selection;
@@ -30,7 +25,10 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// A queryable snapshot of a mutable buffer chunk
 #[derive(Debug)]
 pub struct ChunkSnapshot {
-    id: u32,
+    /// The ID of the chunk this is a snapshot of
+    chunk_id: u32,
+
+    /// Maps table name to `TableSnapshot`
     records: HashMap<String, TableSnapshot>,
     // TODO: Memory tracking
 }
@@ -85,17 +83,17 @@ impl ChunkSnapshot {
         }
 
         Self {
-            id: chunk.id,
+            chunk_id: chunk.id,
             records,
         }
     }
 
-    /// return the ID of this chunk
-    pub fn id(&self) -> u32 {
-        self.id
+    /// return the ID of the chunk this is a snapshot of
+    pub fn chunk_id(&self) -> u32 {
+        self.chunk_id
     }
 
-    /// returns true if there is no data in this chunk
+    /// returns true if there is no data in this snapshot
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
@@ -136,19 +134,15 @@ impl ChunkSnapshot {
             })
     }
 
-    /// Returns a SendableRecordBatchStream for use by DataFusion
-    pub fn read_filter(
-        &self,
-        table_name: &str,
-        selection: Selection<'_>,
-    ) -> Result<SendableRecordBatchStream> {
+    /// Returns a RecordBatch with the given selection
+    pub fn read_filter(&self, table_name: &str, selection: Selection<'_>) -> Result<RecordBatch> {
         let table = self
             .records
             .get(table_name)
             .context(TableNotFound { table_name })?;
 
-        let (schema, batch) = match selection {
-            Selection::All => (table.schema.as_arrow(), table.batch.clone()),
+        Ok(match selection {
+            Selection::All => table.batch.clone(),
             Selection::Some(columns) => {
                 let projection = table.schema.select(columns).context(SelectColumns)?;
                 let schema = table.schema.project(&projection).into();
@@ -157,15 +151,9 @@ impl ChunkSnapshot {
                     .map(|x| Arc::clone(table.batch.column(x)))
                     .collect();
 
-                let batch = RecordBatch::try_new(Arc::clone(&schema), columns).unwrap();
-                (schema, batch)
+                RecordBatch::try_new(schema, columns).expect("failed to project record batch")
             }
-        };
-
-        Ok(Box::pin(ChunkSnapshotStream {
-            schema,
-            batch: Some(batch),
-        }))
+        })
     }
 
     /// Returns a given selection of column names from a table
@@ -189,32 +177,5 @@ impl ChunkSnapshot {
                 .collect(),
             Selection::All => fields.map(|x| x.name().clone()).collect(),
         })
-    }
-}
-
-#[derive(Debug)]
-struct ChunkSnapshotStream {
-    schema: SchemaRef,
-    batch: Option<RecordBatch>,
-}
-
-impl RecordBatchStream for ChunkSnapshotStream {
-    fn schema(&self) -> SchemaRef {
-        Arc::clone(&self.schema)
-    }
-}
-
-impl Stream for ChunkSnapshotStream {
-    type Item = ArrowResult<RecordBatch>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        _: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.batch.take().map(Ok))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (1, Some(1))
     }
 }

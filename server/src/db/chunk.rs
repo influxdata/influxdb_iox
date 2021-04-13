@@ -10,7 +10,10 @@ use snafu::{ResultExt, Snafu};
 
 use std::{collections::BTreeSet, sync::Arc};
 
-use super::{pred::to_read_buffer_predicate, streams::ReadFilterResultsStream};
+use super::{
+    pred::to_read_buffer_predicate,
+    streams::{MemoryStream, ReadFilterResultsStream},
+};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -114,7 +117,7 @@ impl PartitionChunk for DBChunk {
 
     fn id(&self) -> u32 {
         match self {
-            Self::MutableBuffer { chunk, .. } => chunk.id(),
+            Self::MutableBuffer { chunk, .. } => chunk.chunk_id(),
             Self::ReadBuffer { chunk, .. } => chunk.id(),
             Self::ParquetFile { chunk, .. } => chunk.id(),
         }
@@ -231,11 +234,17 @@ impl PartitionChunk for DBChunk {
     ) -> Result<SendableRecordBatchStream, Self::Error> {
         match self {
             Self::MutableBuffer { chunk, .. } => {
-                // TODO: Support predicates
-                assert!(predicate.is_empty());
-                chunk
+                if !predicate.is_empty() {
+                    return InternalPredicateNotSupported {
+                        predicate: predicate.clone(),
+                    }
+                    .fail();
+                }
+                let batch = chunk
                     .read_filter(table_name, selection)
-                    .context(MutableBufferChunk)
+                    .context(MutableBufferChunk)?;
+
+                Ok(Box::pin(MemoryStream::new(batch)))
             }
             Self::ReadBuffer { chunk, .. } => {
                 // Error converting to a rb_predicate needs to fail
