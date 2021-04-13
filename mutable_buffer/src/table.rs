@@ -312,11 +312,7 @@ impl Table {
         self.to_arrow_impl(dictionary, &selection)
     }
 
-    pub fn schema(
-        &self,
-        dictionary: &Dictionary,
-        selection: Selection<'_>,
-    ) -> Result<Schema> {
+    pub fn schema(&self, dictionary: &Dictionary, selection: Selection<'_>) -> Result<Schema> {
         // translate chunk selection into name/indexes:
         let selection = match selection {
             Selection::All => self.all_columns_selection(dictionary),
