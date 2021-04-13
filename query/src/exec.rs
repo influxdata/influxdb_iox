@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use arrow_deps::{
     arrow::record_batch::RecordBatch,
-    datafusion::{self, logical_plan::LogicalPlan},
+    datafusion::{self, logical_plan::LogicalPlan, physical_plan::ExecutionPlan},
 };
 use counters::ExecutionCounters;
 
@@ -257,6 +257,15 @@ impl Executor {
     /// Run the plan and return a record batch reader for reading the results
     pub async fn run_logical_plan(&self, plan: LogicalPlan) -> Result<Vec<RecordBatch>> {
         self.run_logical_plans(vec![plan]).await
+    }
+
+    /// Executes the logical plan using DataFusion on a separate
+    /// thread pool and produces RecordBatches
+    pub async fn collect(&self, physical_plan: Arc<dyn ExecutionPlan>) -> Result<Vec<RecordBatch>> {
+        self.new_context()
+            .collect(physical_plan)
+            .await
+            .context(DataFusionExecution)
     }
 
     /// Create a new execution context, suitable for executing a new query

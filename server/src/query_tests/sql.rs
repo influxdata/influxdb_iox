@@ -9,7 +9,7 @@ use super::scenarios::*;
 use arrow_deps::{
     arrow::record_batch::RecordBatch, assert_table_eq, datafusion::physical_plan::collect,
 };
-use query::{exec::Executor, frontend::sql::SQLQueryPlanner};
+use query::frontend::sql::SQLQueryPlanner;
 use std::sync::Arc;
 
 /// runs table_names(predicate) and compares it to the expected
@@ -27,10 +27,10 @@ macro_rules! run_sql_test_case {
             println!("Running scenario '{}'", scenario_name);
             println!("SQL: '{:#?}'", sql);
             let planner = SQLQueryPlanner::default();
-            let executor = Executor::new(1);
+            let executor = db.executor();
 
             let physical_plan = planner
-                .query(db, &sql, &executor)
+                .query(db, &sql, executor.as_ref())
                 .await
                 .expect("built plan successfully");
 

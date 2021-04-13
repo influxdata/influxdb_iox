@@ -733,7 +733,6 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use arrow_deps::{arrow::record_batch::RecordBatch, assert_table_eq};
-    use query::exec::Executor;
     use reqwest::{Client, Response};
 
     use data_types::{database_rules::DatabaseRules, DatabaseName};
@@ -768,7 +767,6 @@ mod tests {
             .create_database(
                 DatabaseRules::new(DatabaseName::new("MyOrg_MyBucket").unwrap()),
                 app_server.require_id().unwrap(),
-                Arc::clone(&app_server.store),
             )
             .await
             .unwrap();
@@ -817,7 +815,6 @@ mod tests {
             .create_database(
                 DatabaseRules::new(DatabaseName::new("MetricsOrg_MetricsBucket").unwrap()),
                 app_server.require_id().unwrap(),
-                Arc::clone(&app_server.store),
             )
             .await
             .unwrap();
@@ -876,7 +873,6 @@ mod tests {
             .create_database(
                 DatabaseRules::new(DatabaseName::new("MyOrg_MyBucket").unwrap()),
                 app_server.require_id().unwrap(),
-                Arc::clone(&app_server.store),
             )
             .await
             .unwrap();
@@ -1010,7 +1006,6 @@ mod tests {
             .create_database(
                 DatabaseRules::new(DatabaseName::new("MyOrg_MyBucket").unwrap()),
                 app_server.require_id().unwrap(),
-                Arc::clone(&app_server.store),
             )
             .await
             .unwrap();
@@ -1059,7 +1054,6 @@ mod tests {
             .create_database(
                 DatabaseRules::new(DatabaseName::new("MyOrg_MyBucket").unwrap()),
                 app_server.require_id().unwrap(),
-                Arc::clone(&app_server.store),
             )
             .await
             .unwrap();
@@ -1166,8 +1160,8 @@ mod tests {
     /// Run the specified SQL query and return formatted results as a string
     async fn run_query(db: Arc<Db>, query: &str) -> Vec<RecordBatch> {
         let planner = SQLQueryPlanner::default();
-        let executor = Executor::new(1);
-        let physical_plan = planner.query(db, query, &executor).await.unwrap();
+        let executor = db.executor();
+        let physical_plan = planner.query(db, query, executor.as_ref()).await.unwrap();
 
         collect(physical_plan).await.unwrap()
     }
