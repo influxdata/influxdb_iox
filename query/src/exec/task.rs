@@ -1,8 +1,8 @@
 //! This module contains a dedicated thread pool for running "cpu
 //! intensive" workloads such as DataFusion plans
 
-use std::{pin::Pin, sync::Arc};
 use parking_lot::Mutex;
+use std::{pin::Pin, sync::Arc};
 use tokio::sync::oneshot::Receiver;
 
 use futures::Future;
@@ -16,23 +16,53 @@ type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
 /// them) on a separate tokio Executor
 #[derive(Clone)]
 pub struct DedicatedExecutor {
-    inner: Arc<Mutex<State>>
+    state: Arc<Mutex<State>>,
 }
-
 
 /// Runs futures (and any `tasks` that are `tokio::task::spawned` by
 /// them) on a separate tokio Executor
 struct State {
+    /// The number of threads in this pool
+    num_threads: usize,
+
+    /// The name of the threads for this executor
+    thread_name: String,
+
     /// Channel for requests -- the dedicated executor takes requests
     /// from here and runs them.
     requests: Option<std::sync::mpsc::Sender<Task>>,
 
     /// The thread that is doing the work
-    thread: Option<std::thread::JoinHandle<()>>
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 /// The default worker priority (value passed to `libc::setpriority`);
 const WORKER_PRIORITY: i32 = 10;
+
+impl std::fmt::Debug for DedicatedExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = self.state.lock();
+
+        let mut d = f.debug_struct("DedicatedExecutor");
+
+        d.field("num_threads", &state.num_threads)
+            .field("thread_name", &state.thread_name);
+
+        if state.requests.is_some() {
+            d.field("requests", &"Some(...)")
+        } else {
+            d.field("requests", &"None")
+        };
+
+        if state.thread.is_some() {
+            d.field("thread", &"Some(...)")
+        } else {
+            d.field("thread", &"None")
+        };
+
+        d.finish()
+    }
+}
 
 impl DedicatedExecutor {
     /// Creates a new `DedicatedExecutor` with a dedicated tokio
@@ -51,7 +81,8 @@ impl DedicatedExecutor {
     /// drop a runtime in a context where blocking is not allowed. This
     /// happens when a runtime is dropped from within an asynchronous
     /// context.', .../tokio-1.4.0/src/runtime/blocking/shutdown.rs:51:21
-    pub fn new(thread_name: &str, num_threads: usize) -> Self {
+    pub fn new(thread_name: impl Into<String>, num_threads: usize) -> Self {
+        let thread_name = thread_name.into();
         let name_copy = thread_name.to_string();
 
         let (tx, rx) = std::sync::mpsc::channel();
@@ -76,12 +107,14 @@ impl DedicatedExecutor {
         });
 
         let state = State {
+            num_threads,
+            thread_name,
             requests: Some(tx),
             thread: Some(thread),
         };
 
         Self {
-            inner: Arc::new(Mutex::new(state))
+            state: Arc::new(Mutex::new(state)),
         }
     }
 
@@ -99,12 +132,12 @@ impl DedicatedExecutor {
 
         let job = Box::pin(async move {
             let task_output = task.await;
-            if let Err(_) = tx.send(task_output) {
+            if tx.send(task_output).is_err() {
                 warn!("Spawned task output ignored: receiver dropped")
             }
         });
 
-        let mut state = self.inner.lock();
+        let mut state = self.state.lock();
 
         if let Some(requests) = &mut state.requests {
             // would fail if someone has started shutdown
@@ -120,7 +153,7 @@ impl DedicatedExecutor {
     pub fn shutdown(&self) {
         // hang up the channel which will cause the dedicated thread
         // to quit
-        let mut state = self.inner.lock();
+        let mut state = self.state.lock();
         state.requests = None;
     }
 
@@ -135,8 +168,8 @@ impl DedicatedExecutor {
         self.shutdown();
 
         // take the thread out when mutex is held
-        let thread =  {
-            let mut state = self.inner.lock();
+        let thread = {
+            let mut state = self.state.lock();
             state.thread.take()
         };
 
@@ -155,27 +188,27 @@ fn set_current_thread_priority(prio: i32) {
     unsafe { libc::setpriority(0, 0, prio) };
 }
 
-#[cfg(unix)]
-fn get_current_thread_priority() -> i32 {
-    // on linux setpriority sets the current thread's priority
-    // (as opposed to the current process).
-    unsafe { libc::getpriority(0, 0) }
-}
-
 #[cfg(not(unix))]
 fn set_current_thread_priority(prio: i32) {
     warn!("Setting worker thread priority not supported on this platform");
-}
-
-#[cfg(not(unix))]
-fn get_current_thread_priority() -> i32 {
-    WORKER_PRIORITY
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::{Arc, Barrier};
+
+    #[cfg(unix)]
+    fn get_current_thread_priority() -> i32 {
+        // on linux setpriority sets the current thread's priority
+        // (as opposed to the current process).
+        unsafe { libc::getpriority(0, 0) }
+    }
+
+    #[cfg(not(unix))]
+    fn get_current_thread_priority() -> i32 {
+        WORKER_PRIORITY
+    }
 
     #[tokio::test]
     async fn basic() {
@@ -318,6 +351,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::redundant_clone)]
     async fn executor_clone_join() {
         let exec = DedicatedExecutor::new("Test DedicatedExecutor", 1);
         // test it doesn't hang
@@ -325,7 +359,6 @@ mod tests {
         exec.clone().join();
         exec.join();
     }
-
 
     /// Wait for the barrier and then return `result`
     async fn do_work(result: usize, barrier: Arc<Barrier>) -> usize {

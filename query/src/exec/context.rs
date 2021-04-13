@@ -25,7 +25,7 @@ use observability_deps::tracing::debug;
 // Reuse DataFusion error and Result types for this module
 pub use arrow_deps::datafusion::error::{DataFusionError as Error, Result};
 
-use super::counters::ExecutionCounters;
+use super::{counters::ExecutionCounters, task::DedicatedExecutor};
 
 // The default catalog name - this impacts what SQL queries use if not specified
 pub const DEFAULT_CATALOG: &str = "public";
@@ -77,15 +77,27 @@ impl ExtensionPlanner for IOxExtensionPlanner {
     }
 }
 
-/// This is an execution context for planning in IOx.
-/// It wraps a DataFusion execution context and incudes
-/// statistical counters.
+/// This is an execution context for planning in IOx.  It wraps a
+/// DataFusion execution context and incudes statistical counters and
+/// a dedicated thread pool.
 ///
-/// Eventually we envision this as also managing resources
-/// and providing visibility into what plans are running
+/// Methods on this struct should be preferred to using the raw
+/// DataFusion functions (such as `collect`) directly.
+///
+/// Eventually we envision this also managing additional resource
+/// types such as Memory and providing visibility into what plans are
+/// running
 pub struct IOxExecutionContext {
     counters: Arc<ExecutionCounters>,
     inner: ExecutionContext,
+
+    /// Dedicated executor for query execution.
+    ///
+    /// DataFusion plans are "CPU" bound and thus can consume tokio
+    /// executors threads for extended periods of time. We use a
+    /// dedicated tokio runtime to run them so that other requests
+    /// can be handled.
+    exec: DedicatedExecutor,
 }
 
 impl fmt::Debug for IOxExecutionContext {
@@ -102,7 +114,7 @@ impl IOxExecutionContext {
     ///
     /// The config is created with a default catalog and schema, but this
     /// can be overridden at a later date
-    pub fn new(counters: Arc<ExecutionCounters>) -> Self {
+    pub fn new(exec: DedicatedExecutor, counters: Arc<ExecutionCounters>) -> Self {
         const BATCH_SIZE: usize = 1000;
 
         // TBD: Should we be reusing an execution context across all executions?
@@ -115,7 +127,11 @@ impl IOxExecutionContext {
 
         let inner = ExecutionContext::with_config(config);
 
-        Self { counters, inner }
+        Self {
+            exec,
+            counters,
+            inner,
+        }
     }
 
     /// returns a reference to the inner datafusion execution context
@@ -159,44 +175,11 @@ impl IOxExecutionContext {
     pub async fn collect(&self, physical_plan: Arc<dyn ExecutionPlan>) -> Result<Vec<RecordBatch>> {
         self.counters.inc_plans_run();
 
-        // DataFusion plans are "CPU" bound and thus can consume tokio
-        // executors threads for extended periods of time. Thus use a
-        // dedicated tokio runtime to run them.
+        debug!("Running plan, physical:\n{:?}", physical_plan);
 
-        // According to stack overflow, to get a new runtime, we need to spawn our own
-        // thread https://stackoverflow.com/questions/62536566/how-can-i-create-a-tokio-runtime-inside-another-tokio-runtime-without-getting-th
-        // If you try to do thus from a async context you see:
-        // thread 'plan::stringset::tests::test_builder_plan' panicked at 'Cannot drop a
-        // runtime in a context where blocking is not allowed. This happens when a
-        // runtime is dropped from within an asynchronous context.',
-        // /Users/alamb/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.4.0/src/
-        // runtime/blocking/shutdown.rs:51:21
-
-        use std::thread;
-
-        // This is definitely not cool long term, but short term just
-        // block this tokio executor while the plan is running
-        println!("Starting to run plan on separate thread...");
-
-        thread::spawn(|| {
-            // build runtime
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(4)
-                .thread_name("datafusion-executor")
-                .build()
-                .expect("Creating tokio runtime");
-
-            // By entering the context, we all `tokio::spawn` to this executor.
-            let _guard = runtime.enter();
-            debug!("Running plan, physical:\n{:?}", physical_plan);
-
-            println!("Starting collect invocation on executor thread");
-            let res = runtime.block_on(collect(physical_plan));
-            println!("collect invocation complete on executor thread");
-            res
-        })
-        .join()
-        .expect("executor Thread panicked")
+        self.exec.spawn(collect(physical_plan)).await.map_err(|e| {
+            Error::Execution(format!("Error running IOxExecutionContext::collect: {}", e))
+        })?
     }
 
     /// Executes the physical plan and produces a RecordBatchStream to stream
