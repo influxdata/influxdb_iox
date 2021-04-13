@@ -12,7 +12,6 @@
 
 // Influx crates
 use super::super::commands::metrics;
-use arrow_deps::datafusion::physical_plan::collect;
 use data_types::{
     http::WalMetadataQuery,
     names::{org_and_bucket_to_database, OrgBucketMappingError},
@@ -523,12 +522,12 @@ async fn query<M: ConnectionManager + Send + Sync + Debug + 'static>(
 
     let physical_plan = planner
         .query(db, &q, executor.as_ref())
-        .await
         .context(PlanningSQLQuery { query: &q })?;
 
     // TODO: stream read results out rather than rendering the
     // whole thing in mem
-    let batches = collect(physical_plan)
+    let batches = executor
+        .collect(physical_plan)
         .await
         .map_err(|e| Box::new(e) as _)
         .context(Query { db_name })?;
@@ -1161,8 +1160,8 @@ mod tests {
     async fn run_query(db: Arc<Db>, query: &str) -> Vec<RecordBatch> {
         let planner = SQLQueryPlanner::default();
         let executor = db.executor();
-        let physical_plan = planner.query(db, query, executor.as_ref()).await.unwrap();
+        let physical_plan = planner.query(db, query, executor.as_ref()).unwrap();
 
-        collect(physical_plan).await.unwrap()
+        executor.collect(physical_plan).await.unwrap()
     }
 }

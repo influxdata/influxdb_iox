@@ -726,7 +726,7 @@ mod tests {
     use tokio::task::JoinHandle;
     use tokio_util::sync::CancellationToken;
 
-    use arrow_deps::{assert_table_eq, datafusion::physical_plan::collect};
+    use arrow_deps::assert_table_eq;
     use data_types::database_rules::{PartitionTemplate, TemplatePart, NO_SHARD_CONFIG};
     use influxdb_line_protocol::parse_lines;
     use object_store::{memory::InMemory, path::ObjectStorePath};
@@ -894,10 +894,9 @@ mod tests {
         let executor = server.executor();
         let physical_plan = planner
             .query(db, "select * from cpu", executor.as_ref())
-            .await
             .unwrap();
 
-        let batches = collect(physical_plan).await.unwrap();
+        let batches = executor.collect(physical_plan).await.unwrap();
         let expected = vec![
             "+-----+------+",
             "| bar | time |",
@@ -916,11 +915,7 @@ mod tests {
 
         let name = DatabaseName::new("foo".to_string()).unwrap();
         server
-            .create_database(
-                DatabaseRules::new(name),
-                server.require_id().unwrap(),
-                Arc::clone(&server.store),
-            )
+            .create_database(DatabaseRules::new(name), server.require_id().unwrap())
             .await
             .unwrap();
 
@@ -942,10 +937,9 @@ mod tests {
         let executor = server.executor();
         let physical_plan = planner
             .query(db, "select * from cpu", executor.as_ref())
-            .await
             .unwrap();
 
-        let batches = collect(physical_plan).await.unwrap();
+        let batches = executor.collect(physical_plan).await.unwrap();
         let expected = vec![
             "+-----+------+",
             "| bar | time |",

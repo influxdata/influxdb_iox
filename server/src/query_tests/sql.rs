@@ -6,9 +6,7 @@
 #![allow(unused_imports, dead_code, unused_macros)]
 
 use super::scenarios::*;
-use arrow_deps::{
-    arrow::record_batch::RecordBatch, assert_table_eq, datafusion::physical_plan::collect,
-};
+use arrow_deps::{arrow::record_batch::RecordBatch, assert_batches_sorted_eq};
 use query::frontend::sql::SQLQueryPlanner;
 use std::sync::Arc;
 
@@ -31,12 +29,12 @@ macro_rules! run_sql_test_case {
 
             let physical_plan = planner
                 .query(db, &sql, executor.as_ref())
-                .await
                 .expect("built plan successfully");
 
-            let results: Vec<RecordBatch> = collect(physical_plan).await.expect("Running plan");
+            let results: Vec<RecordBatch> =
+                executor.collect(physical_plan).await.expect("Running plan");
 
-            assert_table_eq!($EXPECTED_LINES, &results);
+            assert_batches_sorted_eq!($EXPECTED_LINES, &results);
         }
     };
 }

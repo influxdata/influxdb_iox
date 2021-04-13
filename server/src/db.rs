@@ -1715,7 +1715,7 @@ mod tests {
         let planner = SQLQueryPlanner::default();
         let executor = db.executor();
 
-        let physical_plan = planner.query(db, query, &executor).await.unwrap();
+        let physical_plan = planner.query(db, query, &executor).unwrap();
 
         executor.collect(physical_plan).await.unwrap()
     }
