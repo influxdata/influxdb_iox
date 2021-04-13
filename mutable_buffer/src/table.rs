@@ -112,7 +112,7 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Table {
+pub struct Table {
     /// Name of the table as a u32 in the chunk dictionary
     pub id: u32,
 
@@ -299,7 +299,7 @@ impl Table {
     }
 
     /// Converts this table to an arrow record batch.
-    pub(crate) fn to_arrow(
+    pub fn to_arrow(
         &self,
         dictionary: &Dictionary,
         selection: Selection<'_>,
@@ -312,7 +312,7 @@ impl Table {
         self.to_arrow_impl(dictionary, &selection)
     }
 
-    pub(crate) fn schema(
+    pub fn schema(
         &self,
         dictionary: &Dictionary,
         selection: Selection<'_>,
