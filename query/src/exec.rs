@@ -10,6 +10,7 @@ pub mod seriesset;
 pub mod stringset;
 mod task;
 pub use context::{DEFAULT_CATALOG, DEFAULT_SCHEMA};
+use futures::Future;
 
 use std::sync::Arc;
 
@@ -86,7 +87,7 @@ pub enum Error {
         source: Box<SendError<Result<SeriesSetItem, SeriesSetError>>>,
     },
 
-    #[snafu(display("Joining execution task: {}", source))]
+    #[snafu(display("Error running execution task: {}", source))]
     JoinError { source: ExecutorError },
 }
 
@@ -299,6 +300,23 @@ impl Executor {
             results.append(&mut plan_result);
         }
         Ok(results)
+    }
+
+    /// Runs the specified Future (and any tasks it spawns) on the
+    /// worker pool for this executor, returning the result of the computation
+    ///
+    /// This means among other things that
+    pub async fn run<T>(&self, task: T) -> Result<T::Output>
+    where
+        T: Future + Send + 'static,
+        T::Output: Send + 'static,
+    {
+        // run on the dedicated executor
+        self.exec
+            .spawn(task)
+            // wait on the *current* tokio executor
+            .await
+            .context(JoinError)
     }
 }
 /// Create a SchemaPivot node which  an arbitrary input like
