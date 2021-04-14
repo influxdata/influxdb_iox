@@ -9,6 +9,7 @@ use query::{
     predicate::{Predicate, PredicateBuilder, EMPTY_PREDICATE},
 };
 
+#[derive(Debug)]
 pub struct TwoMeasurementsMultiSeries {}
 #[async_trait]
 impl DBSetup for TwoMeasurementsMultiSeries {
@@ -50,7 +51,6 @@ macro_rules! run_read_filter_test_case {
 
             let plan = planner
                 .read_filter(&db, predicate.clone())
-                .await
                 .expect("built plan successfully");
 
             let string_results = run_series_set_plan(executor, plan).await;
@@ -310,6 +310,7 @@ async fn test_read_filter_data_pred_unsupported_in_scan() {
     run_read_filter_test_case!(TwoMeasurementsMultiSeries {}, predicate, expected_results);
 }
 
+#[derive(Debug)]
 pub struct MeasurementsSortableTags {}
 #[async_trait]
 impl DBSetup for MeasurementsSortableTags {

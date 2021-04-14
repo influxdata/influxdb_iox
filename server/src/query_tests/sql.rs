@@ -3,6 +3,8 @@
 //! wired all the pieces together (as well as ensure any particularly
 //! important SQL does not regress)
 
+#![allow(unused_imports, dead_code, unused_macros)]
+
 use super::scenarios::*;
 use arrow_deps::{
     arrow::record_batch::RecordBatch, assert_table_eq, datafusion::physical_plan::collect,
@@ -278,7 +280,7 @@ async fn sql_select_from_system_tables() {
         "+----+---------------+-------------------+-----------------+",
         "| id | partition_key | storage           | estimated_bytes |",
         "+----+---------------+-------------------+-----------------+",
-        "| 0  | 1970-01-01T00 | OpenMutableBuffer | 493             |",
+        "| 0  | 1970-01-01T00 | OpenMutableBuffer | 453             |",
         "+----+---------------+-------------------+-----------------+",
     ];
     run_sql_test_case!(
