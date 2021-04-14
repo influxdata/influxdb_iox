@@ -933,8 +933,7 @@ mod tests {
     #[tokio::test]
     async fn write_entry_local() {
         let manager = TestConnectionManager::new();
-        let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
-        let server = Server::new(manager, store);
+        let server = Server::new(manager, config());
         server.set_id(NonZeroU32::new(1).unwrap()).unwrap();
 
         let name = DatabaseName::new("foo".to_string()).unwrap();
