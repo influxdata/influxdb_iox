@@ -37,9 +37,6 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// affair. In order to avoid tying up the tokio executor that is
 /// handling API requests, we plan queries using a separate thread
 /// pool.
-///
-/// The structures in this module run the core planning logic using
-/// a separate thread pool
 pub struct Planner {
     /// Executors (whose threadpool to use)
     exec: Arc<Executor>,
