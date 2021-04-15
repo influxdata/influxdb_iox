@@ -11,7 +11,7 @@ use data_types::{
 };
 use internal_types::{
     entry::{self, ClockValue},
-    schema::{builder::SchemaBuilder, Schema, TIME_COLUMN_NAME, TIME_DATA_TIMEZONE},
+    schema::{builder::SchemaBuilder, Schema, TIME_COLUMN_NAME},
     selection::Selection,
 };
 
@@ -383,11 +383,9 @@ impl Table {
                 }
                 Column::I64(vals, _) => {
                     if col.column_name == TIME_COLUMN_NAME {
-                        //let array = TimestampNanosecondArray::from_iter(vals.iter());
-                        let timezone = TIME_DATA_TIMEZONE();
                         // TODO: there is no reason that this needs an owned copy of the Vec...
                         // should file a ticket with arrow to add something to avoid the clone
-                        let array = TimestampNanosecondArray::from_opt_vec(vals.clone(), timezone);
+                        let array = TimestampNanosecondArray::from_opt_vec(vals.clone(), None);
                         Arc::new(array)
                     } else {
                         let array = Int64Array::from_iter(vals.iter());
