@@ -368,8 +368,7 @@ impl Table {
                 Column::Tag(vals, _) => {
                     let iter = vals.iter().map(|id| {
                         id.as_ref().map(|value_id| {
-                            chunk
-                                .dictionary
+                            dictionary
                                 .lookup_id(*value_id)
                                 .expect("dictionary had mapping for tag value")
                         })
