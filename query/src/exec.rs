@@ -303,9 +303,8 @@ impl Executor {
     }
 
     /// Runs the specified Future (and any tasks it spawns) on the
-    /// worker pool for this executor, returning the result of the computation
-    ///
-    /// This means among other things that
+    /// worker pool for this executor, returning the result of the
+    /// computation.
     pub async fn run<T>(&self, task: T) -> Result<T::Output>
     where
         T: Future + Send + 'static,
