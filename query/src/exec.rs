@@ -87,8 +87,8 @@ pub enum Error {
         source: Box<SendError<Result<SeriesSetItem, SeriesSetError>>>,
     },
 
-    #[snafu(display("Error running execution task: {}", source))]
-    JoinError { source: ExecutorError },
+    #[snafu(display("Error joining execution task: {}", source))]
+    TaskJoinError { source: ExecutorError },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -210,7 +210,7 @@ impl Executor {
         // now, wait for all the values to resolve so we can report
         // any errors
         for join_handle in handles {
-            join_handle.await.context(JoinError)??;
+            join_handle.await.context(TaskJoinError)??;
         }
         Ok(())
     }
@@ -245,7 +245,7 @@ impl Executor {
         // collect them all up and combine them
         let mut results = Vec::new();
         for join_handle in handles {
-            let fieldlist = join_handle.await.context(JoinError)???;
+            let fieldlist = join_handle.await.context(TaskJoinError)???;
 
             results.push(fieldlist);
         }
@@ -296,7 +296,7 @@ impl Executor {
         // now, wait for all the values to resolve and collect them together
         let mut results = Vec::new();
         for join_handle in value_futures {
-            let mut plan_result = join_handle.await.context(JoinError)??;
+            let mut plan_result = join_handle.await.context(TaskJoinError)??;
             results.append(&mut plan_result);
         }
         Ok(results)
@@ -316,7 +316,7 @@ impl Executor {
             .spawn(task)
             // wait on the *current* tokio executor
             .await
-            .context(JoinError)
+            .context(TaskJoinError)
     }
 }
 /// Create a SchemaPivot node which  an arbitrary input like
