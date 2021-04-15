@@ -197,7 +197,7 @@ mod tests {
     fn test_convert_single_batch() {
         let schema = Arc::new(Schema::new(vec![
             ArrowField::new("string_field", ArrowDataType::Utf8, true),
-            ArrowField::new("time", TIME_DATA_TYPE().clone(), true),
+            ArrowField::new("time", TIME_DATA_TYPE(), true),
         ]));
 
         let string_array: ArrayRef = Arc::new(StringArray::from(vec!["foo", "bar", "baz", "foo"]));
@@ -246,7 +246,7 @@ mod tests {
     fn test_convert_two_batches() {
         let schema = Arc::new(Schema::new(vec![
             ArrowField::new("string_field", ArrowDataType::Utf8, true),
-            ArrowField::new("time", TIME_DATA_TYPE().clone(), true),
+            ArrowField::new("time", TIME_DATA_TYPE(), true),
         ]));
 
         let string_array1: ArrayRef = Arc::new(StringArray::from(vec!["foo", "bar"]));
@@ -285,7 +285,7 @@ mod tests {
     fn test_convert_all_nulls() {
         let schema = Arc::new(Schema::new(vec![
             ArrowField::new("string_field", ArrowDataType::Utf8, true),
-            ArrowField::new("time", TIME_DATA_TYPE().clone(), true),
+            ArrowField::new("time", TIME_DATA_TYPE(), true),
         ]));
 
         // string array has no actual values, so should not be returned as a field
@@ -312,7 +312,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![
             ArrowField::new("string_field", ArrowDataType::Utf8, true),
             ArrowField::new("int_field", ArrowDataType::Int64, true),
-            ArrowField::new("time", TIME_DATA_TYPE().clone(), true),
+            ArrowField::new("time", TIME_DATA_TYPE(), true),
         ]));
 
         let string_array: ArrayRef = Arc::new(StringArray::from(vec!["foo", "bar", "baz", "foo"]));

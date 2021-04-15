@@ -11,7 +11,6 @@ use arrow_deps::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
     SchemaRef as ArrowSchemaRef, TimeUnit,
 };
-use once_cell::sync::Lazy;
 
 /// The name of the timestamp column in the InfluxDB datamodel
 pub const TIME_COLUMN_NAME: &str = "time";
@@ -29,12 +28,8 @@ pub fn TIME_DATA_TIMEZONE() -> Option<String> {
 
 /// the Arrow [`DataType`] to use for InfluxDB timestamps
 #[allow(non_snake_case)]
-pub fn TIME_DATA_TYPE() -> &'static ArrowDataType {
-    static TIME_DATA_TYPE: Lazy<ArrowDataType> = Lazy::new(|| {
-        let timezone = TIME_DATA_TIMEZONE();
-        ArrowDataType::Timestamp(TimeUnit::Nanosecond, timezone)
-    });
-    &TIME_DATA_TYPE
+pub fn TIME_DATA_TYPE() -> ArrowDataType {
+    ArrowDataType::Timestamp(TimeUnit::Nanosecond, TIME_DATA_TIMEZONE())
 }
 
 pub mod builder;
@@ -653,7 +648,7 @@ impl From<&InfluxColumnType> for ArrowDataType {
         match t {
             InfluxColumnType::Tag => Self::Utf8,
             InfluxColumnType::Field(influxdb_field_type) => (*influxdb_field_type).into(),
-            InfluxColumnType::Timestamp => TIME_DATA_TYPE().clone(),
+            InfluxColumnType::Timestamp => TIME_DATA_TYPE(),
         }
     }
 }
@@ -759,7 +754,7 @@ mod test {
             ArrowField::new("float_col", ArrowDataType::Float64, false),
             ArrowField::new("str_col", ArrowDataType::Utf8, false),
             ArrowField::new("bool_col", ArrowDataType::Boolean, false),
-            ArrowField::new("time_col", TIME_DATA_TYPE().clone(), false),
+            ArrowField::new("time_col", TIME_DATA_TYPE(), false),
         ];
 
         let metadata: HashMap<_, _> = vec![

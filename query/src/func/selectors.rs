@@ -193,7 +193,7 @@ impl SelectorOutput {
         match self {
             Self::Value => input_type.clone(),
             // timestamps are always the same type
-            Self::Time => TIME_DATA_TYPE().clone(),
+            Self::Time => TIME_DATA_TYPE(),
         }
     }
 }
@@ -204,9 +204,9 @@ where
     SELECTOR: Selector + 'static,
 {
     let value_data_type = SELECTOR::value_data_type();
-    let input_signature = Signature::Exact(vec![value_data_type.clone(), TIME_DATA_TYPE().clone()]);
+    let input_signature = Signature::Exact(vec![value_data_type.clone(), TIME_DATA_TYPE()]);
 
-    let state_type = Arc::new(vec![value_data_type.clone(), TIME_DATA_TYPE().clone()]);
+    let state_type = Arc::new(vec![value_data_type.clone(), TIME_DATA_TYPE()]);
     let state_type_factory: StateTypeFunction = Arc::new(move |_| Ok(Arc::clone(&state_type)));
 
     let factory: AccumulatorFunctionImplementation =
@@ -626,7 +626,7 @@ mod test {
             Field::new("i64_value", DataType::Int64, false),
             Field::new("string_value", DataType::Utf8, false),
             Field::new("bool_value", DataType::Boolean, false),
-            Field::new("time", TIME_DATA_TYPE().clone(), true),
+            Field::new("time", TIME_DATA_TYPE(), true),
         ]));
 
         // define data in two partitions

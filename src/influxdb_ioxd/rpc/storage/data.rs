@@ -414,9 +414,9 @@ mod tests {
     #[test]
     fn test_series_set_conversion_different_time_columns() {
         let schema = Arc::new(Schema::new(vec![
-            ArrowField::new("time1", TIME_DATA_TYPE().clone(), true),
+            ArrowField::new("time1", TIME_DATA_TYPE(), true),
             ArrowField::new("string_field1", ArrowDataType::Utf8, true),
-            ArrowField::new("time2", TIME_DATA_TYPE().clone(), true),
+            ArrowField::new("time2", TIME_DATA_TYPE(), true),
             ArrowField::new("string_field2", ArrowDataType::Utf8, true),
         ]));
 
@@ -473,7 +473,7 @@ mod tests {
             ArrowField::new("state", ArrowDataType::Utf8, true),
             ArrowField::new("int_field", ArrowDataType::Int64, true),
             ArrowField::new("float_field", ArrowDataType::Float64, true),
-            ArrowField::new("time", TIME_DATA_TYPE().clone(), false),
+            ArrowField::new("time", TIME_DATA_TYPE(), false),
         ]));
 
         let tag_array: ArrayRef = Arc::new(StringArray::from(vec!["MA", "MA", "MA", "MA"]));
@@ -563,7 +563,7 @@ mod tests {
     fn test_group_series_conversion() {
         let schema = Arc::new(Schema::new(vec![
             ArrowField::new("float_field", ArrowDataType::Float64, true),
-            ArrowField::new("time", TIME_DATA_TYPE().clone(), true),
+            ArrowField::new("time", TIME_DATA_TYPE(), true),
         ]));
 
         let float_array: ArrayRef = Arc::new(Float64Array::from(vec![10.1, 20.1, 30.1, 40.1]));
@@ -780,7 +780,7 @@ mod tests {
             ArrowField::new("int_field", ArrowDataType::Int64, true),
             ArrowField::new("float_field", ArrowDataType::Float64, true),
             ArrowField::new("boolean_field", ArrowDataType::Boolean, true),
-            ArrowField::new("time", TIME_DATA_TYPE().clone(), true),
+            ArrowField::new("time", TIME_DATA_TYPE(), true),
         ]));
 
         let string_array: ArrayRef = Arc::new(StringArray::from(vec!["foo", "bar", "baz", "foo"]));

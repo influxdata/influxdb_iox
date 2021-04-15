@@ -1594,7 +1594,6 @@ dependencies = [
  "generated_types",
  "influxdb_line_protocol",
  "observability_deps",
- "once_cell",
  "ouroboros",
  "snafu",
 ]

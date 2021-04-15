@@ -87,8 +87,8 @@ pub fn make_window_bound_expr(
 
     let udf = create_udf(
         "window_bounds",
-        vec![TIME_DATA_TYPE().clone()],     // argument types
-        Arc::new(TIME_DATA_TYPE().clone()), // return type
+        vec![TIME_DATA_TYPE()],     // argument types
+        Arc::new(TIME_DATA_TYPE()), // return type
         func_ptr,
     );
 
