@@ -38,16 +38,28 @@ pub enum Error {
     },
 
     #[snafu(display(
-        "Internal error: Expected column {} to be type {} but was {}",
-        column_id,
+        "Expected column {} to be type {} but was {}",
+        column,
         expected_column_type,
         actual_column_type
     ))]
-    InternalColumnTypeMismatch {
-        column_id: DID,
+    ColumnTypeMismatch {
+        column: String,
         expected_column_type: String,
         actual_column_type: String,
     },
+
+    #[snafu(display(
+        "Expected column {} to be a tag but received it as a string field",
+        column
+    ))]
+    ExpectedTag { column: String },
+
+    #[snafu(display(
+        "Expected column {} to be a string field but received it as a tag",
+        column
+    ))]
+    ExpectedField { column: String },
 
     #[snafu(display("Internal error: unexpected aggregate request for None aggregate",))]
     InternalUnexpectedNoneAggregate {},
@@ -173,26 +185,22 @@ impl Table {
                         (entry::TypedValuesIterator::I64(_), Column::I64(_, _)) => (),
                         (entry::TypedValuesIterator::String(_), Column::String(_, _)) => {
                             if !insert_column.is_field() {
-                                InternalColumnTypeMismatch {
-                                    column_id,
-                                    expected_column_type: c.type_description(),
-                                    actual_column_type: values.type_description(),
+                                ExpectedField {
+                                    column: insert_column.name(),
                                 }
                                 .fail()?
                             };
                         }
                         (entry::TypedValuesIterator::String(_), Column::Tag(_, _)) => {
                             if !insert_column.is_tag() {
-                                InternalColumnTypeMismatch {
-                                    column_id,
-                                    expected_column_type: c.type_description(),
-                                    actual_column_type: values.type_description(),
+                                ExpectedTag {
+                                    column: insert_column.name(),
                                 }
                                 .fail()?
                             };
                         }
-                        _ => InternalColumnTypeMismatch {
-                            column_id,
+                        _ => ColumnTypeMismatch {
+                            column: insert_column.name(),
                             expected_column_type: c.type_description(),
                             actual_column_type: values.type_description(),
                         }
@@ -583,11 +591,10 @@ mod tests {
         assert!(
             matches!(
                 &response,
-                Error::InternalColumnTypeMismatch {
-                    expected_column_type,
-                    actual_column_type,
-                    ..
-                } if expected_column_type == "tag" && actual_column_type == "String"),
+                Error::ExpectedTag {
+                    column,
+                } if column == "t1"
+            ),
             "didn't match returned error: {:?}",
             response
         );
@@ -612,7 +619,16 @@ mod tests {
             .err()
             .unwrap();
         assert!(
-            matches!(&response, Error::InternalColumnTypeMismatch {expected_column_type, actual_column_type, ..} if expected_column_type == "i64" && actual_column_type == "u64"),
+            matches!(
+                &response,
+                Error::ColumnTypeMismatch {
+                    expected_column_type,
+                    actual_column_type,
+                    column
+                } if expected_column_type == "i64"
+                    && actual_column_type == "u64"
+                    && column == "iv"
+            ),
             "didn't match returned error: {:?}",
             response
         );
@@ -637,7 +653,16 @@ mod tests {
             .err()
             .unwrap();
         assert!(
-            matches!(&response, Error::InternalColumnTypeMismatch {expected_column_type, actual_column_type, ..} if expected_column_type == "f64" && actual_column_type == "i64"),
+            matches!(
+                &response,
+                Error::ColumnTypeMismatch {
+                    expected_column_type,
+                    actual_column_type,
+                    column
+                } if expected_column_type == "f64"
+                    && actual_column_type == "i64"
+                    && column == "fv"
+            ),
             "didn't match returned error: {:?}",
             response
         );
@@ -662,7 +687,16 @@ mod tests {
             .err()
             .unwrap();
         assert!(
-            matches!(&response, Error::InternalColumnTypeMismatch {expected_column_type, actual_column_type, ..} if expected_column_type == "bool" && actual_column_type == "f64"),
+            matches!(
+                &response,
+                Error::ColumnTypeMismatch {
+                    expected_column_type,
+                    actual_column_type,
+                    column
+                } if expected_column_type == "bool"
+                    && actual_column_type == "f64"
+                    && column == "bv"
+            ),
             "didn't match returned error: {:?}",
             response
         );
@@ -687,7 +721,46 @@ mod tests {
             .err()
             .unwrap();
         assert!(
-            matches!(&response, Error::InternalColumnTypeMismatch {expected_column_type, actual_column_type, ..} if expected_column_type == "String" && actual_column_type == "bool"),
+            matches!(
+                &response,
+                Error::ColumnTypeMismatch {
+                    expected_column_type,
+                    actual_column_type,
+                    column
+                } if expected_column_type == "String"
+                    && actual_column_type == "bool"
+                    && column == "sv"
+            ),
+            "didn't match returned error: {:?}",
+            response
+        );
+
+        let lp = "foo,sv=\"bar\" f=3i 1";
+        let entry = lp_to_entry(&lp);
+        let response = table
+            .write_columns(
+                &mut dictionary,
+                ClockValue::new(0),
+                0,
+                entry
+                    .partition_writes()
+                    .unwrap()
+                    .first()
+                    .unwrap()
+                    .table_batches()
+                    .first()
+                    .unwrap()
+                    .columns(),
+            )
+            .err()
+            .unwrap();
+        assert!(
+            matches!(
+                &response,
+                Error::ExpectedField {
+                    column
+                } if column == "sv"
+            ),
             "didn't match returned error: {:?}",
             response
         );
