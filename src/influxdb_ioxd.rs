@@ -1,5 +1,4 @@
 use crate::commands::{
-    logging::LoggingLevel,
     metrics,
     run::{Config, ObjectStore as ObjStoreOpt},
 };
@@ -53,7 +52,7 @@ pub enum Error {
     ServingHttp { source: hyper::Error },
 
     #[snafu(display("Error serving RPC: {}", source))]
-    ServingRPC { source: tonic::transport::Error },
+    ServingRpc { source: tonic::transport::Error },
 
     #[snafu(display(
         "Specified {} for the object store, required configuration missing for {}",
@@ -99,16 +98,8 @@ async fn wait_for_signal() {
 }
 
 /// This is the entry point for the IOx server. `config` represents
-/// command line arguments, if any
-///
-/// The logging_level passed in is the global setting (e.g. if -v or
-/// -vv was passed in before 'server')
-pub async fn main(logging_level: LoggingLevel, config: Config) -> Result<()> {
-    // Handle the case if -v/-vv is specified both before and after the server
-    // command
-    let logging_level = logging_level.combine(LoggingLevel::new(config.verbose_count));
-
-    let _drop_handle = logging_level.setup_logging(&config);
+/// command line arguments, if any.
+pub async fn main(config: Config) -> Result<()> {
     metrics::init_metrics(&config);
 
     // Install custom panic handler and forget about it.
@@ -243,7 +234,7 @@ pub async fn main(logging_level: LoggingLevel, config: Config) -> Result<()> {
                 Ok(_) => info!("gRPC server shutdown"),
                 Err(error) => {
                     error!(%error, "gRPC server error");
-                    res = res.and(Err(Error::ServingRPC{source: error}))
+                    res = res.and(Err(Error::ServingRpc{source: error}))
                 }
             },
             result = http_server => match result {
