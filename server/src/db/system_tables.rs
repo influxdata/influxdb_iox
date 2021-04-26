@@ -26,6 +26,7 @@ use data_types::{
 use tracker::TaskTracker;
 
 use super::catalog::Catalog;
+use crate::JobRegistry;
 
 // The IOx system schema
 pub const SYSTEM_SCHEMA: &str = "system";
@@ -34,23 +35,20 @@ const CHUNKS: &str = "chunks";
 const COLUMNS: &str = "columns";
 const OPERATIONS: &str = "operations";
 
-/// Something that can return a list of per-database jobs
-pub trait DatabaseJobs: std::fmt::Debug + Send + Sync + 'static {
-    /// Return a list of TaskTrackers for jobs
-    fn tracked(&self) -> Vec<TaskTracker<Job>>;
-}
-
 #[derive(Debug)]
 pub struct SystemSchemaProvider {
+    db_name: String,
     catalog: Arc<Catalog>,
-    jobs: Box<dyn DatabaseJobs>,
+    jobs: Arc<JobRegistry>,
 }
 
 impl SystemSchemaProvider {
-    pub fn new(catalog: Arc<Catalog>, jobs: impl DatabaseJobs) -> Self {
+    pub fn new(db_name: impl Into<String>, catalog: Arc<Catalog>, jobs: Arc<JobRegistry>) -> Self {
+        let db_name = db_name.into();
         Self {
+            db_name,
             catalog,
-            jobs: Box::new(jobs),
+            jobs,
         }
     }
 }
@@ -77,7 +75,7 @@ impl SchemaProvider for SystemSchemaProvider {
             COLUMNS => from_partition_summaries(self.catalog.partition_summaries())
                 .log_if_error("chunks table")
                 .ok()?,
-            OPERATIONS => from_task_trackers(self.jobs.tracked())
+            OPERATIONS => from_task_trackers(&self.db_name, self.jobs.tracked())
                 .log_if_error("operations table")
                 .ok()?,
             _ => return None,
@@ -193,7 +191,12 @@ fn from_partition_summaries(partitions: Vec<PartitionSummary>) -> Result<RecordB
     )
 }
 
-fn from_task_trackers(jobs: Vec<TaskTracker<Job>>) -> Result<RecordBatch> {
+fn from_task_trackers(db_name: &str, jobs: Vec<TaskTracker<Job>>) -> Result<RecordBatch> {
+    let jobs = jobs
+        .into_iter()
+        .filter(|job| job.metadata().db_name() == Some(db_name))
+        .collect::<Vec<_>>();
+
     let ids = StringArray::from_iter(jobs.iter().map(|job| Some(job.id().to_string())));
     let statuses = StringArray::from_iter(jobs.iter().map(|job| Some(job.get_status().name())));
     let cpu_time_used = Time64NanosecondArray::from_iter(

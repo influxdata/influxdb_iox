@@ -335,21 +335,6 @@ impl DbMetrics {
     }
 }
 
-#[derive(Debug)]
-struct DbJobs {
-    jobs: Arc<JobRegistry>,
-    db_name: String,
-}
-impl system_tables::DatabaseJobs for DbJobs {
-    fn tracked(&self) -> Vec<TaskTracker<Job>> {
-        self.jobs
-            .tracked()
-            .into_iter()
-            .filter(|job| job.metadata().db_name() == Some(&self.db_name))
-            .collect()
-    }
-}
-
 impl Db {
     pub fn new(
         rules: DatabaseRules,
@@ -366,11 +351,8 @@ impl Db {
         let store = Arc::clone(&object_store);
         let write_buffer = write_buffer.map(Mutex::new);
         let catalog = Arc::new(Catalog::new());
-        let db_jobs = DbJobs {
-            jobs: Arc::clone(&jobs),
-            db_name: db_name.to_string(),
-        };
-        let system_tables = SystemSchemaProvider::new(Arc::clone(&catalog), db_jobs);
+        let system_tables =
+            SystemSchemaProvider::new(&db_name, Arc::clone(&catalog), Arc::clone(&jobs));
         let system_tables = Arc::new(system_tables);
 
         let domain = metrics.register_domain("catalog");
