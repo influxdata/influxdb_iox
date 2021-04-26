@@ -314,12 +314,12 @@ async fn sql_select_from_system_columns() {
 async fn sql_select_from_system_operations() {
     test_helpers::maybe_start_logging();
     let expected = vec![
-        "+----+----------+-----------+-------------+---------------+----------+---------------------------------+",
-        "| id | status   | took_time | db_name     | partition_key | chunk_id | description                     |",
-        "+----+----------+-----------+-------------+---------------+----------+---------------------------------+",
-        "| 0  | Complete | true      | placeholder | 1970-01-01T00 | 0        | Loading chunk to ReadBuffer     |",
-        "| 1  | Complete | true      | placeholder | 1970-01-01T00 | 0        | Writing chunk to Object Storage |",
-        "+----+----------+-----------+-------------+---------------+----------+---------------------------------+",
+        "+----+----------+---------------+----------------+---------------+----------+---------------------------------+",
+        "| id | status   | took_cpu_time | took_wall_time | partition_key | chunk_id | description                     |",
+        "+----+----------+---------------+----------------+---------------+----------+---------------------------------+",
+        "| 0  | Complete | true          | true           | 1970-01-01T00 | 0        | Loading chunk to ReadBuffer     |",
+        "| 1  | Complete | true          | true           | 1970-01-01T00 | 0        | Writing chunk to Object Storage |",
+        "+----+----------+---------------+----------------+---------------+----------+---------------------------------+",
     ];
 
     // Check that the cpu time used reported is greater than zero as it isn't
