@@ -4,7 +4,7 @@ use crate::dictionary::{Dictionary, DID};
 use data_types::partition_metadata::{StatValues, Statistics};
 use internal_types::entry::Column as EntryColumn;
 
-use crate::bitset::{iter_set_bits, BitSet};
+use crate::bitset::{iter_set_positions, BitSet};
 use arrow_deps::arrow::array::{
     ArrayDataBuilder, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray,
     TimestampNanosecondArray, UInt64Array,
@@ -67,29 +67,19 @@ impl Column {
                 ColumnData::Bool(data, StatValues::new())
             }
             InfluxColumnType::Field(InfluxFieldType::UInteger) => {
-                let mut data = Vec::new();
-                data.resize(row_count, 0);
-                ColumnData::U64(data, StatValues::new())
+                ColumnData::U64(vec![0; row_count], StatValues::new())
             }
             InfluxColumnType::Field(InfluxFieldType::Float) => {
-                let mut data = Vec::new();
-                data.resize(row_count, 0.0);
-                ColumnData::F64(data, StatValues::new())
+                ColumnData::F64(vec![0.0; row_count], StatValues::new())
             }
             InfluxColumnType::Field(InfluxFieldType::Integer) | InfluxColumnType::Timestamp => {
-                let mut data = Vec::new();
-                data.resize(row_count, 0);
-                ColumnData::I64(data, StatValues::new())
+                ColumnData::I64(vec![0; row_count], StatValues::new())
             }
             InfluxColumnType::Field(InfluxFieldType::String) => {
-                let mut data = Vec::new();
-                data.resize(row_count, String::new());
-                ColumnData::String(data, StatValues::new())
+                ColumnData::String(vec![String::new(); row_count], StatValues::new())
             }
             InfluxColumnType::Tag => {
-                let mut data = Vec::new();
-                data.resize(row_count, DID::invalid());
-                ColumnData::Tag(data, StatValues::new())
+                ColumnData::Tag(vec![DID::invalid(); row_count], StatValues::new())
             }
         };
 
@@ -142,7 +132,7 @@ impl Column {
 
                 let initial_non_null_count = stats.count;
 
-                for (idx, value) in iter_set_bits(&mask).zip(entry_data) {
+                for (idx, value) in iter_set_positions(&mask).zip(entry_data) {
                     stats.update(value);
 
                     if *value {
@@ -213,7 +203,7 @@ impl Column {
                 let initial_non_null_count = stats.count;
                 let to_add = entry_data.len();
 
-                for (idx, value) in iter_set_bits(&mask).zip(entry_data) {
+                for (idx, value) in iter_set_positions(&mask).zip(entry_data) {
                     stats.update(value);
                     col_data[data_offset + idx] = dictionary.lookup_value_or_insert(value);
                 }
@@ -269,7 +259,7 @@ impl Column {
             ColumnData::F64(v, stats) => mem::size_of::<f64>() * v.len() + mem::size_of_val(&stats),
             ColumnData::I64(v, stats) => mem::size_of::<i64>() * v.len() + mem::size_of_val(&stats),
             ColumnData::U64(v, stats) => mem::size_of::<u64>() * v.len() + mem::size_of_val(&stats),
-            ColumnData::Bool(v, stats) => v.byte_size() + mem::size_of_val(&stats),
+            ColumnData::Bool(v, stats) => v.byte_len() + mem::size_of_val(&stats),
             ColumnData::Tag(v, stats) => mem::size_of::<DID>() * v.len() + mem::size_of_val(&stats),
             ColumnData::String(v, stats) => {
                 let string_bytes_size = v.iter().fold(0, |acc, val| acc + val.len());
@@ -277,7 +267,7 @@ impl Column {
                 string_bytes_size + vec_pointer_sizes + mem::size_of_val(&stats)
             }
         };
-        data_size + self.valid.byte_size()
+        data_size + self.valid.byte_len()
     }
 
     pub fn to_arrow(&self, dictionary: &Dictionary) -> Result<ArrayRef> {
@@ -405,7 +395,7 @@ fn handle_write<T, E>(
     let initial_non_null_count = stats.count;
     let to_add = entry_data.len();
 
-    for (idx, value) in iter_set_bits(valid_mask).zip(entry_data) {
+    for (idx, value) in iter_set_positions(valid_mask).zip(entry_data) {
         stats.update(&value);
         col_data[data_offset + idx] = value;
     }

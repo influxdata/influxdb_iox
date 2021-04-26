@@ -31,7 +31,7 @@ impl BitSet {
         self.buffer.resize(new_buf_len, 0);
     }
 
-    /// Appends `count` values from the iterator of packed bits
+    /// Appends `count` boolean values from the slice of packed bits
     pub fn append_bits(&mut self, count: usize, to_set: &[u8]) {
         let new_len = self.len + count;
         let new_buf_len = (new_len + 7) >> 3;
@@ -101,13 +101,13 @@ impl BitSet {
     }
 
     /// Returns the number of bytes used by this bitset
-    pub fn byte_size(&self) -> usize {
+    pub fn byte_len(&self) -> usize {
         self.buffer.len()
     }
 }
 
 /// Returns an iterator over set bit positions in increasing order
-pub fn iter_set_bits(bytes: &[u8]) -> impl Iterator<Item = usize> + '_ {
+pub fn iter_set_positions(bytes: &[u8]) -> impl Iterator<Item = usize> + '_ {
     let mut byte_idx = 0;
     let mut in_progress = bytes.get(0).cloned().unwrap_or(0);
     std::iter::from_fn(move || loop {
@@ -162,7 +162,7 @@ mod tests {
     fn test_bit_mask() {
         let mut mask = BitSet::new();
 
-        mask.append_bits(8, &[0xFF]);
+        mask.append_bits(8, &[0b11111111]);
         let d1 = mask.buffer.clone();
 
         mask.append_bits(3, &[0b01010010]);
@@ -177,13 +177,13 @@ mod tests {
         mask.append_bits(15, &[0b11011010, 0b01010101]);
         let d5 = mask.buffer.clone();
 
-        assert_eq!(d1.as_slice(), &[0xFF]);
-        assert_eq!(d2.as_slice(), &[0xFF, 0b00000010]);
-        assert_eq!(d3.as_slice(), &[0xFF, 0b10100010]);
-        assert_eq!(d4.as_slice(), &[0xFF, 0b10100010, 0b00000010]);
+        assert_eq!(d1.as_slice(), &[0b11111111]);
+        assert_eq!(d2.as_slice(), &[0b11111111, 0b00000010]);
+        assert_eq!(d3.as_slice(), &[0b11111111, 0b10100010]);
+        assert_eq!(d4.as_slice(), &[0b11111111, 0b10100010, 0b00000010]);
         assert_eq!(
             d5.as_slice(),
-            &[0xFF, 0b10100010, 0b01101010, 0b01010111, 0b00000001]
+            &[0b11111111, 0b10100010, 0b01101010, 0b01010111, 0b00000001]
         );
 
         assert!(mask.get(0));
@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(mask.buffer, collected);
 
         let expected_indexes: Vec<_> = iter_set_bools(&all_bools).collect();
-        let actual_indexes: Vec<_> = iter_set_bits(&mask.buffer).collect();
+        let actual_indexes: Vec<_> = iter_set_positions(&mask.buffer).collect();
         assert_eq!(expected_indexes, actual_indexes);
     }
 
@@ -236,7 +236,7 @@ mod tests {
         assert_eq!(mask.buffer, collected);
 
         let expected_indexes: Vec<_> = iter_set_bools(&all_bools).collect();
-        let actual_indexes: Vec<_> = iter_set_bits(&mask.buffer).collect();
+        let actual_indexes: Vec<_> = iter_set_positions(&mask.buffer).collect();
         assert_eq!(expected_indexes, actual_indexes);
         for index in actual_indexes {
             assert!(mask.get(index));
