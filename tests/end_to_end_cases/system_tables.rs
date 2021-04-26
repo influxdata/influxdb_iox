@@ -39,24 +39,20 @@ async fn test_operations() {
         .expect("failed to wait operation");
 
     let mut client = fixture.flight_client();
-    let sql_query = "select id, status, db_name, description from system.operations";
+    let sql_query = "select id, status, description from system.operations";
 
     let query_results = client.perform_query(&db_name1, sql_query).await.unwrap();
 
     let batches = collect_query(query_results).await;
 
     // parameterize on db_name1
-    let expected_line = format!(
-        "| 0  | Complete | {} | Loading chunk to ReadBuffer |",
-        db_name1
-    );
 
     let expected_read_data = vec![
-        "+----+----------+------------+-----------------------------+",
-        "| id | status   | db_name    | description                 |",
-        "+----+----------+------------+-----------------------------+",
-        &expected_line,
-        "+----+----------+------------+-----------------------------+",
+        "+----+----------+-----------------------------+",
+        "| id | status   | description                 |",
+        "+----+----------+-----------------------------+",
+        "| 0  | Complete | Loading chunk to ReadBuffer |",
+        "+----+----------+-----------------------------+",
     ];
 
     assert_table_eq!(expected_read_data, &batches);
@@ -65,6 +61,7 @@ async fn test_operations() {
     let query_results = client.perform_query(&db_name2, sql_query).await.unwrap();
 
     let batches = collect_query(query_results).await;
-    let expected_read_data = vec![] as Vec<&str>;
+    let expected_read_data = vec!["++", "||", "++", "++"];
+
     assert_table_eq!(expected_read_data, &batches);
 }

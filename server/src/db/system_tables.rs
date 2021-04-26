@@ -26,7 +26,6 @@ use data_types::{
 use tracker::TaskTracker;
 
 use super::catalog::Catalog;
-use crate::JobRegistry;
 
 // The IOx system schema
 pub const SYSTEM_SCHEMA: &str = "system";
@@ -35,15 +34,24 @@ const CHUNKS: &str = "chunks";
 const COLUMNS: &str = "columns";
 const OPERATIONS: &str = "operations";
 
+/// Something that can return a list of per-database jobs
+pub trait DatabaseJobs: std::fmt::Debug + Send + Sync + 'static {
+    /// Return a list of TaskTrackers for jobs
+    fn tracked(&self) -> Vec<TaskTracker<Job>>;
+}
+
 #[derive(Debug)]
 pub struct SystemSchemaProvider {
     catalog: Arc<Catalog>,
-    jobs: Arc<JobRegistry>,
+    jobs: Box<dyn DatabaseJobs>,
 }
 
 impl SystemSchemaProvider {
-    pub fn new(catalog: Arc<Catalog>, jobs: Arc<JobRegistry>) -> Self {
-        Self { catalog, jobs }
+    pub fn new(catalog: Arc<Catalog>, jobs: impl DatabaseJobs) -> Self {
+        Self {
+            catalog,
+            jobs: Box::new(jobs),
+        }
     }
 }
 
@@ -192,7 +200,10 @@ fn from_task_trackers(jobs: Vec<TaskTracker<Job>>) -> Result<RecordBatch> {
         jobs.iter()
             .map(|job| job.get_status().cpu_nanos().map(|n| n as i64)),
     );
-    let db_names = StringArray::from_iter(jobs.iter().map(|job| job.metadata().db_name()));
+    let wall_time_used = Time64NanosecondArray::from_iter(
+        jobs.iter()
+            .map(|job| job.get_status().wall_nanos().map(|n| n as i64)),
+    );
     let partition_keys =
         StringArray::from_iter(jobs.iter().map(|job| job.metadata().partition_key()));
     let chunk_ids = UInt32Array::from_iter(jobs.iter().map(|job| job.metadata().chunk_id()));
@@ -203,7 +214,7 @@ fn from_task_trackers(jobs: Vec<TaskTracker<Job>>) -> Result<RecordBatch> {
         Field::new("id", ids.data_type().clone(), false),
         Field::new("status", statuses.data_type().clone(), false),
         Field::new("cpu_time_used", cpu_time_used.data_type().clone(), true),
-        Field::new("db_name", db_names.data_type().clone(), true),
+        Field::new("wall_time_used", wall_time_used.data_type().clone(), true),
         Field::new("partition_key", partition_keys.data_type().clone(), true),
         Field::new("chunk_id", chunk_ids.data_type().clone(), true),
         Field::new("description", descriptions.data_type().clone(), true),
@@ -215,7 +226,7 @@ fn from_task_trackers(jobs: Vec<TaskTracker<Job>>) -> Result<RecordBatch> {
             Arc::new(ids),
             Arc::new(statuses),
             Arc::new(cpu_time_used),
-            Arc::new(db_names),
+            Arc::new(wall_time_used),
             Arc::new(partition_keys),
             Arc::new(chunk_ids),
             Arc::new(descriptions),

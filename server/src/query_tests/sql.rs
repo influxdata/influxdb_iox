@@ -326,7 +326,7 @@ async fn sql_select_from_system_operations() {
     // repeatable
     run_sql_test_case!(
         TwoMeasurementsManyFieldsLifecycle {},
-        "SELECT id, status, CAST(cpu_time_used AS BIGINT) > 0 as took_time, db_name, partition_key, chunk_id, description from system.operations",
+        "SELECT id, status, CAST(cpu_time_used AS BIGINT) > 0 as took_cpu_time, CAST(wall_time_used AS BIGINT) > 0 as took_wall_time, partition_key, chunk_id, description from system.operations",
         &expected
     );
 }
