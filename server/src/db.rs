@@ -21,6 +21,7 @@ use data_types::{
     timestamp::TimestampRange,
 };
 use internal_types::{
+    arrow::sort::sort_record_batch,
     entry::{self, ClockValue, Entry, SequencedEntry},
     selection::Selection,
 };
@@ -557,7 +558,8 @@ impl Db {
                 .expect("Loading chunk to mutable buffer");
 
             for batch in batches.drain(..) {
-                rb_chunk.upsert_table(&stats.name, batch)
+                let sorted = sort_record_batch(batch).expect("failed to sort");
+                rb_chunk.upsert_table(&stats.name, sorted)
             }
         }
 
