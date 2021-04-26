@@ -1,5 +1,3 @@
-use std::num::NonZeroU32;
-
 use generated_types::{
     google::protobuf::{Duration, Empty},
     influxdata::iox::management::v1::*,
@@ -81,11 +79,11 @@ async fn test_set_get_writer_id() {
     const TEST_ID: u32 = 42;
 
     client
-        .update_writer_id(NonZeroU32::new(TEST_ID).unwrap())
+        .update_server_id(TEST_ID)
         .await
         .expect("set ID failed");
 
-    let got = client.get_writer_id().await.expect("get ID failed");
+    let got = client.get_server_id().await.expect("get ID failed");
 
     assert_eq!(got.get(), TEST_ID);
 }
@@ -278,7 +276,7 @@ async fn test_chunk_get() {
             table_name: "cpu".into(),
             id: 0,
             storage: ChunkStorage::OpenMutableBuffer as i32,
-            estimated_bytes: 161,
+            estimated_bytes: 132,
             time_of_first_write: None,
             time_of_last_write: None,
             time_closing: None,
@@ -288,7 +286,7 @@ async fn test_chunk_get() {
             table_name: "disk".into(),
             id: 0,
             storage: ChunkStorage::OpenMutableBuffer as i32,
-            estimated_bytes: 127,
+            estimated_bytes: 114,
             time_of_first_write: None,
             time_of_last_write: None,
             time_closing: None,
@@ -455,7 +453,7 @@ async fn test_list_partition_chunks() {
         table_name: "cpu".into(),
         id: 0,
         storage: ChunkStorage::OpenMutableBuffer as i32,
-        estimated_bytes: 161,
+        estimated_bytes: 132,
         time_of_first_write: None,
         time_of_last_write: None,
         time_closing: None,

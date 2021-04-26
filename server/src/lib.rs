@@ -78,8 +78,9 @@ use parking_lot::Mutex;
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use data_types::{
-    database_rules::{DatabaseRules, WriterId},
+    database_rules::DatabaseRules,
     job::Job,
+    server_id::ServerId,
     {DatabaseName, DatabaseNameError},
 };
 use influxdb_line_protocol::ParsedLine;
@@ -105,7 +106,6 @@ use influxdb_iox_client::{connection::Builder, write};
 use internal_types::entry::SequencedEntry;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
-use std::num::NonZeroU32;
 
 pub mod buffer;
 mod config;
@@ -143,7 +143,7 @@ pub enum Error {
     #[snafu(display("error replicating to remote: {}", source))]
     ErrorReplicating { source: DatabaseError },
     #[snafu(display("id already set"))]
-    IdAlreadySet { id: NonZeroU32 },
+    IdAlreadySet { id: ServerId },
     #[snafu(display("unable to use server until id is set"))]
     IdNotSet,
     #[snafu(display("error serializing configuration {}", source))]
@@ -282,12 +282,27 @@ impl ServerMetrics {
     }
 }
 
+#[derive(Debug, Default)]
+struct CurrentServerId(OnceNonZeroU32);
+
+impl CurrentServerId {
+    fn set(&self, id: ServerId) -> Result<()> {
+        self.0.set(id.get()).map_err(|id| Error::IdAlreadySet {
+            id: ServerId::new(id),
+        })
+    }
+
+    fn get(&self) -> Result<ServerId> {
+        self.0.get().map(ServerId::new).context(IdNotSet)
+    }
+}
+
 /// `Server` is the container struct for how servers store data internally, as
 /// well as how they communicate with other servers. Each server will have one
 /// of these structs, which keeps track of all replication and query rules.
 #[derive(Debug)]
 pub struct Server<M: ConnectionManager> {
-    id: OnceNonZeroU32,
+    id: CurrentServerId,
     config: Arc<Config>,
     connection_manager: Arc<M>,
     pub store: Arc<ObjectStore>,
@@ -341,17 +356,17 @@ impl<M: ConnectionManager> Server<M> {
     /// path in object storage.
     ///
     /// A valid server ID Must be non-zero.
-    pub fn set_id(&self, id: NonZeroU32) -> Result<()> {
-        self.id.set(id).map_err(|id| Error::IdAlreadySet { id })
+    pub fn set_id(&self, id: ServerId) -> Result<()> {
+        self.id.set(id)
     }
 
     /// Returns the current server ID, or an error if not yet set.
-    pub fn require_id(&self) -> Result<NonZeroU32> {
-        self.id.get().context(IdNotSet)
+    pub fn require_id(&self) -> Result<ServerId> {
+        self.id.get()
     }
 
     /// Tells the server the set of rules for a database.
-    pub async fn create_database(&self, rules: DatabaseRules, server_id: NonZeroU32) -> Result<()> {
+    pub async fn create_database(&self, rules: DatabaseRules, server_id: ServerId) -> Result<()> {
         // Return an error if this server hasn't yet been setup with an id
         self.require_id()?;
         let db_reservation = self.config.create_db(rules)?;
@@ -529,7 +544,7 @@ impl<M: ConnectionManager> Server<M> {
     async fn write_entry_downstream(
         &self,
         db_name: &str,
-        node_group: &[WriterId],
+        node_group: &[ServerId],
         entry: Entry,
     ) -> Result<()> {
         let addrs: Vec<_> = node_group
@@ -626,15 +641,15 @@ impl<M: ConnectionManager> Server<M> {
         Ok(rules)
     }
 
-    pub fn remotes_sorted(&self) -> Vec<(WriterId, String)> {
+    pub fn remotes_sorted(&self) -> Vec<(ServerId, String)> {
         self.config.remotes_sorted()
     }
 
-    pub fn update_remote(&self, id: WriterId, addr: GRpcConnectionString) {
+    pub fn update_remote(&self, id: ServerId, addr: GRpcConnectionString) {
         self.config.update_remote(id, addr)
     }
 
-    pub fn delete_remote(&self, id: WriterId) -> Option<GRpcConnectionString> {
+    pub fn delete_remote(&self, id: ServerId) -> Option<GRpcConnectionString> {
         self.config.delete_remote(id)
     }
 
@@ -894,7 +909,7 @@ async fn get_store_bytes(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, convert::TryFrom};
 
     use async_trait::async_trait;
     use futures::TryStreamExt;
@@ -941,7 +956,7 @@ mod tests {
         let config = config();
         let store = config.store();
         let server = Server::new(manager, config);
-        server.set_id(NonZeroU32::new(1).unwrap()).unwrap();
+        server.set_id(ServerId::try_from(1).unwrap()).unwrap();
 
         let name = DatabaseName::new("bananas").unwrap();
 
@@ -995,7 +1010,7 @@ mod tests {
         let config2 =
             ServerConfig::new(store, Arc::new(MetricRegistry::new())).with_num_worker_threads(1);
         let server2 = Server::new(manager, config2);
-        server2.set_id(NonZeroU32::new(1).unwrap()).unwrap();
+        server2.set_id(ServerId::try_from(1).unwrap()).unwrap();
         server2.load_database_configs().await.unwrap();
 
         let _ = server2.db(&db2).unwrap();
@@ -1008,7 +1023,7 @@ mod tests {
 
         let manager = TestConnectionManager::new();
         let server = Server::new(manager, config());
-        server.set_id(NonZeroU32::new(1).unwrap()).unwrap();
+        server.set_id(ServerId::try_from(1).unwrap()).unwrap();
 
         let name = DatabaseName::new("bananas").unwrap();
 
@@ -1039,7 +1054,7 @@ mod tests {
     async fn db_names_sorted() {
         let manager = TestConnectionManager::new();
         let server = Server::new(manager, config());
-        server.set_id(NonZeroU32::new(1).unwrap()).unwrap();
+        server.set_id(ServerId::try_from(1).unwrap()).unwrap();
 
         let names = vec!["bar", "baz"];
 
@@ -1059,7 +1074,7 @@ mod tests {
     async fn writes_local() {
         let manager = TestConnectionManager::new();
         let server = Server::new(manager, config());
-        server.set_id(NonZeroU32::new(1).unwrap()).unwrap();
+        server.set_id(ServerId::try_from(1).unwrap()).unwrap();
 
         let name = DatabaseName::new("foo".to_string()).unwrap();
         server
@@ -1095,7 +1110,7 @@ mod tests {
     async fn write_entry_local() {
         let manager = TestConnectionManager::new();
         let server = Server::new(manager, config());
-        server.set_id(NonZeroU32::new(1).unwrap()).unwrap();
+        server.set_id(ServerId::try_from(1).unwrap()).unwrap();
 
         let name = DatabaseName::new("foo".to_string()).unwrap();
         server
@@ -1144,12 +1159,13 @@ mod tests {
     #[tokio::test]
     async fn write_entry_downstream() {
         const TEST_SHARD_ID: ShardId = 1;
-        const GOOD_REMOTE_ID_1: WriterId = 1;
-        const GOOD_REMOTE_ID_2: WriterId = 2;
-        const BAD_REMOTE_ID: WriterId = 666;
         const GOOD_REMOTE_ADDR_1: &str = "http://localhost:111";
         const GOOD_REMOTE_ADDR_2: &str = "http://localhost:222";
         const BAD_REMOTE_ADDR: &str = "http://localhost:666";
+
+        let good_remote_id_1 = ServerId::try_from(1).unwrap();
+        let good_remote_id_2 = ServerId::try_from(2).unwrap();
+        let bad_remote_id = ServerId::try_from(666).unwrap();
 
         let mut manager = TestConnectionManager::new();
         let written_1 = Arc::new(AtomicBool::new(false));
@@ -1168,7 +1184,7 @@ mod tests {
         );
 
         let server = Server::new(manager, config());
-        server.set_id(NonZeroU32::new(1).unwrap()).unwrap();
+        server.set_id(ServerId::try_from(1).unwrap()).unwrap();
 
         let db_name = DatabaseName::new("foo").unwrap();
         server
@@ -1179,7 +1195,7 @@ mod tests {
             .await
             .unwrap();
 
-        let remote_ids = vec![BAD_REMOTE_ID, GOOD_REMOTE_ID_1, GOOD_REMOTE_ID_2];
+        let remote_ids = vec![bad_remote_id, good_remote_id_1, good_remote_id_2];
         let db = server.db(&db_name).unwrap();
         {
             let mut rules = db.rules.write();
@@ -1206,7 +1222,7 @@ mod tests {
         );
 
         // one remote is configured but it's down and we'll get connection error
-        server.update_remote(BAD_REMOTE_ID, BAD_REMOTE_ADDR.into());
+        server.update_remote(bad_remote_id, BAD_REMOTE_ADDR.into());
         let err = server.write_lines(&db_name, &lines).await.unwrap_err();
         assert!(matches!(
             err,
@@ -1220,8 +1236,8 @@ mod tests {
 
         // We configure the address for the other remote, this time connection will succeed
         // despite the bad remote failing to connect.
-        server.update_remote(GOOD_REMOTE_ID_1, GOOD_REMOTE_ADDR_1.into());
-        server.update_remote(GOOD_REMOTE_ID_2, GOOD_REMOTE_ADDR_2.into());
+        server.update_remote(good_remote_id_1, GOOD_REMOTE_ADDR_1.into());
+        server.update_remote(good_remote_id_2, GOOD_REMOTE_ADDR_2.into());
 
         // Remotes are tried in random order, so we need to repeat the test a few times to have a reasonable
         // probability both the remotes will get hit.
@@ -1244,7 +1260,7 @@ mod tests {
         let cancel_token = CancellationToken::new();
         let background_handle = spawn_worker(Arc::clone(&server), cancel_token.clone());
 
-        server.set_id(NonZeroU32::new(1).unwrap()).unwrap();
+        server.set_id(ServerId::try_from(1).unwrap()).unwrap();
 
         let db_name = DatabaseName::new("foo").unwrap();
         server
@@ -1405,7 +1421,7 @@ mod tests {
     async fn hard_buffer_limit() {
         let manager = TestConnectionManager::new();
         let server = Server::new(manager, config());
-        server.set_id(NonZeroU32::new(1).unwrap()).unwrap();
+        server.set_id(ServerId::try_from(1).unwrap()).unwrap();
 
         let name = DatabaseName::new("foo".to_string()).unwrap();
         server

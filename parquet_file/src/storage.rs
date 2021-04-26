@@ -19,26 +19,27 @@ use arrow_deps::{
         file::{reader::FileReader, serialized_reader::SerializedFileReader, writer::TryClone},
     },
 };
+use bytes::Bytes;
+use data_types::server_id::ServerId;
+use futures::{Stream, StreamExt};
 use internal_types::selection::Selection;
 use object_store::{
     path::{ObjectStorePath, Path},
     ObjectStore, ObjectStoreApi,
 };
-use query::predicate::Predicate;
-
-use bytes::Bytes;
-use futures::{Stream, StreamExt};
 use parking_lot::Mutex;
+use query::predicate::Predicate;
 use snafu::{OptionExt, ResultExt, Snafu};
 use std::{
     fs::File,
     io::{Cursor, Seek, SeekFrom, Write},
-    num::NonZeroU32,
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::task;
+use tokio::{
+    sync::mpsc::{channel, Receiver, Sender},
+    task,
+};
 use tokio_stream::wrappers::ReceiverStream;
 
 #[derive(Debug, Snafu)]
@@ -123,16 +124,16 @@ impl RecordBatchStream for ParquetStream {
 #[derive(Debug, Clone)]
 pub struct Storage {
     object_store: Arc<ObjectStore>,
-    writer_id: NonZeroU32,
+    server_id: ServerId,
     db_name: String,
 }
 
 impl Storage {
-    pub fn new(store: Arc<ObjectStore>, id: NonZeroU32, db: String) -> Self {
+    pub fn new(object_store: Arc<ObjectStore>, server_id: ServerId, db_name: String) -> Self {
         Self {
-            object_store: store,
-            writer_id: id,
-            db_name: db,
+            object_store,
+            server_id,
+            db_name,
         }
     }
 
@@ -149,7 +150,7 @@ impl Storage {
         // name>.parquet
 
         let mut path = self.object_store.new_path();
-        path.push_dir(self.writer_id.to_string());
+        path.push_dir(self.server_id.to_string());
         path.push_dir(self.db_name.clone());
         path.push_dir("data");
         path.push_dir(partition_key);
