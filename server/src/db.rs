@@ -1341,7 +1341,11 @@ mod tests {
         write_lp(db.as_ref(), "cpu,tag2=a bar=3 5");
 
         let partition_key = "1970-01-01T00";
-        let mb_chunk = db.rollover_partition(partition_key, "cpu").await.unwrap();
+        let mb_chunk = db
+            .rollover_partition(partition_key, "cpu")
+            .await
+            .unwrap()
+            .unwrap();
 
         let mb = collect_read_filter(&mb_chunk, "cpu").await;
 
