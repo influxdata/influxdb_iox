@@ -1179,39 +1179,7 @@ impl InfluxRpcPlanner {
     where
         D: Database,
     {
-        let mut db_chunks = Vec::new();
-
-        // TODO write the following in a functional style (need to get
-        // rid of `await` on `Database::chunks`)
-
-        let partition_keys = database
-            .partition_keys()
-            .map_err(|e| Box::new(e) as _)
-            .context(ListingPartitions)?;
-
-        debug!(partition_keys=?partition_keys, "Considering partition keys");
-
-        for key in partition_keys {
-            // TODO prune partitions somehow
-            let partition_chunks = database.chunks(&key);
-            for chunk in partition_chunks {
-                let could_pass_predicate = chunk
-                    .could_pass_predicate(predicate)
-                    .map_err(|e| Box::new(e) as _)
-                    .context(CheckingChunkPredicate {
-                        chunk_id: chunk.id(),
-                    })?;
-
-                debug!(
-                    chunk_id = chunk.id(),
-                    could_pass_predicate, "Considering chunk"
-                );
-                if could_pass_predicate {
-                    db_chunks.push(chunk)
-                }
-            }
-        }
-        Ok(db_chunks)
+        Ok(database.chunks(predicate))
     }
 }
 
