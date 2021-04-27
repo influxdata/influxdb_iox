@@ -84,6 +84,21 @@ jobs:
           name: Clippy
           command: cargo clippy --all-targets --workspace -- -D warnings
       - cache_save
+  doc:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+    environment:
+        # Disable full debug symbol generation to speed up CI build
+        # "1" means line tables only, which is useful for panic tracebacks.
+        RUSTFLAGS: "-C debuginfo=1"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Cargo doc
+          command: cargo doc --document-private-items --no-deps --workspace
+      - cache_save
   test:
     docker:
       - image: quay.io/influxdb/rust:ci
@@ -197,7 +212,11 @@ jobs:
           echo sha256sum after build is
           sha256sum target/release/influxdb_iox
       - setup_remote_docker:
-          docker_layer_caching: true
+          # There seems to be a cache invalidation bug in docker
+          # or in the way that circleci implements layer caching.
+          # Disabling for now, and tracked further investigations
+          # in https://github.com/influxdata/k8s-idpe/issues/3038
+          docker_layer_caching: false
       - run: |
           sudo apt-get update
           sudo apt-get install -y docker.io
@@ -248,6 +267,7 @@ workflows:
       - test_influxdb2_client
       - build
       - check-flatbuffers
+      - doc
 
   # Internal pipeline for perf builds.
   #
