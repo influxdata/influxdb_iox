@@ -328,12 +328,10 @@ fn optimize_schema(schema: &Schema) -> Schema {
 /// which defines the mapping from dictionary IDs. It then sends these
 /// dictionaries over the wire.
 ///
-/// This poses a problem as RecordBatches within IOx may not have the
-/// same underlying dictionary across row groups for the same column
+/// This requires identifying the different dictionaries in use, assigning
+/// them IDs, and sending new dictionaries, delta or otherwise, when needed
 ///
-/// Differential updates of dictionaries are supported and would be
-/// the natural way to support this, however, they aren't supported in
-/// the rust implementation and it would be non-trivial to implement
+/// This is tracked by #1318
 ///
 /// For now we just hydrate the dictionaries to their underlying type
 fn hydrate_dictionary(array: &ArrayRef) -> Result<ArrayRef, Error> {
@@ -444,10 +442,20 @@ mod tests {
 
         // Should hydrate string dictionary for transport
         assert_eq!(optimized_schema.field(1).data_type(), &DataType::Utf8);
-        assert!(batch
+        let array = batch
             .column(1)
             .as_any()
             .downcast_ref::<StringArray>()
-            .is_some());
+            .unwrap();
+
+        let expected = StringArray::from(vec![
+            Some("foo"),
+            Some("bar"),
+            None,
+            Some("fiz"),
+            None,
+            Some("foo"),
+        ]);
+        assert_eq!(array, &expected)
     }
 }
