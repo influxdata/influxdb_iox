@@ -100,9 +100,9 @@ pub fn sort_record_batch(batch: RecordBatch) -> Result<RecordBatch> {
 
 #[cfg(test)]
 mod tests {
-    use arrow_deps::arrow::array::{Int32Array, StringArray, TimestampNanosecondArray};
-    use arrow_deps::arrow::compute::cast;
+    use arrow_deps::arrow::array::{Int32Array, TimestampNanosecondArray};
     use arrow_deps::arrow::datatypes::DataType;
+    use arrow_deps::assert_table_eq;
 
     use crate::schema::builder::SchemaBuilder;
 
@@ -153,42 +153,21 @@ mod tests {
 
         let sorted = sort_record_batch(batch).unwrap();
 
-        let column0 = cast(sorted.column(0), &DataType::Utf8).unwrap();
-        let column0: Vec<_> = column0
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap()
-            .iter()
-            .filter_map(|x| x)
-            .collect();
-
-        let column1 = cast(sorted.column(1), &DataType::Utf8).unwrap();
-        let column1: Vec<_> = column1
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap()
-            .iter()
-            .filter_map(|x| x)
-            .collect();
-
-        let column2 = sorted.column(2);
-        let column2 = column2
-            .as_any()
-            .downcast_ref::<TimestampNanosecondArray>()
-            .unwrap();
-
-        let column3 = sorted.column(3);
-        let column3 = column3.as_any().downcast_ref::<Int32Array>().unwrap();
-
-        assert_eq!(
-            column0,
-            vec!["bananas", "cupcakes", "foo", "foo", "bongo", "cupcakes"]
+        // Expects to be sorted first by tag2, then tag1, then time
+        assert_table_eq!(
+            &[
+                "+----------+-------+-------------------------------+------+",
+                "| tag1     | tag2  | time                          | data |",
+                "+----------+-------+-------------------------------+------+",
+                "| bananas  | prod  | 1970-01-01 00:00:00.000000002 | 22   |",
+                "| cupcakes | prod  | 1970-01-01 00:00:00.000000012 | 2232 |",
+                "| foo      | prod  | 1970-01-01 00:00:00.000000020 | 2133 |",
+                "| foo      | prod  | 1970-01-01 00:00:00.000000040 | 543  |",
+                "| bongo    | stage | 1970-01-01 00:00:00.000000054 | 33   |",
+                "| cupcakes | stage | 1970-01-01 00:00:00           | 32   |",
+                "+----------+-------+-------------------------------+------+",
+            ],
+            &[sorted]
         );
-        assert_eq!(
-            column1,
-            vec!["prod", "prod", "prod", "prod", "stage", "stage"]
-        );
-        assert_eq!(column2.values(), &[2, 12, 20, 40, 54, 0]);
-        assert_eq!(column3.values(), &[22, 2232, 2133, 543, 33, 32])
     }
 }
