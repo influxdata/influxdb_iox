@@ -187,15 +187,10 @@ impl Partition {
         &'a self,
         predicate: &'a Predicate,
     ) -> impl Iterator<Item = &Arc<RwLock<Chunk>>> + 'a {
-        match &predicate.table_names {
-            Some(tables) => {
-                itertools::Either::Left(self.tables.iter().filter_map(
-                    move |(table_name, table)| tables.contains(table_name).then(|| table),
-                ))
-            }
-            None => itertools::Either::Right(self.tables.values()),
-        }
-        .flat_map(|table| table.chunks.values())
+        self.tables
+            .iter()
+            .filter(move |(table_name, _)| predicate.should_include_table(table_name))
+            .flat_map(|(_, table)| table.chunks.values())
     }
 
     /// Return a PartitionSummary for this partition

@@ -42,8 +42,9 @@ pub trait Database: Debug + Send + Sync {
     /// Return the partition keys for data in this DB
     fn partition_keys(&self) -> Result<Vec<String>, Self::Error>;
 
-    /// Returns a set of chunks within the partition that match
-    /// the provided predicate
+    /// Returns a set of chunks within the partition with data that may match
+    /// the provided predicate. If possible, chunks which have no rows that can
+    /// possibly match the predicate are omitted.
     fn chunks(&self, predicate: &Predicate) -> Vec<Arc<Self::Chunk>>;
 
     /// Return a summary of all chunks in this database, in all partitions
