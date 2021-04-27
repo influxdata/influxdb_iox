@@ -654,10 +654,7 @@ impl From<&InfluxColumnType> for ArrowDataType {
     /// What arrow type is used for this column type?
     fn from(t: &InfluxColumnType) -> Self {
         match t {
-            InfluxColumnType::Tag => ArrowDataType::Dictionary(
-                Box::new(ArrowDataType::Int32),
-                Box::new(ArrowDataType::Utf8),
-            ),
+            InfluxColumnType::Tag => Self::Dictionary(Box::new(Self::Int32), Box::new(Self::Utf8)),
             InfluxColumnType::Field(influxdb_field_type) => (*influxdb_field_type).into(),
             InfluxColumnType::Timestamp => TIME_DATA_TYPE(),
         }
