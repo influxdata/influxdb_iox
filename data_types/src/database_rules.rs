@@ -1,23 +1,24 @@
-use std::convert::{TryFrom, TryInto};
-
+use crate::{
+    consistent_hasher::ConsistentHasher,
+    field_validation::{FromField, FromFieldOpt, FromFieldString, FromFieldVec},
+    server_id::ServerId,
+    DatabaseName,
+};
 use chrono::{DateTime, TimeZone, Utc};
-use regex::Regex;
-use snafu::{OptionExt, Snafu};
-
-use generated_types::google::protobuf::Empty;
 use generated_types::{
-    google::{FieldViolation, FieldViolationExt},
+    google::{protobuf::Empty, FieldViolation, FieldViolationExt},
     influxdata::iox::management::v1 as management,
 };
 use influxdb_line_protocol::ParsedLine;
-
-use crate::consistent_hasher::ConsistentHasher;
-use crate::field_validation::{FromField, FromFieldOpt, FromFieldString, FromFieldVec};
-use crate::DatabaseName;
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
-use std::num::{NonZeroU32, NonZeroUsize};
-use std::sync::Arc;
+use regex::Regex;
+use snafu::{OptionExt, Snafu};
+use std::{
+    collections::HashMap,
+    convert::{TryFrom, TryInto},
+    hash::{Hash, Hasher},
+    num::{NonZeroU32, NonZeroUsize},
+    sync::Arc,
+};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -847,7 +848,7 @@ pub struct MatcherToShard {
 }
 
 /// A collection of IOx nodes
-pub type NodeGroup = Vec<WriterId>;
+pub type NodeGroup = Vec<ServerId>;
 
 /// HashRing is a rule for creating a hash key for a row and mapping that to
 /// an individual node on a ring.
@@ -932,7 +933,9 @@ impl TryFrom<management::ShardConfig> for ShardConfig {
                 proto
                     .shards
                     .into_iter()
-                    .map(|(k, v)| Ok((k, try_from_management_node_group_for_node_group(v))))
+                    .map(|(k, v)| {
+                        try_from_management_node_group_for_node_group(v).map(|ng| (k, ng))
+                    })
                     .collect::<Result<HashMap<u32, NodeGroup>, FieldViolation>>()?,
             ),
         })
@@ -995,15 +998,24 @@ fn from_node_group_for_management_node_group(node_group: NodeGroup) -> managemen
     management::NodeGroup {
         nodes: node_group
             .into_iter()
-            .map(|id| management::node_group::Node { id })
+            .map(|id| management::node_group::Node { id: id.get_u32() })
             .collect(),
     }
 }
 
 fn try_from_management_node_group_for_node_group(
     proto: management::NodeGroup,
-) -> std::vec::Vec<u32> {
-    proto.nodes.into_iter().map(|i| i.id).collect()
+) -> Result<NodeGroup, FieldViolation> {
+    proto
+        .nodes
+        .into_iter()
+        .map(|i| {
+            ServerId::try_from(i.id).map_err(|_| FieldViolation {
+                field: "id".to_string(),
+                description: "Node ID must be nonzero".to_string(),
+            })
+        })
+        .collect()
 }
 
 impl From<Matcher> for management::Matcher {
@@ -1046,7 +1058,6 @@ impl TryFrom<management::Matcher> for Matcher {
 /// files and subdirectories for a partition. It takes the form of `/<writer
 /// ID>/<database>/<partition key>/`.
 pub type PartitionId = String;
-pub type WriterId = u32;
 
 #[cfg(test)]
 mod tests {

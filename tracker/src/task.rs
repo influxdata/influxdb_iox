@@ -80,9 +80,13 @@
 //! etc... between threads as any such functionality must perform the necessary
 //! synchronisation to be well-formed.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 
 use tokio_util::sync::CancellationToken;
 
@@ -143,6 +147,27 @@ pub enum TaskStatus {
         /// the last TrackedFuture being dropped
         wall_nanos: usize,
     },
+}
+
+impl TaskStatus {
+    /// return a human readable name for this status
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Creating => "Creating",
+            Self::Running { .. } => "Running",
+            Self::Complete { .. } => "Complete",
+        }
+    }
+
+    /// If the job has competed, returns the total amount of CPU time
+    /// spent executing futures
+    pub fn cpu_nanos(&self) -> Option<usize> {
+        match self {
+            Self::Creating => None,
+            Self::Running { cpu_nanos, .. } => Some(*cpu_nanos),
+            Self::Complete { cpu_nanos, .. } => Some(*cpu_nanos),
+        }
+    }
 }
 
 /// A Tracker can be used to monitor/cancel/wait for a set of associated futures

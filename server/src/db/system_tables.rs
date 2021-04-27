@@ -1,12 +1,16 @@
 use std::any::Any;
 use std::convert::AsRef;
+use std::iter::FromIterator;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
 use arrow_deps::{
     arrow::{
-        array::{Array, StringBuilder, TimestampNanosecondBuilder, UInt32Builder, UInt64Builder},
+        array::{
+            Array, StringArray, StringBuilder, Time64NanosecondArray, TimestampNanosecondArray,
+            UInt32Array, UInt64Array, UInt64Builder,
+        },
         datatypes::{Field, Schema},
         error::Result,
         record_batch::RecordBatch,
@@ -16,24 +20,30 @@ use arrow_deps::{
         datasource::{MemTable, TableProvider},
     },
 };
-use data_types::{chunk::ChunkSummary, error::ErrorLogger, partition_metadata::PartitionSummary};
+use data_types::{
+    chunk::ChunkSummary, error::ErrorLogger, job::Job, partition_metadata::PartitionSummary,
+};
+use tracker::TaskTracker;
 
 use super::catalog::Catalog;
+use crate::JobRegistry;
 
 // The IOx system schema
 pub const SYSTEM_SCHEMA: &str = "system";
 
 const CHUNKS: &str = "chunks";
 const COLUMNS: &str = "columns";
+const OPERATIONS: &str = "operations";
 
 #[derive(Debug)]
 pub struct SystemSchemaProvider {
     catalog: Arc<Catalog>,
+    jobs: Arc<JobRegistry>,
 }
 
 impl SystemSchemaProvider {
-    pub fn new(catalog: Arc<Catalog>) -> Self {
-        Self { catalog }
+    pub fn new(catalog: Arc<Catalog>, jobs: Arc<JobRegistry>) -> Self {
+        Self { catalog, jobs }
     }
 }
 
@@ -43,7 +53,11 @@ impl SchemaProvider for SystemSchemaProvider {
     }
 
     fn table_names(&self) -> Vec<String> {
-        vec![CHUNKS.to_string(), COLUMNS.to_string()]
+        vec![
+            CHUNKS.to_string(),
+            COLUMNS.to_string(),
+            OPERATIONS.to_string(),
+        ]
     }
 
     fn table(&self, name: &str) -> Option<Arc<dyn TableProvider>> {
@@ -54,6 +68,9 @@ impl SchemaProvider for SystemSchemaProvider {
                 .ok()?,
             COLUMNS => from_partition_summaries(self.catalog.partition_summaries())
                 .log_if_error("chunks table")
+                .ok()?,
+            OPERATIONS => from_task_trackers(self.jobs.tracked())
+                .log_if_error("operations table")
                 .ok()?,
             _ => return None,
         };
@@ -66,48 +83,27 @@ impl SchemaProvider for SystemSchemaProvider {
     }
 }
 
-fn append_time(
-    builder: &mut TimestampNanosecondBuilder,
-    time: Option<DateTime<Utc>>,
-) -> Result<()> {
-    match time {
-        Some(time) => builder.append_value(time.timestamp_nanos()),
-        None => builder.append_null(),
-    }
+// TODO: Use a custom proc macro or serde to reduce the boilerplate
+fn time_to_ts(time: Option<DateTime<Utc>>) -> Option<i64> {
+    time.map(|ts| ts.timestamp_nanos())
 }
 
-// TODO: Use a custom proc macro or serde to reduce the boilerplate
-
 fn from_chunk_summaries(chunks: Vec<ChunkSummary>) -> Result<RecordBatch> {
-    let mut id = UInt32Builder::new(chunks.len());
-    let mut partition_key = StringBuilder::new(chunks.len());
-    let mut table_name = StringBuilder::new(chunks.len());
-    let mut storage = StringBuilder::new(chunks.len());
-    let mut estimated_bytes = UInt64Builder::new(chunks.len());
-    let mut time_of_first_write = TimestampNanosecondBuilder::new(chunks.len());
-    let mut time_of_last_write = TimestampNanosecondBuilder::new(chunks.len());
-    let mut time_closing = TimestampNanosecondBuilder::new(chunks.len());
-
-    for chunk in chunks {
-        id.append_value(chunk.id)?;
-        partition_key.append_value(chunk.partition_key.as_ref())?;
-        table_name.append_value(chunk.table_name.as_ref())?;
-        storage.append_value(chunk.storage.as_str())?;
-        estimated_bytes.append_value(chunk.estimated_bytes as u64)?;
-
-        append_time(&mut time_of_first_write, chunk.time_of_first_write)?;
-        append_time(&mut time_of_last_write, chunk.time_of_last_write)?;
-        append_time(&mut time_closing, chunk.time_closing)?;
-    }
-
-    let id = id.finish();
-    let partition_key = partition_key.finish();
-    let table_name = table_name.finish();
-    let storage = storage.finish();
-    let estimated_bytes = estimated_bytes.finish();
-    let time_of_first_write = time_of_first_write.finish();
-    let time_of_last_write = time_of_last_write.finish();
-    let time_closing = time_closing.finish();
+    let id = UInt32Array::from_iter(chunks.iter().map(|c| Some(c.id)));
+    let partition_key =
+        StringArray::from_iter(chunks.iter().map(|c| Some(c.partition_key.as_ref())));
+    let table_name = StringArray::from_iter(chunks.iter().map(|c| Some(c.table_name.as_ref())));
+    let storage = StringArray::from_iter(chunks.iter().map(|c| Some(c.storage.as_str())));
+    let estimated_bytes =
+        UInt64Array::from_iter(chunks.iter().map(|c| Some(c.estimated_bytes as u64)));
+    let time_of_first_write = TimestampNanosecondArray::from_iter(
+        chunks.iter().map(|c| c.time_of_first_write).map(time_to_ts),
+    );
+    let time_of_last_write = TimestampNanosecondArray::from_iter(
+        chunks.iter().map(|c| c.time_of_last_write).map(time_to_ts),
+    );
+    let time_closing =
+        TimestampNanosecondArray::from_iter(chunks.iter().map(|c| c.time_closing).map(time_to_ts));
 
     let schema = Schema::new(vec![
         Field::new("id", id.data_type().clone(), false),
@@ -189,6 +185,44 @@ fn from_partition_summaries(partitions: Vec<PartitionSummary>) -> Result<RecordB
     )
 }
 
+fn from_task_trackers(jobs: Vec<TaskTracker<Job>>) -> Result<RecordBatch> {
+    let ids = StringArray::from_iter(jobs.iter().map(|job| Some(job.id().to_string())));
+    let statuses = StringArray::from_iter(jobs.iter().map(|job| Some(job.get_status().name())));
+    let cpu_time_used = Time64NanosecondArray::from_iter(
+        jobs.iter()
+            .map(|job| job.get_status().cpu_nanos().map(|n| n as i64)),
+    );
+    let db_names = StringArray::from_iter(jobs.iter().map(|job| job.metadata().db_name()));
+    let partition_keys =
+        StringArray::from_iter(jobs.iter().map(|job| job.metadata().partition_key()));
+    let chunk_ids = UInt32Array::from_iter(jobs.iter().map(|job| job.metadata().chunk_id()));
+    let descriptions =
+        StringArray::from_iter(jobs.iter().map(|job| Some(job.metadata().description())));
+
+    let schema = Schema::new(vec![
+        Field::new("id", ids.data_type().clone(), false),
+        Field::new("status", statuses.data_type().clone(), false),
+        Field::new("cpu_time_used", cpu_time_used.data_type().clone(), true),
+        Field::new("db_name", db_names.data_type().clone(), true),
+        Field::new("partition_key", partition_keys.data_type().clone(), true),
+        Field::new("chunk_id", chunk_ids.data_type().clone(), true),
+        Field::new("description", descriptions.data_type().clone(), true),
+    ]);
+
+    RecordBatch::try_new(
+        Arc::new(schema),
+        vec![
+            Arc::new(ids),
+            Arc::new(statuses),
+            Arc::new(cpu_time_used),
+            Arc::new(db_names),
+            Arc::new(partition_keys),
+            Arc::new(chunk_ids),
+            Arc::new(descriptions),
+        ],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,11 +285,11 @@ mod tests {
                     columns: vec![
                         ColumnSummary {
                             name: "c1".to_string(),
-                            stats: Statistics::I64(StatValues::new(23)),
+                            stats: Statistics::I64(StatValues::new_with_value(23)),
                         },
                         ColumnSummary {
                             name: "c2".to_string(),
-                            stats: Statistics::I64(StatValues::new(43)),
+                            stats: Statistics::I64(StatValues::new_with_value(43)),
                         },
                     ],
                 }],

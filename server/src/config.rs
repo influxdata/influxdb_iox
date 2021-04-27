@@ -1,13 +1,9 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    num::NonZeroU32,
     sync::{Arc, RwLock},
 };
 
-use data_types::{
-    database_rules::{DatabaseRules, WriterId},
-    DatabaseName,
-};
+use data_types::{database_rules::DatabaseRules, server_id::ServerId, DatabaseName};
 use metrics::MetricRegistry;
 use object_store::{path::ObjectStorePath, ObjectStore};
 use query::exec::Executor;
@@ -103,22 +99,22 @@ impl Config {
         Ok(rules.clone())
     }
 
-    pub(crate) fn remotes_sorted(&self) -> Vec<(WriterId, String)> {
+    pub(crate) fn remotes_sorted(&self) -> Vec<(ServerId, String)> {
         let state = self.state.read().expect("mutex poisoned");
         state.remotes.iter().map(|(&a, b)| (a, b.clone())).collect()
     }
 
-    pub(crate) fn update_remote(&self, id: WriterId, addr: GRpcConnectionString) {
+    pub(crate) fn update_remote(&self, id: ServerId, addr: GRpcConnectionString) {
         let mut state = self.state.write().expect("mutex poisoned");
         state.remotes.insert(id, addr);
     }
 
-    pub(crate) fn delete_remote(&self, id: WriterId) -> Option<GRpcConnectionString> {
+    pub(crate) fn delete_remote(&self, id: ServerId) -> Option<GRpcConnectionString> {
         let mut state = self.state.write().expect("mutex poisoned");
         state.remotes.remove(&id)
     }
 
-    pub(crate) fn resolve_remote(&self, id: WriterId) -> Option<GRpcConnectionString> {
+    pub(crate) fn resolve_remote(&self, id: ServerId) -> Option<GRpcConnectionString> {
         let state = self.state.read().expect("mutex poisoned");
         state.remotes.get(&id).cloned()
     }
@@ -126,7 +122,7 @@ impl Config {
     fn commit(
         &self,
         rules: DatabaseRules,
-        server_id: NonZeroU32,
+        server_id: ServerId,
         object_store: Arc<ObjectStore>,
         exec: Arc<Executor>,
     ) {
@@ -224,7 +220,7 @@ struct ConfigState {
     reservations: BTreeSet<DatabaseName<'static>>,
     databases: BTreeMap<DatabaseName<'static>, DatabaseState>,
     /// Map between remote IOx server IDs and management API connection strings.
-    remotes: BTreeMap<WriterId, GRpcConnectionString>,
+    remotes: BTreeMap<ServerId, GRpcConnectionString>,
 }
 
 #[derive(Debug)]
@@ -272,7 +268,7 @@ pub(crate) struct CreateDatabaseHandle<'a> {
 impl<'a> CreateDatabaseHandle<'a> {
     pub(crate) fn commit(
         mut self,
-        server_id: NonZeroU32,
+        server_id: ServerId,
         object_store: Arc<ObjectStore>,
         exec: Arc<Executor>,
     ) {
@@ -295,6 +291,8 @@ impl<'a> Drop for CreateDatabaseHandle<'a> {
 
 #[cfg(test)]
 mod test {
+    use std::convert::TryFrom;
+
     use object_store::{memory::InMemory, ObjectStore, ObjectStoreApi};
 
     use super::*;
@@ -313,7 +311,7 @@ mod test {
         }
 
         let db_reservation = config.create_db(rules).unwrap();
-        let server_id = NonZeroU32::new(1).unwrap();
+        let server_id = ServerId::try_from(1).unwrap();
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
         let exec = Arc::new(Executor::new(1));
         db_reservation.commit(server_id, store, exec);
@@ -341,7 +339,7 @@ mod test {
         let rules = DatabaseRules::new(name.clone());
 
         let db_reservation = config.create_db(rules).unwrap();
-        let server_id = NonZeroU32::new(1).unwrap();
+        let server_id = ServerId::try_from(1).unwrap();
         let store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
         let exec = Arc::new(Executor::new(1));
         db_reservation.commit(server_id, store, exec);
