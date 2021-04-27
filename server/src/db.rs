@@ -1,21 +1,7 @@
 //! This module contains the main IOx Database object which has the
 //! instances of the mutable buffer, read buffer, and object store
 
-use std::any::Any;
-use std::{
-    convert::TryInto,
-    num::NonZeroU32,
-    sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
-    },
-};
-
-use async_trait::async_trait;
-use observability_deps::tracing::{debug, info};
-use parking_lot::{Mutex, RwLock};
-use snafu::{ensure, OptionExt, ResultExt, Snafu};
-
+use super::{buffer::Buffer, JobRegistry};
 use arrow_deps::{
     arrow::datatypes::SchemaRef as ArrowSchemaRef,
     datafusion::{
@@ -23,27 +9,40 @@ use arrow_deps::{
         physical_plan::SendableRecordBatchStream,
     },
 };
-
-use super::{buffer::Buffer, JobRegistry};
+use async_trait::async_trait;
 use catalog::{chunk::ChunkState, Catalog};
 pub(crate) use chunk::DbChunk;
-use data_types::job::Job;
 use data_types::{
-    chunk::ChunkSummary, database_rules::DatabaseRules, partition_metadata::PartitionSummary,
+    chunk::ChunkSummary,
+    database_rules::DatabaseRules,
+    job::Job,
+    partition_metadata::{PartitionSummary, TableSummary},
+    server_id::ServerId,
     timestamp::TimestampRange,
 };
-use internal_types::selection::Selection;
+use internal_types::{
+    entry::{self, ClockValue, Entry, SequencedEntry},
+    selection::Selection,
+};
+use lifecycle::LifecycleManager;
 use metrics::MetricRegistry;
 use object_store::ObjectStore;
+use observability_deps::tracing::{debug, info};
+use parking_lot::{Mutex, RwLock};
 use parquet_file::{chunk::Chunk, storage::Storage};
 use query::{exec::Executor, Database, DEFAULT_SCHEMA};
 use read_buffer::Chunk as ReadBufferChunk;
-use tracker::{MemRegistry, TaskTracker, TrackedFutureExt};
-
-use data_types::partition_metadata::TableSummary;
-use internal_types::entry::{self, ClockValue, Entry, SequencedEntry};
-use lifecycle::LifecycleManager;
+use snafu::{ensure, OptionExt, ResultExt, Snafu};
+use std::{
+    any::Any,
+    convert::TryInto,
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
+};
 use system_tables::{SystemSchemaProvider, SYSTEM_SCHEMA};
+use tracker::{MemRegistry, TaskTracker, TrackedFutureExt};
 
 pub mod catalog;
 mod chunk;
@@ -255,7 +254,7 @@ const STARTING_SEQUENCE: u64 = 1;
 pub struct Db {
     pub rules: RwLock<DatabaseRules>,
 
-    pub server_id: NonZeroU32, // this is also the Query Server ID
+    pub server_id: ServerId, // this is also the Query Server ID
 
     /// Interface to use for peristence
     pub store: Arc<ObjectStore>,
@@ -339,7 +338,7 @@ impl DbMetrics {
 impl Db {
     pub fn new(
         rules: DatabaseRules,
-        server_id: NonZeroU32,
+        server_id: ServerId,
         object_store: Arc<ObjectStore>,
         exec: Arc<Executor>,
         write_buffer: Option<Buffer>,
@@ -364,7 +363,7 @@ impl Db {
             ),
             default_labels: vec![
                 metrics::KeyValue::new("db_name", db_name.to_string()),
-                metrics::KeyValue::new("svr_id", format!("{:?}", server_id)),
+                metrics::KeyValue::new("svr_id", format!("{}", server_id)),
             ],
         };
         Self {
@@ -861,7 +860,7 @@ impl Db {
         // TODO: build this based on either this or on the write buffer, if configured
         let sequenced_entry = SequencedEntry::new_from_entry_bytes(
             ClockValue::new(self.next_sequence()),
-            self.server_id.get(),
+            self.server_id,
             entry.data(),
         )
         .context(SequencedEntryError)?;
@@ -918,7 +917,7 @@ impl Db {
                     mb_chunk
                         .write_table_batches(
                             sequenced_entry.clock_value(),
-                            sequenced_entry.writer_id(),
+                            sequenced_entry.server_id(),
                             &[table_batch],
                         )
                         .context(WriteEntry {
@@ -1055,7 +1054,7 @@ mod tests {
     use super::*;
     use futures::stream;
     use futures::{StreamExt, TryStreamExt};
-    use std::iter::Iterator;
+    use std::{convert::TryFrom, iter::Iterator};
 
     use super::test_helpers::{try_write_lp, write_lp};
     use internal_types::entry::test_helpers::lp_to_entry;
@@ -1320,7 +1319,7 @@ mod tests {
         let object_store = Arc::new(ObjectStore::new_file(File::new(root.path())));
 
         // Create a DB given a server id, an object store and a db name
-        let server_id: NonZeroU32 = NonZeroU32::new(10).unwrap();
+        let server_id = ServerId::try_from(10).unwrap();
         let db_name = "parquet_test_db";
         let db = Arc::new(make_database(server_id, Arc::clone(&object_store), db_name));
 

@@ -2,7 +2,10 @@
 //! from line protocol and the `DatabaseRules` configuration.
 
 use crate::schema::{InfluxColumnType, InfluxFieldType, TIME_COLUMN_NAME};
-use data_types::database_rules::{Error as DataError, Partitioner, ShardId, Sharder, WriterId};
+use data_types::{
+    database_rules::{Error as DataError, Partitioner, ShardId, Sharder},
+    server_id::ServerId,
+};
 use generated_types::entry as entry_fb;
 use influxdb_line_protocol::{FieldValue, ParsedLine};
 
@@ -1180,17 +1183,18 @@ pub struct SequencedEntry {
     #[borrows(data)]
     #[covariant]
     entry: Option<entry_fb::Entry<'this>>,
+    server_id: ServerId,
 }
 
 impl SequencedEntry {
     pub fn new_from_entry_bytes(
         clock_value: ClockValue,
-        writer_id: u32,
+        server_id: ServerId,
         entry_bytes: &[u8],
     ) -> Result<Self> {
         // The flatbuffer contains:
         //    1xu64 -> clock_value
-        //    1xu32 -> writer_id
+        //    1xu32 -> server_id
         //    0?       -> entry (unused here)
         //    input   -> entry_bytes
         // The buffer also needs space for the flatbuffer vtable.
@@ -1202,7 +1206,7 @@ impl SequencedEntry {
             &mut fbb,
             &entry_fb::SequencedEntryArgs {
                 clock_value: clock_value.get(),
-                writer_id,
+                server_id: server_id.get_u32(),
                 entry_bytes: Some(entry_bytes),
             },
         );
@@ -1210,7 +1214,7 @@ impl SequencedEntry {
         fbb.finish(sequenced_entry, None);
 
         let (mut data, idx) = fbb.collapse();
-        let sequenced_entry = Self::try_from(data.split_off(idx))
+        let sequenced_entry = Self::try_from((data.split_off(idx), server_id))
             .expect("Flatbuffer data just constructed should be valid");
 
         Ok(sequenced_entry)
@@ -1238,17 +1242,18 @@ impl SequencedEntry {
         ClockValue::new(self.fb().clock_value())
     }
 
-    pub fn writer_id(&self) -> WriterId {
-        self.fb().writer_id()
+    pub fn server_id(&self) -> ServerId {
+        *self.borrow_server_id()
     }
 }
 
-impl TryFrom<Vec<u8>> for SequencedEntry {
+impl TryFrom<(Vec<u8>, ServerId)> for SequencedEntry {
     type Error = flatbuffers::InvalidFlatbuffer;
 
-    fn try_from(data: Vec<u8>) -> Result<Self, Self::Error> {
+    fn try_from(data: (Vec<u8>, ServerId)) -> Result<Self, Self::Error> {
         SequencedEntryTryBuilder {
-            data,
+            server_id: data.1,
+            data: data.0,
             fb_builder: |data| flatbuffers::root::<entry_fb::SequencedEntry<'_>>(data),
             entry_builder: |data| match flatbuffers::root::<entry_fb::SequencedEntry<'_>>(data)?
                 .entry_bytes()
@@ -1884,10 +1889,11 @@ mod tests {
 
         let entry_bytes = sharded_entries.first().unwrap().entry.data();
         let clock_value = ClockValue::new(23);
+        let server_id = ServerId::try_from(2).unwrap();
         let sequenced_entry =
-            SequencedEntry::new_from_entry_bytes(clock_value, 2, entry_bytes).unwrap();
+            SequencedEntry::new_from_entry_bytes(clock_value, server_id, entry_bytes).unwrap();
         assert_eq!(sequenced_entry.clock_value(), clock_value);
-        assert_eq!(sequenced_entry.writer_id(), 2);
+        assert_eq!(sequenced_entry.server_id(), server_id);
 
         let partition_writes = sequenced_entry.partition_writes().unwrap();
         let table_batches = partition_writes.first().unwrap().table_batches();

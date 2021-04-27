@@ -4,7 +4,7 @@ use crate::commands::tracing;
 use crate::influxdb_ioxd;
 use clap::arg_enum;
 use core::num::NonZeroU16;
-use std::num::NonZeroU32;
+use data_types::server_id::ServerId;
 use std::{net::SocketAddr, net::ToSocketAddrs, path::PathBuf};
 use structopt::StructOpt;
 use thiserror::Error;
@@ -180,7 +180,7 @@ pub struct Config {
     /// Tracing: sampler argument
     ///
     /// Valid range: [0.0, 1.0].
-    /// 
+    ///
     /// Only used if `--traces-sampler` is set to
     /// parentbased_traceidratio (default) or traceidratio.
     ///
@@ -249,10 +249,10 @@ pub struct Config {
     ///
     /// Used for writing to object storage and as an identifier that is added to
     /// replicated writes, write buffer segments, and Chunks. Must be unique in
-    /// a group of connected or semi-connected IOx servers. Must be a number
-    /// that can be represented by a 32-bit unsigned integer.
-    #[structopt(long = "--writer-id", env = "INFLUXDB_IOX_ID")]
-    pub writer_id: Option<NonZeroU32>,
+    /// a group of connected or semi-connected IOx servers. Must be a nonzero
+    /// number that can be represented by a 32-bit unsigned integer.
+    #[structopt(long = "--server-id", env = "INFLUXDB_IOX_ID")]
+    pub server_id: Option<ServerId>,
 
     /// The address on which IOx will serve HTTP API requests.
     #[structopt(
@@ -296,6 +296,8 @@ pub struct Config {
 Possible values (case insensitive):
 
 * memory (default): Effectively no object persistence.
+* memorythrottled: Like `memory` but with latency and throughput that somewhat resamble a cloud
+   object store. Useful for testing and benchmarking.
 * file: Stores objects in the local filesystem. Must also set `--data-dir`.
 * s3: Amazon S3. Must also set `--bucket`, `--aws-access-key-id`, `--aws-secret-access-key`, and
    possibly `--aws-default-region`.
@@ -404,6 +406,7 @@ arg_enum! {
     #[derive(Debug, Copy, Clone, PartialEq)]
     pub enum ObjectStore {
         Memory,
+        MemoryThrottled,
         File,
         S3,
         Google,
