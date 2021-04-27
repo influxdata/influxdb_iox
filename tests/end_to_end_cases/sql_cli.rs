@@ -127,24 +127,3 @@ async fn test_sql_use_database() {
         .success()
         .stdout(predicate::str::contains(expected_output));
 }
-
-#[tokio::test]
-async fn test_sql_use_database_prompt() {
-    let fixture = ServerFixture::create_shared().await;
-    let addr = fixture.grpc_base();
-
-    let db_name = rand_name();
-    create_two_partition_database(&db_name, fixture.grpc_channel()).await;
-
-    let expected_prompt = format!("{}> ", db_name);
-
-    Command::cargo_bin("influxdb_iox")
-        .unwrap()
-        .arg("sql")
-        .arg("--host")
-        .arg(addr)
-        .write_stdin(format!("use {};\n\nshow databases;\n\nexit;", db_name))
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(expected_prompt));
-}
