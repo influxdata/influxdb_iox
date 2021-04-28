@@ -12,6 +12,7 @@ use generated_types::{
 use influxdb_line_protocol::ParsedLine;
 use regex::Regex;
 use snafu::{OptionExt, Snafu};
+use std::num::NonZeroU64;
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
@@ -181,14 +182,12 @@ pub struct LifecycleRules {
     pub mutable_linger_seconds: Option<NonZeroU32>,
 
     /// A chunk of data within a partition is guaranteed to remain mutable
-    /// for at least this number of seconds
+    /// for at least this number of seconds unless it exceeds the mutable_size_threshold
     pub mutable_minimum_age_seconds: Option<NonZeroU32>,
 
     /// Once a chunk of data within a partition reaches this number of bytes
-    /// writes outside its keyspace will be directed to a new chunk
-    ///
-    /// This chunk will be then compacted once it becomes cold for writes
-    /// based on the mutable_linger_seconds and mutable_minimum_age_seconds
+    /// writes outside its keyspace will be directed to a new chunk and this
+    /// chunk will be compacted to the read buffer as soon as possible
     pub mutable_size_threshold: Option<NonZeroUsize>,
 
     /// Once the total amount of buffered data in memory reaches this size start
@@ -216,6 +215,10 @@ pub struct LifecycleRules {
 
     /// Do not allow writing new data to this database
     pub immutable: bool,
+
+    /// The background worker will evaluate whether there is work to do
+    /// at every `period` milliseconds.
+    pub background_worker_period_millis: Option<NonZeroU64>,
 }
 
 impl From<LifecycleRules> for management::LifecycleRules {
@@ -245,6 +248,9 @@ impl From<LifecycleRules> for management::LifecycleRules {
             drop_non_persisted: config.drop_non_persisted,
             persist: config.persist,
             immutable: config.immutable,
+            background_worker_period_millis: config
+                .background_worker_period_millis
+                .map_or(0, NonZeroU64::get),
         }
     }
 }
@@ -263,6 +269,7 @@ impl TryFrom<management::LifecycleRules> for LifecycleRules {
             drop_non_persisted: proto.drop_non_persisted,
             persist: proto.persist,
             immutable: proto.immutable,
+            background_worker_period_millis: NonZeroU64::new(proto.background_worker_period_millis),
         })
     }
 }
@@ -1374,6 +1381,7 @@ mod tests {
             drop_non_persisted: true,
             persist: true,
             immutable: true,
+            background_worker_period_millis: 1000,
         };
 
         let config: LifecycleRules = protobuf.clone().try_into().unwrap();
@@ -1413,6 +1421,25 @@ mod tests {
         assert_eq!(back.buffer_size_hard, protobuf.buffer_size_hard);
         assert_eq!(back.drop_non_persisted, protobuf.drop_non_persisted);
         assert_eq!(back.immutable, protobuf.immutable);
+        assert_eq!(
+            back.background_worker_period_millis,
+            protobuf.background_worker_period_millis
+        );
+    }
+
+    #[test]
+    fn default_background_worker_period_millis() {
+        let protobuf = management::LifecycleRules {
+            background_worker_period_millis: 0,
+            ..Default::default()
+        };
+
+        let config: LifecycleRules = protobuf.clone().try_into().unwrap();
+        let back: management::LifecycleRules = config.into();
+        assert_eq!(
+            back.background_worker_period_millis,
+            protobuf.background_worker_period_millis
+        );
     }
 
     #[test]
