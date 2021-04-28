@@ -45,9 +45,7 @@ impl LifecycleManager {
     /// Should be called periodically and should spawn any long-running
     /// work onto the tokio threadpool and return
     ///
-    /// If any background work was started by this iteration it returns
-    /// a future that resolves when any of it completes. Otherwise
-    /// it returns a future that resolves when this method should be called next
+    /// Returns a future that resolves when this method should be called next
     pub fn check_for_work(&mut self) -> BoxFuture<'static, ()> {
         ChunkMover::check_for_work(self, Utc::now())
     }
@@ -91,7 +89,7 @@ trait ChunkMover {
 
     /// The core policy logic
     ///
-    /// It returns a future that resolves when this method should be called next
+    /// Returns a future that resolves when this method should be called next
     fn check_for_work(&mut self, now: DateTime<Utc>) -> BoxFuture<'static, ()> {
         let rules = self.rules();
         let chunks = self.chunks(&rules.sort_order);
