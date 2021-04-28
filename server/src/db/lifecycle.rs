@@ -14,6 +14,10 @@ use super::{
     Db,
 };
 use data_types::database_rules::SortOrder;
+use futures::future::BoxFuture;
+use std::time::Duration;
+
+pub const DEFAULT_LIFECYCLE_BACKOFF: Duration = Duration::from_secs(1);
 
 /// Handles the lifecycle of chunks within a Db
 pub struct LifecycleManager {
@@ -40,7 +44,11 @@ impl LifecycleManager {
     ///
     /// Should be called periodically and should spawn any long-running
     /// work onto the tokio threadpool and return
-    pub fn check_for_work(&mut self) {
+    ///
+    /// If any background work was started by this iteration it returns
+    /// a future that resolves when any of it completes. Otherwise
+    /// it returns a future that resolves when this method should be called next
+    pub fn check_for_work(&mut self) -> BoxFuture<'static, ()> {
         ChunkMover::check_for_work(self, Utc::now())
     }
 }
@@ -49,6 +57,8 @@ impl LifecycleManager {
 ///
 /// This is to enable independent testing of the policy logic
 trait ChunkMover {
+    type Job: Send + Sync + 'static;
+
     /// Returns the size of a chunk - overridden for testing
     fn chunk_size(chunk: &Chunk) -> usize {
         chunk.size()
@@ -64,11 +74,11 @@ trait ChunkMover {
     /// they should prioritised
     fn chunks(&self, order: &SortOrder) -> Vec<Arc<RwLock<Chunk>>>;
 
-    /// Returns a boolean indicating if a move is in progress
-    fn is_move_active(&self) -> bool;
+    /// Returns a tracker for the running move task if any
+    fn move_tracker(&self) -> Option<&TaskTracker<Self::Job>>;
 
-    /// Returns a boolean indicating if a write is in progress
-    fn is_write_active(&self) -> bool;
+    /// Returns a tracker for the running write task if any
+    fn write_tracker(&self) -> Option<&TaskTracker<Self::Job>>;
 
     /// Starts an operation to move a chunk to the read buffer
     fn move_to_read_buffer(&mut self, partition_key: String, table_name: String, chunk_id: u32);
@@ -80,7 +90,9 @@ trait ChunkMover {
     fn drop_chunk(&mut self, partition_key: String, table_name: String, chunk_id: u32);
 
     /// The core policy logic
-    fn check_for_work(&mut self, now: DateTime<Utc>) {
+    ///
+    /// It returns a future that resolves when this method should be called next
+    fn check_for_work(&mut self, now: DateTime<Utc>) -> BoxFuture<'static, ()> {
         let rules = self.rules();
         let chunks = self.chunks(&rules.sort_order);
 
@@ -89,8 +101,8 @@ trait ChunkMover {
         // Only want to start a new move/write task if there isn't one already in-flight
         //
         // Note: This does not take into account manually triggered tasks
-        let mut move_active = self.is_move_active();
-        let mut write_active = self.is_write_active();
+        let mut move_tracker = self.move_tracker().filter(|x| !x.is_complete()).cloned();
+        let mut write_tracker = self.write_tracker().filter(|x| !x.is_complete()).cloned();
 
         // Iterate through the chunks to determine
         // - total memory consumption
@@ -103,10 +115,10 @@ trait ChunkMover {
             buffer_size += Self::chunk_size(&*chunk_guard);
 
             let would_move = can_move(&rules, &*chunk_guard, now);
-            let would_write = !write_active && rules.persist;
+            let would_write = write_tracker.is_none() && rules.persist;
 
             match chunk_guard.state() {
-                ChunkState::Open(_) if !move_active && would_move => {
+                ChunkState::Open(_) if move_tracker.is_none() && would_move => {
                     let mut chunk_guard = RwLockUpgradableReadGuard::upgrade(chunk_guard);
                     chunk_guard.set_closing().expect("cannot close open chunk");
 
@@ -116,18 +128,18 @@ trait ChunkMover {
 
                     std::mem::drop(chunk_guard);
 
-                    move_active = true;
                     self.move_to_read_buffer(partition_key, table_name, chunk_id);
+                    move_tracker = self.move_tracker().cloned();
                 }
-                ChunkState::Closing(_) if !move_active => {
+                ChunkState::Closing(_) if move_tracker.is_none() => {
                     let partition_key = chunk_guard.key().to_string();
                     let table_name = chunk_guard.table_name().to_string();
                     let chunk_id = chunk_guard.id();
 
                     std::mem::drop(chunk_guard);
 
-                    move_active = true;
                     self.move_to_read_buffer(partition_key, table_name, chunk_id);
+                    move_tracker = self.move_tracker().cloned();
                 }
                 ChunkState::Moved(_) if would_write => {
                     let partition_key = chunk_guard.key().to_string();
@@ -136,8 +148,8 @@ trait ChunkMover {
 
                     std::mem::drop(chunk_guard);
 
-                    write_active = true;
                     self.write_to_object_store(partition_key, table_name, chunk_id);
+                    write_tracker = self.write_tracker().cloned();
                 }
                 _ => {}
             }
@@ -175,10 +187,37 @@ trait ChunkMover {
                 }
             }
         }
+
+        Box::pin(async move {
+            let backoff = rules
+                .worker_backoff_millis
+                .map(|x| Duration::from_millis(x.get()))
+                .unwrap_or(DEFAULT_LIFECYCLE_BACKOFF);
+
+            tokio::select! {
+                _ = tokio::time::sleep(backoff) => {}
+                _ = wait_optional_tracker(move_tracker) => {}
+                _ = wait_optional_tracker(write_tracker) => {}
+            };
+        })
+    }
+}
+
+/// Completes when the provided tracker completes or never if None provided
+async fn wait_optional_tracker<Job: Send + Sync + 'static>(tracker: Option<TaskTracker<Job>>) {
+    match tracker {
+        None => futures::future::pending().await,
+        Some(move_tracker) => move_tracker.join().await,
     }
 }
 
 impl ChunkMover for LifecycleManager {
+    type Job = Job;
+
+    fn db_name(&self) -> &str {
+        &self.db_name
+    }
+
     fn rules(&self) -> LifecycleRules {
         self.db.rules.read().lifecycle_rules.clone()
     }
@@ -187,18 +226,12 @@ impl ChunkMover for LifecycleManager {
         self.db.catalog.chunks_sorted_by(sort_order)
     }
 
-    fn is_move_active(&self) -> bool {
-        self.move_task
-            .as_ref()
-            .map(|x| !x.is_complete())
-            .unwrap_or(false)
+    fn move_tracker(&self) -> Option<&TaskTracker<Job>> {
+        self.move_task.as_ref()
     }
 
-    fn is_write_active(&self) -> bool {
-        self.write_task
-            .as_ref()
-            .map(|x| !x.is_complete())
-            .unwrap_or(false)
+    fn write_tracker(&self) -> Option<&TaskTracker<Job>> {
+        self.write_task.as_ref()
     }
 
     fn move_to_read_buffer(&mut self, partition_key: String, table_name: String, chunk_id: u32) {
@@ -225,10 +258,6 @@ impl ChunkMover for LifecycleManager {
             .db
             .drop_chunk(&partition_key, &table_name, chunk_id)
             .log_if_error("dropping chunk to free up memory");
-    }
-
-    fn db_name(&self) -> &str {
-        &self.db_name
     }
 }
 
@@ -276,7 +305,7 @@ mod tests {
     use data_types::server_id::ServerId;
     use internal_types::entry::{test_helpers::lp_to_entry, ClockValue};
     use std::num::{NonZeroU32, NonZeroUsize};
-    use tracker::MemRegistry;
+    use tracker::{MemRegistry, TaskRegistry};
 
     fn from_secs(secs: i64) -> DateTime<Utc> {
         DateTime::from_utc(chrono::NaiveDateTime::from_timestamp(secs, 0), Utc)
@@ -364,8 +393,8 @@ mod tests {
     /// logic within ChunkMover::poll
     struct DummyMover {
         rules: LifecycleRules,
-        move_active: bool,
-        write_active: bool,
+        move_tracker: Option<TaskTracker<()>>,
+        write_tracker: Option<TaskTracker<()>>,
         chunks: Vec<Arc<RwLock<Chunk>>>,
         events: Vec<MoverEvents>,
     }
@@ -378,17 +407,23 @@ mod tests {
                     .into_iter()
                     .map(|x| Arc::new(RwLock::new(x)))
                     .collect(),
-                move_active: false,
-                write_active: false,
+                move_tracker: None,
+                write_tracker: None,
                 events: vec![],
             }
         }
     }
 
     impl ChunkMover for DummyMover {
+        type Job = ();
+
         fn chunk_size(_: &Chunk) -> usize {
             // All chunks are 20 bytes
             20
+        }
+
+        fn db_name(&self) -> &str {
+            "my_awesome_db"
         }
 
         fn rules(&self) -> LifecycleRules {
@@ -399,12 +434,12 @@ mod tests {
             self.chunks.clone()
         }
 
-        fn is_move_active(&self) -> bool {
-            self.move_active
+        fn move_tracker(&self) -> Option<&TaskTracker<Self::Job>> {
+            self.move_tracker.as_ref()
         }
 
-        fn is_write_active(&self) -> bool {
-            self.write_active
+        fn write_tracker(&self) -> Option<&TaskTracker<Self::Job>> {
+            self.write_tracker.as_ref()
         }
 
         fn move_to_read_buffer(
@@ -419,7 +454,7 @@ mod tests {
                 .find(|x| x.read().id() == chunk_id)
                 .unwrap();
             chunk.write().set_moving().unwrap();
-            self.events.push(MoverEvents::Move(chunk_id))
+            self.events.push(MoverEvents::Move(chunk_id));
         }
 
         fn write_to_object_store(
@@ -434,7 +469,7 @@ mod tests {
                 .find(|x| x.read().id() == chunk_id)
                 .unwrap();
             chunk.write().set_writing_to_object_store().unwrap();
-            self.events.push(MoverEvents::Write(chunk_id))
+            self.events.push(MoverEvents::Write(chunk_id));
         }
 
         fn drop_chunk(&mut self, _partition_key: String, _table_name: String, chunk_id: u32) {
@@ -444,10 +479,6 @@ mod tests {
                 .filter(|x| x.read().id() != chunk_id)
                 .collect();
             self.events.push(MoverEvents::Drop(chunk_id))
-        }
-
-        fn db_name(&self) -> &str {
-            "my_awesome_db"
         }
     }
 
@@ -549,6 +580,7 @@ mod tests {
 
     #[test]
     fn test_in_progress() {
+        let mut registry = TaskRegistry::new();
         let rules = LifecycleRules {
             mutable_linger_seconds: Some(NonZeroU32::new(10).unwrap()),
             ..Default::default()
@@ -556,17 +588,43 @@ mod tests {
         let chunks = vec![new_chunk(0, Some(0), Some(0))];
 
         let mut mover = DummyMover::new(rules, chunks);
-        mover.move_active = true;
+
+        let (tracker, registration) = registry.register(());
+        mover.move_tracker = Some(tracker);
 
         mover.check_for_work(from_secs(80));
 
         assert_eq!(mover.events, vec![]);
 
-        mover.move_active = false;
+        std::mem::drop(registration);
 
         mover.check_for_work(from_secs(80));
 
         assert_eq!(mover.events, vec![MoverEvents::Move(0)]);
+    }
+
+    #[tokio::test]
+    async fn test_backoff() {
+        let mut registry = TaskRegistry::new();
+        let rules = LifecycleRules {
+            mutable_linger_seconds: Some(NonZeroU32::new(100).unwrap()),
+            ..Default::default()
+        };
+        let mut mover = DummyMover::new(rules, vec![]);
+
+        let (tracker, registration) = registry.register(());
+        mover.move_tracker = Some(tracker);
+
+        let future = mover.check_for_work(from_secs(0));
+        tokio::time::timeout(Duration::from_millis(1), future)
+            .await
+            .expect_err("expected timeout");
+
+        let future = mover.check_for_work(from_secs(0));
+        std::mem::drop(registration);
+        tokio::time::timeout(Duration::from_millis(1), future)
+            .await
+            .expect("expect early return due to task completion");
     }
 
     #[test]
