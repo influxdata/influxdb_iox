@@ -189,6 +189,21 @@ impl<T> Clone for TaskTracker<T> {
 }
 
 impl<T> TaskTracker<T> {
+    /// Creates a new task tracker from the provided registration
+    pub fn new(id: TaskId, registration: &TaskRegistration, metadata: T) -> Self {
+        Self {
+            id,
+            metadata: Arc::new(metadata),
+            state: Arc::clone(&registration.state),
+        }
+    }
+
+    /// Returns a complete task tracker
+    pub fn complete(metadata: T) -> Self {
+        let registration = TaskRegistration::new();
+        Self::new(TaskId(0), &registration, metadata)
+    }
+
     /// Returns the ID of the Tracker - these are unique per TrackerRegistry
     pub fn id(&self) -> TaskId {
         self.id
@@ -288,8 +303,8 @@ impl Clone for TaskRegistration {
     }
 }
 
-impl TaskRegistration {
-    fn new() -> Self {
+impl Default for TaskRegistration {
+    fn default() -> Self {
         let state = Arc::new(TrackerState {
             start_instant: Instant::now(),
             cpu_nanos: AtomicUsize::new(0),
@@ -302,6 +317,12 @@ impl TaskRegistration {
         });
 
         Self { state }
+    }
+}
+
+impl TaskRegistration {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 

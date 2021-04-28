@@ -79,10 +79,20 @@ trait ChunkMover {
     fn write_tracker(&self) -> Option<&TaskTracker<Self::Job>>;
 
     /// Starts an operation to move a chunk to the read buffer
-    fn move_to_read_buffer(&mut self, partition_key: String, table_name: String, chunk_id: u32);
+    fn move_to_read_buffer(
+        &mut self,
+        partition_key: String,
+        table_name: String,
+        chunk_id: u32,
+    ) -> TaskTracker<Self::Job>;
 
     /// Starts an operation to write a chunk to the object store
-    fn write_to_object_store(&mut self, partition_key: String, table_name: String, chunk_id: u32);
+    fn write_to_object_store(
+        &mut self,
+        partition_key: String,
+        table_name: String,
+        chunk_id: u32,
+    ) -> TaskTracker<Self::Job>;
 
     /// Drops a chunk from the database
     fn drop_chunk(&mut self, partition_key: String, table_name: String, chunk_id: u32);
@@ -126,8 +136,8 @@ trait ChunkMover {
 
                     std::mem::drop(chunk_guard);
 
-                    self.move_to_read_buffer(partition_key, table_name, chunk_id);
-                    move_tracker = self.move_tracker().cloned();
+                    move_tracker =
+                        Some(self.move_to_read_buffer(partition_key, table_name, chunk_id));
                 }
                 ChunkState::Closing(_) if move_tracker.is_none() => {
                     let partition_key = chunk_guard.key().to_string();
@@ -136,8 +146,8 @@ trait ChunkMover {
 
                     std::mem::drop(chunk_guard);
 
-                    self.move_to_read_buffer(partition_key, table_name, chunk_id);
-                    move_tracker = self.move_tracker().cloned();
+                    move_tracker =
+                        Some(self.move_to_read_buffer(partition_key, table_name, chunk_id));
                 }
                 ChunkState::Moved(_) if would_write => {
                     let partition_key = chunk_guard.key().to_string();
@@ -146,8 +156,8 @@ trait ChunkMover {
 
                     std::mem::drop(chunk_guard);
 
-                    self.write_to_object_store(partition_key, table_name, chunk_id);
-                    write_tracker = self.write_tracker().cloned();
+                    write_tracker =
+                        Some(self.write_to_object_store(partition_key, table_name, chunk_id));
                 }
                 _ => {}
             }
@@ -232,22 +242,32 @@ impl ChunkMover for LifecycleManager {
         self.write_task.as_ref()
     }
 
-    fn move_to_read_buffer(&mut self, partition_key: String, table_name: String, chunk_id: u32) {
+    fn move_to_read_buffer(
+        &mut self,
+        partition_key: String,
+        table_name: String,
+        chunk_id: u32,
+    ) -> TaskTracker<Self::Job> {
         info!(%partition_key, %chunk_id, "moving chunk to read buffer");
-        self.move_task = Some(self.db.load_chunk_to_read_buffer_in_background(
-            partition_key,
-            table_name,
-            chunk_id,
-        ))
+        let tracker =
+            self.db
+                .load_chunk_to_read_buffer_in_background(partition_key, table_name, chunk_id);
+        self.move_task = Some(tracker.clone());
+        tracker
     }
 
-    fn write_to_object_store(&mut self, partition_key: String, table_name: String, chunk_id: u32) {
+    fn write_to_object_store(
+        &mut self,
+        partition_key: String,
+        table_name: String,
+        chunk_id: u32,
+    ) -> TaskTracker<Self::Job> {
         info!(%partition_key, %chunk_id, "write chunk to object store");
-        self.write_task = Some(self.db.write_chunk_to_object_store_in_background(
-            partition_key,
-            table_name,
-            chunk_id,
-        ))
+        let tracker =
+            self.db
+                .write_chunk_to_object_store_in_background(partition_key, table_name, chunk_id);
+        self.write_task = Some(tracker.clone());
+        tracker
     }
 
     fn drop_chunk(&mut self, partition_key: String, table_name: String, chunk_id: u32) {
@@ -445,7 +465,7 @@ mod tests {
             _partition_key: String,
             _table_name: String,
             chunk_id: u32,
-        ) {
+        ) -> TaskTracker<Self::Job> {
             let chunk = self
                 .chunks
                 .iter()
@@ -453,6 +473,9 @@ mod tests {
                 .unwrap();
             chunk.write().set_moving().unwrap();
             self.events.push(MoverEvents::Move(chunk_id));
+            let tracker = TaskTracker::complete(());
+            self.move_tracker = Some(tracker.clone());
+            tracker
         }
 
         fn write_to_object_store(
@@ -460,7 +483,7 @@ mod tests {
             _partition_key: String,
             _table_name: String,
             chunk_id: u32,
-        ) {
+        ) -> TaskTracker<Self::Job> {
             let chunk = self
                 .chunks
                 .iter()
@@ -468,6 +491,9 @@ mod tests {
                 .unwrap();
             chunk.write().set_writing_to_object_store().unwrap();
             self.events.push(MoverEvents::Write(chunk_id));
+            let tracker = TaskTracker::complete(());
+            self.write_tracker = Some(tracker.clone());
+            tracker
         }
 
         fn drop_chunk(&mut self, _partition_key: String, _table_name: String, chunk_id: u32) {
