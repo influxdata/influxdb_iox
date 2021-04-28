@@ -26,6 +26,8 @@ use internal_types::{
     selection::Selection,
 };
 
+use arrow_deps::arrow::array::DictionaryArray;
+use arrow_deps::arrow::datatypes::Int32Type;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use snafu::{OptionExt, Snafu};
@@ -101,13 +103,13 @@ impl Database for TestDatabase {
         Ok(keys)
     }
 
-    fn chunks(&self, partition_key: &str) -> Vec<Arc<Self::Chunk>> {
+    fn chunks(&self, _predicate: &Predicate) -> Vec<Arc<Self::Chunk>> {
         let partitions = self.partitions.lock();
-        if let Some(chunks) = partitions.get(partition_key) {
-            chunks.values().cloned().collect()
-        } else {
-            vec![]
-        }
+        partitions
+            .values()
+            .flat_map(|x| x.values())
+            .cloned()
+            .collect()
     }
 
     fn chunk_summaries(&self) -> Result<Vec<data_types::chunk::ChunkSummary>, Self::Error> {
@@ -242,7 +244,7 @@ impl TestChunk {
             .get(&table_name)
             .expect("table must exist in TestChunk");
 
-        // create arays
+        // create arrays
         let columns = schema
             .iter()
             .map(|(_influxdb_column_type, field)| match field.data_type() {
@@ -250,6 +252,12 @@ impl TestChunk {
                 DataType::Utf8 => Arc::new(StringArray::from(vec!["MA"])) as ArrayRef,
                 DataType::Timestamp(TimeUnit::Nanosecond, _) => {
                     Arc::new(TimestampNanosecondArray::from_vec(vec![1000], None)) as ArrayRef
+                }
+                DataType::Dictionary(key, value)
+                    if key.as_ref() == &DataType::Int32 && value.as_ref() == &DataType::Utf8 =>
+                {
+                    let dict: DictionaryArray<Int32Type> = vec!["MA"].into_iter().collect();
+                    Arc::new(dict) as ArrayRef
                 }
                 _ => unimplemented!(
                     "Unimplemented data type for test database: {:?}",

@@ -18,6 +18,7 @@ use internal_types::selection::Selection;
 use partition::Partition;
 use query::{
     exec::stringset::StringSet,
+    predicate::Predicate,
     provider::{self, ProviderBuilder},
     PartitionChunk,
 };
@@ -59,6 +60,13 @@ pub enum Error {
         operation: String,
         expected: String,
         actual: String,
+    },
+
+    #[snafu(display("Can not open chunk {}:{} : {}", partition_key, chunk_id, source))]
+    OpenChunk {
+        partition_key: String,
+        chunk_id: u32,
+        source: mutable_buffer::chunk::Error,
     },
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -142,6 +150,10 @@ impl Catalog {
             .collect()
     }
 
+    pub fn chunk_summaries(&self) -> Vec<ChunkSummary> {
+        self.filtered_chunks(&Predicate::default(), Chunk::summary)
+    }
+
     /// Returns all chunks within the catalog in an arbitrary order
     pub fn chunks(&self) -> Vec<Arc<RwLock<Chunk>>> {
         let mut chunks = Vec::new();
@@ -152,15 +164,6 @@ impl Catalog {
             chunks.extend(partition.chunks().cloned())
         }
         chunks
-    }
-
-    pub fn chunk_summaries(&self) -> Vec<ChunkSummary> {
-        let mut summaries = Vec::new();
-        for partition in self.partitions.read().values() {
-            let partition = partition.read();
-            summaries.extend(partition.chunk_summaries())
-        }
-        summaries
     }
 
     /// Returns the chunks in the requested sort order
@@ -180,6 +183,33 @@ impl Catalog {
             chunks.reverse();
         }
 
+        chunks
+    }
+
+    /// Calls `map` with every chunk matching `predicate` and returns a
+    /// collection of the results
+    pub fn filtered_chunks<F, C>(&self, predicate: &Predicate, map: F) -> Vec<C>
+    where
+        F: Fn(&Chunk) -> C + Copy,
+    {
+        let mut chunks = Vec::new();
+        let partitions = self.partitions.read();
+
+        let partitions = match &predicate.partition_key {
+            None => itertools::Either::Left(partitions.values()),
+            Some(partition_key) => {
+                itertools::Either::Right(partitions.get(partition_key).into_iter())
+            }
+        };
+
+        for partition in partitions {
+            let partition = partition.read();
+            chunks.extend(partition.filtered_chunks(predicate).map(|chunk| {
+                let chunk = chunk.read();
+                // TODO: Filter chunks
+                map(&chunk)
+            }))
+        }
         chunks
     }
 }
@@ -211,7 +241,7 @@ impl SchemaProvider for Catalog {
             for chunk in partition.chunks() {
                 let chunk = chunk.read();
 
-                if (chunk.table_name() == table_name) && chunk.has_data() {
+                if chunk.table_name() == table_name {
                     let chunk = super::DbChunk::snapshot(&chunk);
 
                     // This should only fail if the table doesn't exist which isn't possible
@@ -240,7 +270,26 @@ impl SchemaProvider for Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use data_types::server_id::ServerId;
+    use internal_types::entry::{test_helpers::lp_to_entry, ClockValue};
+    use query::predicate::PredicateBuilder;
+    use std::convert::TryFrom;
     use tracker::MemRegistry;
+
+    fn create_open_chunk(partition: &Arc<RwLock<Partition>>, table: &str, registry: &MemRegistry) {
+        let entry = lp_to_entry(&format!("{} bar=1 10", table));
+        let write = entry.partition_writes().unwrap().remove(0);
+        let batch = write.table_batches().remove(0);
+        let mut partition = partition.write();
+        partition
+            .create_open_chunk(
+                batch,
+                ClockValue::try_from(5).unwrap(),
+                ServerId::try_from(1).unwrap(),
+                registry,
+            )
+            .unwrap();
+    }
 
     #[test]
     fn partition_get() {
@@ -283,10 +332,11 @@ mod tests {
         let catalog = Catalog::new();
         let p1 = catalog.get_or_create_partition("p1");
 
-        let mut p1 = p1.write();
-        p1.create_open_chunk("table1", &registry);
-        p1.create_open_chunk("table1", &registry);
-        p1.create_open_chunk("table2", &registry);
+        create_open_chunk(&p1, "table1", &registry);
+        create_open_chunk(&p1, "table1", &registry);
+        create_open_chunk(&p1, "table2", &registry);
+
+        let p1 = p1.write();
 
         let c1_0 = p1.chunk("table1", 0).unwrap();
         assert_eq!(c1_0.read().table_name(), "table1");
@@ -316,19 +366,12 @@ mod tests {
         let catalog = Catalog::new();
 
         let p1 = catalog.get_or_create_partition("p1");
-        {
-            let mut p1 = p1.write();
-
-            p1.create_open_chunk("table1", &registry);
-            p1.create_open_chunk("table1", &registry);
-            p1.create_open_chunk("table2", &registry);
-        }
+        create_open_chunk(&p1, "table1", &registry);
+        create_open_chunk(&p1, "table1", &registry);
+        create_open_chunk(&p1, "table2", &registry);
 
         let p2 = catalog.get_or_create_partition("p2");
-        {
-            let mut p2 = p2.write();
-            p2.create_open_chunk("table1", &registry);
-        }
+        create_open_chunk(&p2, "table1", &registry);
 
         assert_eq!(
             chunk_strings(&catalog),
@@ -395,18 +438,12 @@ mod tests {
         let catalog = Catalog::new();
 
         let p1 = catalog.get_or_create_partition("p1");
-        {
-            let mut p1 = p1.write();
-            p1.create_open_chunk("table1", &registry);
-            p1.create_open_chunk("table1", &registry);
-            p1.create_open_chunk("table2", &registry);
-        }
+        create_open_chunk(&p1, "table1", &registry);
+        create_open_chunk(&p1, "table1", &registry);
+        create_open_chunk(&p1, "table2", &registry);
 
         let p2 = catalog.get_or_create_partition("p2");
-        {
-            let mut p2 = p2.write();
-            p2.create_open_chunk("table1", &registry);
-        }
+        create_open_chunk(&p2, "table1", &registry);
 
         assert_eq!(chunk_strings(&catalog).len(), 4);
 
@@ -437,9 +474,9 @@ mod tests {
         let registry = MemRegistry::new();
         let catalog = Catalog::new();
         let p3 = catalog.get_or_create_partition("p3");
-        let mut p3 = p3.write();
+        create_open_chunk(&p3, "table1", &registry);
 
-        p3.create_open_chunk("table1", &registry);
+        let mut p3 = p3.write();
 
         let err = p3.drop_chunk("table2", 0).unwrap_err();
         assert_eq!(err.to_string(), "unknown table: p3:table2");
@@ -454,12 +491,8 @@ mod tests {
         let catalog = Catalog::new();
 
         let p1 = catalog.get_or_create_partition("p1");
-
-        {
-            let mut p1 = p1.write();
-            p1.create_open_chunk("table1", &registry);
-            p1.create_open_chunk("table1", &registry);
-        }
+        create_open_chunk(&p1, "table1", &registry);
+        create_open_chunk(&p1, "table1", &registry);
         assert_eq!(
             chunk_strings(&catalog),
             vec!["Chunk p1:table1:0", "Chunk p1:table1:1"]
@@ -472,13 +505,41 @@ mod tests {
         assert_eq!(chunk_strings(&catalog), vec!["Chunk p1:table1:1"]);
 
         // should be ok to "re-create", it gets another chunk_id though
-        {
-            let mut p1 = p1.write();
-            p1.create_open_chunk("table1", &registry);
-        }
+        create_open_chunk(&p1, "table1", &registry);
         assert_eq!(
             chunk_strings(&catalog),
             vec!["Chunk p1:table1:1", "Chunk p1:table1:2"]
         );
+    }
+
+    #[test]
+    fn filtered_chunks() {
+        let registry = MemRegistry::new();
+        let catalog = Catalog::new();
+
+        let p1 = catalog.get_or_create_partition("p1");
+        let p2 = catalog.get_or_create_partition("p2");
+        create_open_chunk(&p1, "table1", &registry);
+        create_open_chunk(&p1, "table2", &registry);
+        create_open_chunk(&p2, "table2", &registry);
+
+        let a = catalog.filtered_chunks(&Predicate::default(), |_| ());
+
+        let b = catalog.filtered_chunks(&PredicateBuilder::new().table("table1").build(), |_| ());
+
+        let c = catalog.filtered_chunks(&PredicateBuilder::new().table("table2").build(), |_| ());
+
+        let d = catalog.filtered_chunks(
+            &PredicateBuilder::new()
+                .table("table2")
+                .partition_key("p2")
+                .build(),
+            |_| (),
+        );
+
+        assert_eq!(a.len(), 3);
+        assert_eq!(b.len(), 1);
+        assert_eq!(c.len(), 2);
+        assert_eq!(d.len(), 1);
     }
 }

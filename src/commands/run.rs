@@ -296,6 +296,8 @@ pub struct Config {
 Possible values (case insensitive):
 
 * memory (default): Effectively no object persistence.
+* memorythrottled: Like `memory` but with latency and throughput that somewhat resamble a cloud
+   object store. Useful for testing and benchmarking.
 * file: Stores objects in the local filesystem. Must also set `--data-dir`.
 * s3: Amazon S3. Must also set `--bucket`, `--aws-access-key-id`, `--aws-secret-access-key`, and
    possibly `--aws-default-region`.
@@ -367,7 +369,7 @@ Possible values (case insensitive):
     pub google_service_account: Option<String>,
 
     /// When using Microsoft Azure as the object store, set this to the
-    /// name you see when going to All Services > Storage accounts > [name].
+    /// name you see when going to All Services > Storage accounts > `[name]`.
     ///
     /// Must also set `--object-store=azure`, `--bucket`, and
     /// `--azure-storage-access-key`.
@@ -404,6 +406,7 @@ arg_enum! {
     #[derive(Debug, Copy, Clone, PartialEq)]
     pub enum ObjectStore {
         Memory,
+        MemoryThrottled,
         File,
         S3,
         Google,

@@ -245,14 +245,16 @@ impl Chunk {
             .sum::<usize>();
 
         // This call is expensive. Complete it before locking.
+        let now = std::time::Instant::now();
         let row_group = RowGroup::from(table_data);
+        let compressing_took = now.elapsed();
         let table_name = table_name.into();
 
-        let rows = self.rows();
+        let rows = row_group.rows();
         let rg_size = row_group.size();
-        let compression = format!("{:.2}%", (rg_size as f64 / rb_size as f64) * 100.0);
+        let compression = format!("{:.2}%", (1.0 - (rg_size as f64 / rb_size as f64)) * 100.0);
         let chunk_id = self.id();
-        info!(%rows, rb_size, rg_size, %compression, ?table_name, %chunk_id, "row group added");
+        info!(%rows, rb_size, rg_size, %compression, ?table_name, %chunk_id, ?compressing_took, "row group added");
 
         let mut chunk_data = self.chunk_data.write();
 
@@ -600,6 +602,8 @@ mod test {
         row_group::{ColumnType, RowGroup},
         value::Values,
     };
+    use arrow_deps::arrow::array::DictionaryArray;
+    use arrow_deps::arrow::datatypes::Int32Type;
 
     // helper to make the `add_remove_tables` test simpler to read.
     fn gen_recordbatch() -> RecordBatch {
@@ -614,7 +618,11 @@ mod test {
             .into();
 
         let data: Vec<ArrayRef> = vec![
-            Arc::new(StringArray::from(vec!["west", "west", "east"])),
+            Arc::new(
+                vec!["west", "west", "east"]
+                    .into_iter()
+                    .collect::<DictionaryArray<Int32Type>>(),
+            ),
             Arc::new(Float64Array::from(vec![1.2, 3.3, 45.3])),
             Arc::new(BooleanArray::from(vec![true, false, true])),
             Arc::new(TimestampNanosecondArray::from_vec(
@@ -629,13 +637,36 @@ mod test {
 
     // Helper function to assert the contents of a column on a record batch.
     fn assert_rb_column_equals(rb: &RecordBatch, col_name: &str, exp: &Values<'_>) {
+        use arrow_deps::arrow::datatypes::DataType;
+
         let got_column = rb.column(rb.schema().index_of(col_name).unwrap());
 
         match exp {
-            Values::String(exp_data) => {
-                let arr: &StringArray = got_column.as_any().downcast_ref::<StringArray>().unwrap();
-                assert_eq!(&arr.iter().collect::<Vec<_>>(), exp_data);
-            }
+            Values::String(exp_data) => match got_column.data_type() {
+                DataType::Utf8 => {
+                    let arr = got_column.as_any().downcast_ref::<StringArray>().unwrap();
+                    assert_eq!(&arr.iter().collect::<Vec<_>>(), exp_data);
+                }
+                DataType::Dictionary(key, value)
+                    if key.as_ref() == &DataType::Int32 && value.as_ref() == &DataType::Utf8 =>
+                {
+                    let dictionary = got_column
+                        .as_any()
+                        .downcast_ref::<DictionaryArray<Int32Type>>()
+                        .unwrap();
+                    let values = dictionary.values();
+                    let values = values.as_any().downcast_ref::<StringArray>().unwrap();
+
+                    let hydrated: Vec<_> = dictionary
+                        .keys()
+                        .iter()
+                        .map(|key| key.map(|key| values.value(key as _)))
+                        .collect();
+
+                    assert_eq!(&hydrated, exp_data)
+                }
+                d => panic!("Unexpected type {:?}", d),
+            },
             Values::I64(exp_data) => {
                 if let Some(arr) = got_column.as_any().downcast_ref::<Int64Array>() {
                     assert_eq!(arr.values(), exp_data);
@@ -857,7 +888,11 @@ mod test {
             .unwrap();
 
         let data: Vec<ArrayRef> = vec![
-            Arc::new(StringArray::from(vec!["prod", "dev", "prod"])),
+            Arc::new(
+                vec!["prod", "dev", "prod"]
+                    .into_iter()
+                    .collect::<DictionaryArray<Int32Type>>(),
+            ),
             Arc::new(Float64Array::from(vec![10.0, 30000.0, 4500.0])),
             Arc::new(UInt64Array::from(vec![1000, 3000, 5000])),
             Arc::new(Int64Array::from(vec![1000, -1000, 4000])),
@@ -962,8 +997,16 @@ mod test {
                 .unwrap();
 
             let data: Vec<ArrayRef> = vec![
-                Arc::new(StringArray::from(vec!["us-west", "us-east", "us-west"])),
-                Arc::new(StringArray::from(vec!["west", "west", "east"])),
+                Arc::new(
+                    vec!["us-west", "us-east", "us-west"]
+                        .into_iter()
+                        .collect::<DictionaryArray<Int32Type>>(),
+                ),
+                Arc::new(
+                    vec!["west", "west", "east"]
+                        .into_iter()
+                        .collect::<DictionaryArray<Int32Type>>(),
+                ),
                 Arc::new(Float64Array::from(vec![1.2, 300.3, 4500.3])),
                 Arc::new(Int64Array::from(vec![None, Some(33), Some(44)])),
                 Arc::new(BooleanArray::from(vec![true, false, false])),
@@ -1175,7 +1218,11 @@ mod test {
             .into();
 
         let data: Vec<ArrayRef> = vec![
-            Arc::new(StringArray::from(vec!["west", "west", "east"])),
+            Arc::new(
+                vec!["west", "west", "east"]
+                    .into_iter()
+                    .collect::<DictionaryArray<Int32Type>>(),
+            ),
             Arc::new(Float64Array::from(vec![1.2, 3.3, 45.3])),
             Arc::new(TimestampNanosecondArray::from_vec(
                 vec![11111111, 222222, 3333],
@@ -1244,8 +1291,16 @@ mod test {
             .into();
 
         let data: Vec<ArrayRef> = vec![
-            Arc::new(StringArray::from(vec!["north", "south", "east"])),
-            Arc::new(StringArray::from(vec![Some("prod"), None, Some("stag")])),
+            Arc::new(
+                vec!["north", "south", "east"]
+                    .into_iter()
+                    .collect::<DictionaryArray<Int32Type>>(),
+            ),
+            Arc::new(
+                vec![Some("prod"), None, Some("stag")]
+                    .into_iter()
+                    .collect::<DictionaryArray<Int32Type>>(),
+            ),
             Arc::new(TimestampNanosecondArray::from_vec(
                 vec![11111111, 222222, 3333],
                 None,

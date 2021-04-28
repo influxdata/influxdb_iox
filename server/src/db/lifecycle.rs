@@ -102,11 +102,11 @@ trait ChunkMover {
 
             buffer_size += Self::chunk_size(&*chunk_guard);
 
-            let would_move = !move_active && can_move(&rules, &*chunk_guard, now);
+            let would_move = can_move(&rules, &*chunk_guard, now);
             let would_write = !write_active && rules.persist;
 
             match chunk_guard.state() {
-                ChunkState::Open(_) if would_move => {
+                ChunkState::Open(_) if !move_active && would_move => {
                     let mut chunk_guard = RwLockUpgradableReadGuard::upgrade(chunk_guard);
                     chunk_guard.set_closing().expect("cannot close open chunk");
 
@@ -119,7 +119,7 @@ trait ChunkMover {
                     move_active = true;
                     self.move_to_read_buffer(partition_key, table_name, chunk_id);
                 }
-                ChunkState::Closing(_) if would_move => {
+                ChunkState::Closing(_) if !move_active => {
                     let partition_key = chunk_guard.key().to_string();
                     let table_name = chunk_guard.table_name().to_string();
                     let chunk_id = chunk_guard.id();
@@ -273,7 +273,12 @@ fn can_move(rules: &LifecycleRules, chunk: &Chunk, now: DateTime<Utc>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::num::{NonZeroU32, NonZeroUsize};
+    use data_types::server_id::ServerId;
+    use internal_types::entry::{test_helpers::lp_to_entry, ClockValue};
+    use std::{
+        convert::TryFrom,
+        num::{NonZeroU32, NonZeroUsize},
+    };
     use tracker::MemRegistry;
 
     fn from_secs(secs: i64) -> DateTime<Utc> {
@@ -285,7 +290,18 @@ mod tests {
         time_of_first_write: Option<i64>,
         time_of_last_write: Option<i64>,
     ) -> Chunk {
-        let mut chunk = Chunk::new_open("", "table1", id, &MemRegistry::new());
+        let entry = lp_to_entry("table1 bar=10 10");
+        let write = entry.partition_writes().unwrap().remove(0);
+        let batch = write.table_batches().remove(0);
+        let mut chunk = Chunk::new_open(
+            batch,
+            "",
+            id,
+            ClockValue::try_from(5).unwrap(),
+            ServerId::try_from(1).unwrap(),
+            &MemRegistry::new(),
+        )
+        .unwrap();
         chunk.set_timestamps(
             time_of_first_write.map(from_secs),
             time_of_last_write.map(from_secs),
@@ -716,5 +732,27 @@ mod tests {
         mover.check_for_work(from_secs(0));
 
         assert_eq!(mover.events, vec![MoverEvents::Write(1)]);
+    }
+
+    #[test]
+    fn test_moves_closing() {
+        let rules = LifecycleRules {
+            mutable_linger_seconds: Some(NonZeroU32::new(10).unwrap()),
+            mutable_minimum_age_seconds: Some(NonZeroU32::new(60).unwrap()),
+            ..Default::default()
+        };
+        let chunks = vec![new_chunk(0, Some(40), Some(40))];
+
+        let mut mover = DummyMover::new(rules, chunks);
+
+        // Initially can't move
+        mover.check_for_work(from_secs(80));
+        assert_eq!(mover.events, vec![]);
+
+        mover.chunks[0].write().set_closing().unwrap();
+
+        // As soon as closing can move
+        mover.check_for_work(from_secs(80));
+        assert_eq!(mover.events, vec![MoverEvents::Move(0)]);
     }
 }
