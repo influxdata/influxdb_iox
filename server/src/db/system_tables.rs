@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 use arrow_deps::{
     arrow::{
         array::{
-            Array, ArrayRef, StringArray, StringBuilder, Time64NanosecondArray,
-            TimestampNanosecondArray, UInt32Array, UInt64Array, UInt64Builder,
+            ArrayRef, StringArray, StringBuilder, Time64NanosecondArray, TimestampNanosecondArray,
+            UInt32Array, UInt64Array, UInt64Builder,
         },
         error::Result,
         record_batch::RecordBatch,
