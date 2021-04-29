@@ -17,8 +17,7 @@ use data_types::{names::org_and_bucket_to_database, DatabaseName};
 use generated_types::{influxdata::iox::management::v1::DatabaseRules, ReadSource, TimestampRange};
 
 use arrow_deps::arrow::{
-    array::{Array, ArrayRef, Float64Array, StringArray, TimestampNanosecondArray},
-    datatypes::{Field, Schema},
+    array::{ArrayRef, Float64Array, StringArray, TimestampNanosecondArray},
     record_batch::RecordBatch,
 };
 
