@@ -108,7 +108,14 @@ trait ChunkMover {
 
         // Only want to start a new move/write task if there isn't one already in-flight
         //
-        // Note: This does not take into account manually triggered tasks
+        // Fetch the trackers for tasks created by previous loop iterations. If the trackers exist
+        // and haven't completed, we don't want to create a new task of that type as there
+        // is still one in-flight.
+        //
+        // This is a very weak heuristic for preventing background work from starving query
+        // workload - i.e. only use one thread for each type of background task.
+        //
+        // We may want to revisit this in future
         let mut move_tracker = self.move_tracker().filter(|x| !x.is_complete()).cloned();
         let mut write_tracker = self.write_tracker().filter(|x| !x.is_complete()).cloned();
 
@@ -116,7 +123,6 @@ trait ChunkMover {
         // - total memory consumption
         // - any chunks to move
 
-        // TODO: Track size globally to avoid iterating through all chunks (#1100)
         for chunk in &chunks {
             let chunk_guard = chunk.upgradable_read();
 
@@ -202,6 +208,22 @@ trait ChunkMover {
                 .map(|x| Duration::from_millis(x.get()))
                 .unwrap_or(DEFAULT_LIFECYCLE_BACKOFF);
 
+            // `check_for_work` should be called again if either of the tasks completes
+            // or the backoff expires.
+            //
+            // This formulation ensures that the loop will run again in backoff
+            // number of milliseconds regardless of if any tasks have finished
+            //
+            // Consider the situation where we have an in-progress write but no
+            // in-progress move. We will look again for new tasks as soon
+            // as either the backoff expires or the write task finishes
+            //
+            // Similarly if there are no in-progress tasks, we will look again
+            // after the backoff interval
+            //
+            // Finally if all tasks are running we still want to be invoked
+            // after the backoff interval, even if no tasks have completed by then,
+            // as we may need to drop chunks
             tokio::select! {
                 _ = tokio::time::sleep(backoff) => {}
                 _ = wait_optional_tracker(move_tracker) => {}
@@ -640,6 +662,9 @@ mod tests {
         let mut mover = DummyMover::new(rules, vec![]);
 
         let (tracker, registration) = registry.register(());
+
+        // Manually set the move_tracker on the DummyMover as if a previous invocation
+        // of check_for_work had started a background move task
         mover.move_tracker = Some(tracker);
 
         let future = mover.check_for_work(from_secs(0));
