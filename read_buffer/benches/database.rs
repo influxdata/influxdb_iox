@@ -115,7 +115,7 @@ fn generate_row_group(rows: usize) -> RecordBatch {
         )),
     ];
 
-    RecordBatch::try_new(schema.into(), data).unwrap()
+x    RecordBatch::try_new(schema.into(), data).unwrap()
 }
 
 criterion_group!(benches, table_names);
