@@ -690,6 +690,9 @@ mod tests {
             .track(registration.clone()),
         );
 
+        // This executor goop is necessary to get a future into
+        // a state where it is waiting on the Notify resource
+
         let waker = futures::task::noop_waker();
         let mut cx = futures::task::Context::from_waker(&waker);
         let fut_tracker = tracker.clone();
@@ -732,6 +735,9 @@ mod tests {
 
         let mut registry = TaskRegistry::new();
         let (tracker, registration) = registry.register(());
+
+        // This executor goop is necessary to get a future into
+        // a state where it is waiting on the Notify resource
 
         let waker = futures::task::noop_waker();
         let mut cx = futures::task::Context::from_waker(&waker);
