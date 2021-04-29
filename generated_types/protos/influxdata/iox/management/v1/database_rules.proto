@@ -161,7 +161,7 @@ message LifecycleRules {
   //
   // If 0, the default backoff is used
   // See server::db::lifecycle::DEFAULT_LIFECYCLE_BACKOFF
-  uint64 worker_backoff_millis = 11;
+  uint64 worker_backoff_millis = 10;
 }
 
 message DatabaseRules {
