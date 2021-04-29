@@ -181,7 +181,6 @@ where
   database_name IN ('{}', '{}')
 order by
   partition_key, table_name
-;
 "#,
         db_name1, db_name2
     );
@@ -217,7 +216,7 @@ async fn test_sql_observer_columns() {
     .trim();
 
     let query = format!(
-        r#"observer;
+        r#"
 select
   partition_key, table_name, count(*) as column_count
 from
@@ -228,7 +227,6 @@ group by
   partition_key, table_name
 order by
   partition_key, table_name, column_count
-;
 "#,
         db_name
     );
@@ -253,18 +251,42 @@ async fn test_sql_observer_operations() {
     let db_name = rand_name();
     create_two_partition_database(&db_name, fixture.grpc_channel()).await;
 
+    let mut management_client = fixture.management_client();
+    let chunks = management_client
+        .list_chunks(&db_name)
+        .await
+        .expect("listing chunks");
+    println!("The chunks:\n{:?}", chunks);
+
+    let partition_key = "cpu";
+    let table_name = "cpu";
+    // Move the chunk to read buffer
+    let operation = management_client
+        .close_partition_chunk(&db_name, partition_key, table_name, 0)
+        .await
+        .expect("new partition chunk");
+
+    println!("Operation response is {:?}", operation);
+    let operation_id = operation.name.parse().expect("not an integer");
+
+    // wait for the job to be done
+    fixture
+        .operations_client()
+        .wait_operation(operation_id, Some(std::time::Duration::from_secs(1)))
+        .await
+        .expect("failed to wait operation");
+
     let expected_output = r#"
 +---------------+----------+-----------------------------+
 | partition_key | chunk_id | description                 |
 +---------------+----------+-----------------------------+
-| cpu           | 0        | Loading chunk to ReadBuffer |
 | cpu           | 0        | Loading chunk to ReadBuffer |
 +---------------+----------+-----------------------------+
 "#
     .trim();
 
     let query = format!(
-        r#"observer;
+        r#"
 select
   partition_key, chunk_id, description
 from
@@ -273,7 +295,6 @@ where
   database_name = '{}'
 order by
   partition_key, chunk_id, description
-;
 "#,
         db_name
     );
