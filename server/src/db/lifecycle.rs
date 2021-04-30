@@ -842,7 +842,7 @@ mod tests {
     }
 
     #[test]
-    fn test_moves_closing() {
+    fn test_moves_closed() {
         let rules = LifecycleRules {
             mutable_linger_seconds: Some(NonZeroU32::new(10).unwrap()),
             mutable_minimum_age_seconds: Some(NonZeroU32::new(60).unwrap()),
@@ -858,7 +858,7 @@ mod tests {
 
         mover.chunks[0].write().set_closed().unwrap();
 
-        // As soon as closing can move
+        // As soon as closed can move
         mover.check_for_work(from_secs(80));
         assert_eq!(mover.events, vec![MoverEvents::Move(0)]);
     }

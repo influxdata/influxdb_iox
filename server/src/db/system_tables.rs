@@ -120,7 +120,7 @@ fn from_chunk_summaries(chunks: Vec<ChunkSummary>) -> Result<RecordBatch> {
         ("row_count", Arc::new(row_counts), false),
         ("time_of_first_write", Arc::new(time_of_first_write), true),
         ("time_of_last_write", Arc::new(time_of_last_write), true),
-        ("time_closing", Arc::new(time_closed), true),
+        ("time_closed", Arc::new(time_closed), true),
     ])
 }
 
@@ -235,12 +235,12 @@ mod tests {
         ];
 
         let expected = vec![
-            "+----+---------------+------------+-------------------+-----------------+-----------+---------------------+---------------------+--------------+",
-            "| id | partition_key | table_name | storage           | estimated_bytes | row_count | time_of_first_write | time_of_last_write  | time_closing |",
-            "+----+---------------+------------+-------------------+-----------------+-----------+---------------------+---------------------+--------------+",
-            "| 0  | p1            | table1     | OpenMutableBuffer | 23754           | 11        | 1970-01-01 00:00:10 |                     |              |",
-            "| 0  | p1            | table1     | OpenMutableBuffer | 23454           | 22        |                     | 1970-01-01 00:01:20 |              |",
-            "+----+---------------+------------+-------------------+-----------------+-----------+---------------------+---------------------+--------------+",
+            "+----+---------------+------------+-------------------+-----------------+-----------+---------------------+---------------------+-------------+",
+            "| id | partition_key | table_name | storage           | estimated_bytes | row_count | time_of_first_write | time_of_last_write  | time_closed |",
+            "+----+---------------+------------+-------------------+-----------------+-----------+---------------------+---------------------+-------------+",
+            "| 0  | p1            | table1     | OpenMutableBuffer | 23754           | 11        | 1970-01-01 00:00:10 |                     |             |",
+            "| 0  | p1            | table1     | OpenMutableBuffer | 23454           | 22        |                     | 1970-01-01 00:01:20 |             |",
+            "+----+---------------+------------+-------------------+-----------------+-----------+---------------------+---------------------+-------------+",
         ];
 
         let batch = from_chunk_summaries(chunks).unwrap();

@@ -72,7 +72,7 @@ pub struct ChunkSummary {
     /// itself
     pub time_of_last_write: Option<DateTime<Utc>>,
 
-    /// Time at which this chunk was marked as closing. Note this is
+    /// Time at which this chunk was marked as closed. Note this is
     /// not the same as the timestamps on the data itself
     pub time_closed: Option<DateTime<Utc>>,
 }
@@ -196,7 +196,7 @@ impl TryFrom<management::Chunk> for ChunkSummary {
             .map(TryInto::try_into)
             .transpose()
             .map_err(|_| FieldViolation {
-                field: "time_closing".to_string(),
+                field: "time_closed".to_string(),
                 description: "Timestamp must be positive".to_string(),
             })?;
 

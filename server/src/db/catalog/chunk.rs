@@ -98,7 +98,7 @@ pub struct Chunk {
     /// itself
     time_of_last_write: Option<DateTime<Utc>>,
 
-    /// Time at which this chunk was maked as closing. Note this is
+    /// Time at which this chunk was maked as closed. Note this is
     /// not the same as the timestamps on the data itself
     time_closed: Option<DateTime<Utc>>,
 }
@@ -301,14 +301,14 @@ impl Chunk {
     }
 
     /// Returns a mutable reference to the mutable buffer storage for
-    /// chunks in the Open or Closing state
+    /// chunks in the Open or Closed state
     ///
-    /// Must be in open or closing state
+    /// Must be in open or closed state
     pub fn mutable_buffer(&mut self) -> Result<&mut MBChunk> {
         match &mut self.state {
             ChunkState::Open(chunk) => Ok(chunk),
             ChunkState::Closed(chunk) => Ok(chunk),
-            state => unexpected_state!(self, "mutable buffer reference", "Open or Closing", state),
+            state => unexpected_state!(self, "mutable buffer reference", "Open or Closed", state),
         }
     }
 
@@ -326,7 +326,7 @@ impl Chunk {
             }
             state => {
                 self.state = state;
-                unexpected_state!(self, "setting closing", "Open or Closing", &self.state)
+                unexpected_state!(self, "setting closed", "Open or Closed", &self.state)
             }
         }
     }
@@ -345,7 +345,7 @@ impl Chunk {
             }
             state => {
                 self.state = state;
-                unexpected_state!(self, "setting moving", "Open or Closing", &self.state)
+                unexpected_state!(self, "setting moving", "Open or Closed", &self.state)
             }
         }
     }
