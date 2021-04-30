@@ -261,7 +261,7 @@ pub struct Db {
 
     pub server_id: ServerId, // this is also the Query Server ID
 
-    /// Interface to use for peristence
+    /// Interface to use for persistence
     pub store: Arc<ObjectStore>,
 
     /// Executor for running queries
@@ -325,6 +325,11 @@ struct DbMetrics {
     // catalog data lifecycle.
     catalog_chunks: metrics::Counter,
 
+    // Tracks a distribution of sizes in bytes of chunks as they're moved into
+    // various immutable stages in IOx: closing/moving in the MUB, in the RB,
+    // and in Parquet.
+    catalog_immutable_chunk_bytes: metrics::Histogram,
+
     // Default labels for the metrics.
     // TODO(edd): you should be able to set these on the metrics when they're
     // created.
@@ -367,6 +372,18 @@ impl Db {
                 None,
                 "In-memory chunks created in various life-cycle stages",
             ),
+            catalog_immutable_chunk_bytes: domain
+                .register_histogram_metric(
+                    "chunk_creation",
+                    "size",
+                    "bytes",
+                    "The new size of an immutable chunk",
+                )
+                .with_labels(vec![
+                    metrics::KeyValue::new("db_name", db_name.to_string()),
+                    metrics::KeyValue::new("svr_id", format!("{}", server_id)),
+                ])
+                .init(),
             default_labels: vec![
                 metrics::KeyValue::new("db_name", db_name.to_string()),
                 metrics::KeyValue::new("svr_id", format!("{}", server_id)),
@@ -536,6 +553,17 @@ impl Db {
             })?
         };
 
+        // Track the size of the newly immutable closed MUB chunk.
+        self.metrics
+            .catalog_immutable_chunk_bytes
+            .observe_with_labels(
+                mb_chunk.size() as f64,
+                &[metrics::KeyValue::new(
+                    "state",
+                    chunk.read().state().metric_label(),
+                )],
+            );
+
         self.metrics.update_chunk_state(chunk.read().state());
         info!(%partition_key, %table_name, %chunk_id, "chunk marked MOVING, loading tables into read buffer");
 
@@ -571,6 +599,17 @@ impl Db {
             table_name,
             chunk_id,
         })?;
+
+        // Track the size of the newly immutable closed MUB chunk.
+        self.metrics
+            .catalog_immutable_chunk_bytes
+            .observe_with_labels(
+                chunk.size() as f64,
+                &[metrics::KeyValue::new(
+                    "state",
+                    chunk.state().metric_label(),
+                )],
+            );
 
         self.metrics.update_chunk_state(chunk.state());
         debug!(%partition_key, %table_name, %chunk_id, "chunk marked MOVED. loading complete");
@@ -683,7 +722,13 @@ impl Db {
                 .try_into()
                 .context(SchemaConversion)?;
             let table_time_range = time_range.map(|(start, end)| TimestampRange::new(start, end));
-            parquet_chunk.add_table(stats, path, schema, table_time_range);
+            parquet_chunk.add_table(
+                stats,
+                path,
+                Arc::clone(&self.store),
+                schema,
+                table_time_range,
+            );
         }
 
         // Relock the chunk again (nothing else should have been able
@@ -699,10 +744,22 @@ impl Db {
                 chunk_id,
             })?;
 
+        // Track the size of the newly written to OS chunk.
+        self.metrics
+            .catalog_immutable_chunk_bytes
+            .observe_with_labels(
+                chunk.size() as f64,
+                &[metrics::KeyValue::new(
+                    "state",
+                    chunk.state().metric_label(),
+                )],
+            );
+
         self.metrics.update_chunk_state(chunk.state());
         debug!(%partition_key, %table_name, %chunk_id, "chunk marked MOVED. Persisting to object store complete");
 
-        Ok(DbChunk::snapshot(&chunk))
+        // We know this chunk is ParquetFile type
+        Ok(DbChunk::parquet_file_snapshot(&chunk))
     }
 
     /// Spawns a task to perform
@@ -1332,7 +1389,9 @@ mod tests {
 
     #[tokio::test]
     async fn load_to_read_buffer_sorted() {
-        let db = Arc::new(make_db().db);
+        let test_db = make_db();
+        let db = Arc::new(test_db.db);
+
         write_lp(db.as_ref(), "cpu,tag1=cupcakes bar=1 10");
         write_lp(db.as_ref(), "cpu,tag1=asfd,tag2=foo bar=2 20");
         write_lp(db.as_ref(), "cpu,tag1=bingo,tag2=foo bar=2 10");
@@ -1352,6 +1411,32 @@ mod tests {
         let rb_chunk = db
             .load_chunk_to_read_buffer(partition_key, "cpu", mb_chunk.id())
             .await
+            .unwrap();
+
+        // MUB chunk size
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_chunk_creation_size_bytes")
+            .with_labels(&[
+                ("db_name", "placeholder"),
+                ("state", "moving"),
+                ("svr_id", "1"),
+            ])
+            .histogram()
+            .sample_sum_eq(316.0)
+            .unwrap();
+
+        // RB chunk size
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_chunk_creation_size_bytes")
+            .with_labels(&[
+                ("db_name", "placeholder"),
+                ("state", "moved"),
+                ("svr_id", "1"),
+            ])
+            .histogram()
+            .sample_sum_eq(4291.0)
             .unwrap();
 
         let rb = collect_read_filter(&rb_chunk, "cpu").await;
@@ -1415,7 +1500,8 @@ mod tests {
         // Create a DB given a server id, an object store and a db name
         let server_id = ServerId::try_from(10).unwrap();
         let db_name = "parquet_test_db";
-        let db = Arc::new(make_database(server_id, Arc::clone(&object_store), db_name));
+        let test_db = make_database(server_id, Arc::clone(&object_store), db_name);
+        let db = Arc::new(test_db.db);
 
         // Write some line protocols in Mutable buffer of the DB
         write_lp(db.as_ref(), "cpu bar=1 10");
@@ -1437,6 +1523,19 @@ mod tests {
         let pq_chunk = db
             .write_chunk_to_object_store(partition_key, "cpu", mb_chunk.id())
             .await
+            .unwrap();
+
+        // Parquet chunk size
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_chunk_creation_size_bytes")
+            .with_labels(&[
+                ("db_name", "parquet_test_db"),
+                ("state", "os"),
+                ("svr_id", "10"),
+            ])
+            .histogram()
+            .sample_sum_eq(1897.0)
             .unwrap();
 
         // it should be the same chunk!
@@ -1794,6 +1893,10 @@ mod tests {
             .await
             .unwrap();
 
+        db.write_chunk_to_object_store("1970-01-01T00", "cpu", 0)
+            .await
+            .unwrap();
+
         print!("Partitions2: {:?}", db.partition_keys().unwrap());
 
         db.rollover_partition("1970-01-05T15", "cpu").await.unwrap();
@@ -1811,8 +1914,8 @@ mod tests {
                 to_arc("1970-01-01T00"),
                 to_arc("cpu"),
                 0,
-                ChunkStorage::ReadBuffer,
-                1213,
+                ChunkStorage::ReadBufferAndObjectStore,
+                1213 + 675, // size of RB and OS chunks
                 1,
             ),
             ChunkSummary::new_without_timestamps(
@@ -1849,6 +1952,7 @@ mod tests {
 
         assert_eq!(db.memory_registries.mutable_buffer.bytes(), 100 + 129 + 131);
         assert_eq!(db.memory_registries.read_buffer.bytes(), 1213);
+        assert_eq!(db.memory_registries.parquet.bytes(), 89); // TODO: This 89 must be replaced with 675. Ticket #1311
     }
 
     #[tokio::test]
@@ -1868,6 +1972,11 @@ mod tests {
 
         // load a chunk to the read buffer
         db.load_chunk_to_read_buffer("1970-01-01T00", "cpu", chunk_id)
+            .await
+            .unwrap();
+
+        // write the read buffer chunk to object store
+        db.write_chunk_to_object_store("1970-01-01T00", "cpu", chunk_id)
             .await
             .unwrap();
 
