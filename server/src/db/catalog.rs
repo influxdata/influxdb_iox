@@ -68,6 +68,36 @@ pub enum Error {
     },
 
     #[snafu(display(
+        "A lifecycle action '{}' is already in progress for  {}:{}:{}",
+        lifecycle_action,
+        partition_key,
+        table_name,
+        chunk_id,
+    ))]
+    LifecycleActionAlreadyInProgress {
+        partition_key: String,
+        table_name: String,
+        chunk_id: u32,
+        lifecycle_action: String,
+    },
+
+    #[snafu(display(
+        "Unexpected chunk state for {}:{}:{}. Expected {}, got {}",
+        partition_key,
+        table_name,
+        chunk_id,
+        expected,
+        actual
+    ))]
+    UnexpectedLifecycleAction {
+        partition_key: String,
+        table_name: String,
+        chunk_id: u32,
+        expected: String,
+        actual: String,
+    },
+
+    #[snafu(display(
         "Can not add an empty chunk to the catalog {}:{}",
         partition_key,
         chunk_id
