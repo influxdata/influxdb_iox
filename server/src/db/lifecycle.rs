@@ -134,7 +134,7 @@ trait ChunkMover {
             match chunk_guard.state() {
                 ChunkState::Open(_) if move_tracker.is_none() && would_move => {
                     let mut chunk_guard = RwLockUpgradableReadGuard::upgrade(chunk_guard);
-                    chunk_guard.set_closing().expect("cannot close open chunk");
+                    chunk_guard.set_closed().expect("cannot close open chunk");
 
                     let partition_key = chunk_guard.key().to_string();
                     let table_name = chunk_guard.table_name().to_string();
@@ -145,7 +145,7 @@ trait ChunkMover {
                     move_tracker =
                         Some(self.move_to_read_buffer(partition_key, table_name, chunk_id));
                 }
-                ChunkState::Closing(_) if move_tracker.is_none() => {
+                ChunkState::Closed(_) if move_tracker.is_none() => {
                     let partition_key = chunk_guard.key().to_string();
                     let table_name = chunk_guard.table_name().to_string();
                     let chunk_id = chunk_guard.id();
@@ -380,7 +380,7 @@ mod tests {
 
     /// Transitions a new ("open") chunk into the "moving" state.
     fn transition_to_moving(mut chunk: Chunk) -> Chunk {
-        chunk.set_closing().unwrap();
+        chunk.set_closed().unwrap();
         chunk.set_moving().unwrap();
         chunk
     }
@@ -856,7 +856,7 @@ mod tests {
         mover.check_for_work(from_secs(80));
         assert_eq!(mover.events, vec![]);
 
-        mover.chunks[0].write().set_closing().unwrap();
+        mover.chunks[0].write().set_closed().unwrap();
 
         // As soon as closing can move
         mover.check_for_work(from_secs(80));

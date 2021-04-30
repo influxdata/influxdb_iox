@@ -428,7 +428,7 @@ impl Db {
             })?
         {
             let mut chunk = chunk.write();
-            chunk.set_closing().context(RollingOverPartition {
+            chunk.set_closed().context(RollingOverPartition {
                 partition_key,
                 table_name,
             })?;
@@ -1004,7 +1004,7 @@ fn check_chunk_closing(
             let size = mb_chunk.size();
 
             if size > threshold.get() {
-                chunk.set_closing().expect("cannot close open chunk");
+                chunk.set_closed().expect("cannot close open chunk");
                 metrics.update_chunk_state(chunk.state());
             }
         }
@@ -1648,8 +1648,8 @@ mod tests {
         assert!(start < chunk.time_of_first_write().unwrap());
         assert!(chunk.time_of_first_write().unwrap() < after_data_load);
         assert!(chunk.time_of_first_write().unwrap() == chunk.time_of_last_write().unwrap());
-        assert!(after_data_load < chunk.time_closing().unwrap());
-        assert!(chunk.time_closing().unwrap() < after_rollover);
+        assert!(after_data_load < chunk.time_closed().unwrap());
+        assert!(chunk.time_closed().unwrap() < after_rollover);
     }
 
     #[tokio::test]
@@ -1669,8 +1669,8 @@ mod tests {
 
         let chunks: Vec<_> = partition.chunks().collect();
         assert_eq!(chunks.len(), 2);
-        assert!(matches!(chunks[0].read().state(), ChunkState::Closing(_)));
-        assert!(matches!(chunks[1].read().state(), ChunkState::Closing(_)));
+        assert!(matches!(chunks[0].read().state(), ChunkState::Closed(_)));
+        assert!(matches!(chunks[1].read().state(), ChunkState::Closed(_)));
     }
 
     #[tokio::test]
@@ -1858,12 +1858,12 @@ mod tests {
         );
 
         assert!(
-            summary.time_closing.unwrap() > after_first_write,
+            summary.time_closed.unwrap() > after_first_write,
             "summary; {:#?}",
             summary
         );
         assert!(
-            summary.time_closing.unwrap() < after_close,
+            summary.time_closed.unwrap() < after_close,
             "summary; {:#?}",
             summary
         );
