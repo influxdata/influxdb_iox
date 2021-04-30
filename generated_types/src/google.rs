@@ -13,7 +13,7 @@ pub mod longrunning {
     impl Operation {
         /// Return the IOx operation `id`. This `id` can
         /// be passed to the various APIs in the
-        /// operations client such as [`wait_operation`];
+        /// operations client such as `influxdb_iox_client::operations::Client::wait_operation`;
         pub fn id(&self) -> usize {
             self.name
                 .parse()
