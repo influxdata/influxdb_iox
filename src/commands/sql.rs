@@ -19,8 +19,7 @@ pub struct Config {
     // TODO add an option to avoid saving history
 
     // TODO add an option to specify the default database (rather than having to set it via USE DATABASE)
- 
-   /// Format to use for output. Can be overridden using
+    /// Format to use for output. Can be overridden using
     /// `SET FORMAT` command
     ///
     /// Optional format ('pretty', 'json', or 'csv')
