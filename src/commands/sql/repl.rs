@@ -230,7 +230,11 @@ impl Repl {
         let end = Instant::now();
         self.print_results(&batches)?;
 
-        println!("Returned {} in {:?}", Self::row_summary(&batches), end - start);
+        println!(
+            "Returned {} in {:?}",
+            Self::row_summary(&batches),
+            end - start
+        );
         Ok(())
     }
 

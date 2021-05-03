@@ -125,8 +125,7 @@ async fn test_sql_use_database() {
         .write_stdin(format!("use {};\n\nselect * from cpu;", db_name))
         .assert()
         .success()
-        .stdout(predicate::str::contains(expected_output)
-            .and(predicate::str::contains("1 row")));
+        .stdout(predicate::str::contains(expected_output).and(predicate::str::contains("1 row")));
 }
 
 #[tokio::test]
