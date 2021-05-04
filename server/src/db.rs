@@ -1478,7 +1478,7 @@ mod tests {
             .unwrap();
 
         catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "moved", 1222).unwrap();
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "os", 1897).unwrap(); // now also in OS
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "os", 1913).unwrap(); // now also in OS
 
         db.unload_read_buffer("1970-01-01T00", "cpu", 0)
             .await
@@ -1494,7 +1494,7 @@ mod tests {
             .unwrap();
 
         // verify chunk size not increased for OS (it was in OS before unload)
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "os", 1897).unwrap();
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "os", 1913).unwrap();
         // verify chunk size for RB has decreased
         catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "moved", 0).unwrap();
     }
@@ -1819,7 +1819,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(1913.0)
+            .sample_sum_eq(1897.0)
             .unwrap();
 
         // it should be the same chunk!
@@ -1943,7 +1943,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(1913.0)
+            .sample_sum_eq(1897.0)
             .unwrap();
 
         // Unload RB chunk but keep it in OS
