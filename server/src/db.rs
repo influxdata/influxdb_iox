@@ -1319,7 +1319,7 @@ mod tests {
     use data_types::{
         chunk::ChunkStorage,
         database_rules::{Order, Sort, SortOrder},
-        partition_metadata::{ColumnSummary, StatValues, Statistics, TableSummary},
+        partition_metadata::{ColumnSummary, InfluxDbType, StatValues, Statistics, TableSummary},
     };
     use datafusion::execution::context;
     use entry::test_helpers::lp_to_entry;
@@ -1819,7 +1819,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(1897.0)
+            .sample_sum_eq(1913.0)
             .unwrap();
 
         // it should be the same chunk!
@@ -1943,7 +1943,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(1897.0)
+            .sample_sum_eq(1913.0)
             .unwrap();
 
         // Unload RB chunk but keep it in OS
@@ -1971,7 +1971,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(675.0)
+            .sample_sum_eq(691.0)
             .unwrap();
 
         // Verify data written to the parquet file in object store
@@ -2346,7 +2346,7 @@ mod tests {
                 to_arc("cpu"),
                 0,
                 ChunkStorage::ReadBufferAndObjectStore,
-                1213 + 675, // size of RB and OS chunks
+                1904, // size of RB and OS chunks
                 1,
             ),
             ChunkSummary::new_without_timestamps(
@@ -2431,6 +2431,7 @@ mod tests {
                         columns: vec![
                             ColumnSummary {
                                 name: "bar".into(),
+                                influxdb_type: Some(InfluxDbType::Field),
                                 stats: Statistics::F64(StatValues {
                                     min: 1.0,
                                     max: 2.0,
@@ -2439,6 +2440,7 @@ mod tests {
                             },
                             ColumnSummary {
                                 name: "time".into(),
+                                influxdb_type: Some(InfluxDbType::Timestamp),
                                 stats: Statistics::I64(StatValues {
                                     min: 1,
                                     max: 2,
@@ -2447,6 +2449,7 @@ mod tests {
                             },
                             ColumnSummary {
                                 name: "baz".into(),
+                                influxdb_type: Some(InfluxDbType::Field),
                                 stats: Statistics::F64(StatValues {
                                     min: 3.0,
                                     max: 3.0,
@@ -2460,6 +2463,7 @@ mod tests {
                         columns: vec![
                             ColumnSummary {
                                 name: "foo".into(),
+                                influxdb_type: Some(InfluxDbType::Field),
                                 stats: Statistics::F64(StatValues {
                                     min: 1.0,
                                     max: 1.0,
@@ -2468,6 +2472,7 @@ mod tests {
                             },
                             ColumnSummary {
                                 name: "time".into(),
+                                influxdb_type: Some(InfluxDbType::Timestamp),
                                 stats: Statistics::I64(StatValues {
                                     min: 1,
                                     max: 1,
@@ -2486,6 +2491,7 @@ mod tests {
                         columns: vec![
                             ColumnSummary {
                                 name: "bar".into(),
+                                influxdb_type: Some(InfluxDbType::Field),
                                 stats: Statistics::F64(StatValues {
                                     min: 1.0,
                                     max: 1.0,
@@ -2494,6 +2500,7 @@ mod tests {
                             },
                             ColumnSummary {
                                 name: "time".into(),
+                                influxdb_type: Some(InfluxDbType::Timestamp),
                                 stats: Statistics::I64(StatValues {
                                     min: 400000000000000,
                                     max: 400000000000000,
@@ -2507,6 +2514,7 @@ mod tests {
                         columns: vec![
                             ColumnSummary {
                                 name: "frob".into(),
+                                influxdb_type: Some(InfluxDbType::Field),
                                 stats: Statistics::F64(StatValues {
                                     min: 3.0,
                                     max: 3.0,
@@ -2515,6 +2523,7 @@ mod tests {
                             },
                             ColumnSummary {
                                 name: "time".into(),
+                                influxdb_type: Some(InfluxDbType::Timestamp),
                                 stats: Statistics::I64(StatValues {
                                     min: 400000000000001,
                                     max: 400000000000001,

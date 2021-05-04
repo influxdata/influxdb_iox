@@ -287,6 +287,7 @@ fn read_statistics_from_parquet_row_group(
             )? {
                 ExtractedStatistics::Statistics(stats) => column_summaries.push(ColumnSummary {
                     name: field.name().clone(),
+                    influxdb_type: Some(iox_type.into()),
                     stats,
                 }),
                 ExtractedStatistics::TimestampRange(range) => {

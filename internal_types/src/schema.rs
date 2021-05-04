@@ -659,6 +659,16 @@ impl From<&InfluxColumnType> for ArrowDataType {
     }
 }
 
+impl From<InfluxColumnType> for data_types::partition_metadata::InfluxDbType {
+    fn from(t: InfluxColumnType) -> Self {
+        match t {
+            InfluxColumnType::Tag => Self::Tag,
+            InfluxColumnType::Field(_) => Self::Field,
+            InfluxColumnType::Timestamp => Self::Timestamp,
+        }
+    }
+}
+
 /// Thing that implements iterator over a Schema's columns.
 pub struct SchemaIter<'a> {
     schema: &'a Schema,

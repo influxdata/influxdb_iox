@@ -10,11 +10,7 @@ use arrow::{
 };
 use datafusion::physical_plan::SendableRecordBatchStream;
 
-use data_types::{
-    partition_metadata::{ColumnSummary, StatValues, Statistics, TableSummary},
-    server_id::ServerId,
-    timestamp::TimestampRange,
-};
+use data_types::{partition_metadata::{ColumnSummary, InfluxDbType, StatValues, Statistics, TableSummary}, server_id::ServerId, timestamp::TimestampRange};
 use datafusion_util::MemoryStream;
 use futures::TryStreamExt;
 use internal_types::schema::{builder::SchemaBuilder, Schema};
@@ -117,6 +113,7 @@ fn create_column_tag(
 
     summaries.push(ColumnSummary {
         name: name.to_string(),
+        influxdb_type: Some(InfluxDbType::Tag),
         stats: Statistics::String(StatValues {
             min: data.iter().flatten().min().unwrap().to_string(),
             max: data.iter().flatten().max().unwrap().to_string(),
@@ -202,6 +199,7 @@ fn create_column_field_f64(
 
     summaries.push(ColumnSummary {
         name: name.to_string(),
+        influxdb_type: Some(InfluxDbType::Field),
         stats: Statistics::F64(StatValues {
             min: *data
                 .iter()
@@ -264,6 +262,7 @@ where
 
     summaries.push(ColumnSummary {
         name: name.to_string(),
+        influxdb_type: Some(InfluxDbType::Field),
         stats: f(StatValues {
             min: data.iter().flatten().min().unwrap().clone(),
             max: data.iter().flatten().max().unwrap().clone(),

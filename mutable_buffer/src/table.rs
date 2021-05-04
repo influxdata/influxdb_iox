@@ -306,6 +306,7 @@ impl Table {
                 ColumnSummary {
                     name: column_name.to_string(),
                     stats: c.stats(),
+                    influxdb_type: Some(c.influx_type().into()),
                 }
             })
             .collect()
