@@ -1819,7 +1819,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(1897.0)
+            .sample_sum_eq(1913.0)
             .unwrap();
 
         // it should be the same chunk!
@@ -1943,7 +1943,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(1897.0)
+            .sample_sum_eq(1913.0)
             .unwrap();
 
         // Unload RB chunk but keep it in OS
