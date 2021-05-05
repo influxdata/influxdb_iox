@@ -162,7 +162,7 @@ fn from_partition_summaries(partitions: Vec<PartitionSummary>) -> Result<RecordB
         ("table_name", Arc::new(table_name), false),
         ("column_name", Arc::new(column_name), false),
         ("column_type", Arc::new(column_type), false),
-        ("influxdb_type", Arc::new(influxdb_type), false),
+        ("influxdb_type", Arc::new(influxdb_type), true),
     ])
 }
 
