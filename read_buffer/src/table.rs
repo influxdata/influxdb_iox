@@ -9,7 +9,7 @@ use parking_lot::RwLock;
 use snafu::{ensure, Snafu};
 
 use arrow::record_batch::RecordBatch;
-use data_types::partition_metadata::TableSummary;
+use data_types::{chunk::ChunkColumnSummary, partition_metadata::TableSummary};
 use internal_types::selection::Selection;
 
 use crate::row_group::{self, ColumnName, Predicate, RowGroup};
@@ -139,6 +139,21 @@ impl Table {
         let base_size = std::mem::size_of::<Self>() + self.name.len();
         // meta.size accounts for all the row group data.
         base_size + self.table_data.read().meta.size()
+    }
+
+    /// The estimated size for each column in this table. Note there
+    /// may be multiple entries for each column.
+    pub fn column_sizes(&self) -> Vec<ChunkColumnSummary> {
+        self.table_data
+            .read()
+            .data
+            .iter()
+            .flat_map(|rg| rg.column_sizes())
+            .map(|(name, estimated_bytes)| ChunkColumnSummary {
+                name: Arc::new(name.to_string()),
+                estimated_bytes,
+            })
+            .collect()
     }
 
     // Returns the total number of row groups in this table.
