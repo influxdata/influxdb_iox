@@ -10,7 +10,11 @@ use arrow::{
 };
 use datafusion::physical_plan::SendableRecordBatchStream;
 
-use data_types::{partition_metadata::{ColumnSummary, InfluxDbType, StatValues, Statistics, TableSummary}, server_id::ServerId, timestamp::TimestampRange};
+use data_types::{
+    partition_metadata::{ColumnSummary, InfluxDbType, StatValues, Statistics, TableSummary},
+    server_id::ServerId,
+    timestamp::TimestampRange,
+};
 use datafusion_util::MemoryStream;
 use futures::TryStreamExt;
 use internal_types::schema::{builder::SchemaBuilder, Schema};
