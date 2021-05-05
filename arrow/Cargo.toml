@@ -7,4 +7,5 @@ description = "Re-exports arrow at a specific version"
 
 [dependencies]
 
-arrow = { git = "https://github.com/apache/arrow-rs", rev = "ed00e4d4a160cd5182bfafb81fee2240ec005014" }
+# Rename to workaround doctest bug
+upstream = { git = "https://github.com/apache/arrow-rs", rev = "ed00e4d4a160cd5182bfafb81fee2240ec005014", package="arrow" }
