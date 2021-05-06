@@ -15,7 +15,7 @@ use arrow::{
         UInt32Array, UInt32Builder, UInt64Array, UInt64Builder,
     },
     datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit},
-    error::Result,
+    error::{ArrowError, Result},
     record_batch::RecordBatch,
 };
 use data_types::{
@@ -256,14 +256,8 @@ fn from_partition_summaries(partitions: Vec<PartitionSummary>) -> Result<RecordB
 
 fn assemble_chunk_columns(
     partitions: Vec<UnaggregatedPartitionSummary>,
-    mut chunk_summaries: Vec<DetailedChunkSummary>,
+    chunk_summaries: Vec<DetailedChunkSummary>,
 ) -> Result<RecordBatch> {
-    // Collapse down any replicated columns in our detaied chunk
-    // summaries so we have one entry per column
-    chunk_summaries
-        .iter_mut()
-        .for_each(|chunk_summary| chunk_summary.coalesce());
-
     // maps (partition_key, chunk_id, table_name) --> DetailedChunkSummary
     let chunk_summary_map: HashMap<_, _> = chunk_summaries
         .iter()
@@ -316,28 +310,22 @@ fn assemble_chunk_columns(
                 table.name.as_str(),
             );
 
-            // TODO remove this following code and generate an
-            // internal error if chunk_summary_map has no entry for the key
-            let (chunk_summary, mut column_index) = {
-                if let Some(chunk_summary) = chunk_summary_map.get(&key) {
-                    (Some(chunk_summary), make_column_index(chunk_summary))
-                } else {
-                    (None, HashMap::new())
-                }
-            };
+            let chunk_summary = chunk_summary_map.get(&key).ok_or_else(|| {
+                ArrowError::ComputeError(format!(
+                    "IOx internal error: Can not find summary for {:?}",
+                    key
+                ))
+            })?;
 
-            let storage_value = chunk_summary.map(|s| s.inner.storage.as_str());
+            let mut column_index = make_column_index(chunk_summary);
+            let storage_value = chunk_summary.inner.storage.as_str();
 
             for column in &table.columns {
                 partition_key.append_value(&partition.key)?;
                 chunk_id.append_value(chunk_table.chunk_id)?;
                 table_name.append_value(&table.name)?;
                 column_name.append_value(&column.name)?;
-                if let Some(v) = storage_value {
-                    storage.append_value(v)?;
-                } else {
-                    storage.append(false)?;
-                }
+                storage.append_value(storage_value)?;
                 count.append_value(column.count())?;
                 if let Some(v) = column.stats.min_as_str() {
                     min_values.append_value(v)?;
@@ -361,11 +349,7 @@ fn assemble_chunk_columns(
                 chunk_id.append_value(chunk_table.chunk_id)?;
                 table_name.append_value(&table.name)?;
                 column_name.append_value(name)?;
-                if let Some(v) = storage_value {
-                    storage.append_value(v)?;
-                } else {
-                    storage.append(false)?;
-                }
+                storage.append_value(storage_value)?;
                 count.append_null()?;
                 min_values.append(false)?;
                 max_values.append(false)?;
@@ -693,8 +677,9 @@ mod tests {
                     },
                 }],
             },
+            // other partition has different columns
             UnaggregatedPartitionSummary {
-                key: "p1".to_string(),
+                key: "p2".to_string(),
                 tables: vec![
                     UnaggregatedTableSummary {
                         chunk_id: 43,
@@ -728,7 +713,7 @@ mod tests {
                     partition_key: "p1".into(),
                     table_name: "t1".into(),
                     id: 42,
-                    storage: ChunkStorage::OpenMutableBuffer,
+                    storage: ChunkStorage::ReadBuffer,
                     estimated_bytes: 23754,
                     row_count: 11,
                     time_of_first_write: None,
@@ -741,6 +726,10 @@ mod tests {
                         estimated_bytes: 11,
                     },
                     ChunkColumnSummary {
+                        name: "c2".into(),
+                        estimated_bytes: 12,
+                    },
+                    ChunkColumnSummary {
                         name: "__other".into(),
                         estimated_bytes: 13,
                     },
@@ -748,7 +737,7 @@ mod tests {
             },
             DetailedChunkSummary {
                 inner: ChunkSummary {
-                    partition_key: "p1".into(),
+                    partition_key: "p2".into(),
                     table_name: "t1".into(),
                     id: 43,
                     storage: ChunkStorage::OpenMutableBuffer,
@@ -758,17 +747,27 @@ mod tests {
                     time_of_last_write: None,
                     time_closed: None,
                 },
-                // two entries for c2 (they need to be aggregated)
-                columns: vec![
-                    ChunkColumnSummary {
-                        name: "c2".into(),
-                        estimated_bytes: 100,
-                    },
-                    ChunkColumnSummary {
-                        name: "c2".into(),
-                        estimated_bytes: 200,
-                    },
-                ],
+                columns: vec![ChunkColumnSummary {
+                    name: "c1".into(),
+                    estimated_bytes: 100,
+                }],
+            },
+            DetailedChunkSummary {
+                inner: ChunkSummary {
+                    partition_key: "p2".into(),
+                    table_name: "t2".into(),
+                    id: 44,
+                    storage: ChunkStorage::OpenMutableBuffer,
+                    estimated_bytes: 23754,
+                    row_count: 11,
+                    time_of_first_write: None,
+                    time_of_last_write: None,
+                    time_closed: None,
+                },
+                columns: vec![ChunkColumnSummary {
+                    name: "c3".into(),
+                    estimated_bytes: 200,
+                }],
             },
         ];
 
@@ -776,11 +775,12 @@ mod tests {
             "+---------------+----------+------------+-------------+-------------------+-------+-----------+-----------+-----------------+",
             "| partition_key | chunk_id | table_name | column_name | storage           | count | min_value | max_value | estimated_bytes |",
             "+---------------+----------+------------+-------------+-------------------+-------+-----------+-----------+-----------------+",
-            "| p1            | 42       | t1         | c1          | OpenMutableBuffer | 55    | bar       | foo       | 11              |",
-            "| p1            | 42       | t1         | c2          | OpenMutableBuffer | 66    | 11        | 43        |                 |",
-            "| p1            | 42       | t1         | __other     | OpenMutableBuffer |       |           |           | 13              |",
-            "| p1            | 43       | t1         | c2          | OpenMutableBuffer | 667   | 110       | 430       | 300             |",
-            "| p1            | 44       | t2         | c3          |                   | 4     | -1        | 2         |                 |",
+            "| p1            | 42       | t1         | c1          | ReadBuffer        | 55    | bar       | foo       | 11              |",
+            "| p1            | 42       | t1         | c2          | ReadBuffer        | 66    | 11        | 43        | 12              |",
+            "| p1            | 42       | t1         | __other     | ReadBuffer        |       |           |           | 13              |",
+            "| p2            | 43       | t1         | c2          | OpenMutableBuffer | 667   | 110       | 430       |                 |",
+            "| p2            | 43       | t1         | c1          | OpenMutableBuffer |       |           |           | 100             |",
+            "| p2            | 44       | t2         | c3          | OpenMutableBuffer | 4     | -1        | 2         | 200             |",
             "+---------------+----------+------------+-------------+-------------------+-------+-----------+-----------+-----------------+",
         ];
 
