@@ -278,7 +278,7 @@ fn assemble_chunk_columns(
         .collect();
 
     /// Builds an index from column_name -> size
-    fn make_column_index(summary: &DetailedChunkSummary) -> HashMap<&String, u64> {
+    fn make_column_index(summary: &DetailedChunkSummary) -> HashMap<&str, u64> {
         summary
             .columns
             .iter()
@@ -310,7 +310,11 @@ fn assemble_chunk_columns(
     for partition in partitions {
         for chunk_table in partition.tables {
             let table = &chunk_table.table;
-            let key = (&partition.key, chunk_table.chunk_id, &table.name);
+            let key = (
+                partition.key.as_str(),
+                chunk_table.chunk_id,
+                table.name.as_str(),
+            );
 
             // TODO remove this following code and generate an
             // internal error if chunk_summary_map has no entry for the key
@@ -346,7 +350,7 @@ fn assemble_chunk_columns(
                     max_values.append(false)?;
                 }
 
-                let size = column_index.remove(&column.name);
+                let size = column_index.remove(column.name.as_str());
 
                 estimated_bytes.append_option(size)?;
             }
@@ -721,8 +725,8 @@ mod tests {
         let chunk_summaries = vec![
             DetailedChunkSummary {
                 inner: ChunkSummary {
-                    partition_key: Arc::new("p1".to_string()),
-                    table_name: Arc::new("t1".to_string()),
+                    partition_key: "p1".into(),
+                    table_name: "t1".into(),
                     id: 42,
                     storage: ChunkStorage::OpenMutableBuffer,
                     estimated_bytes: 23754,
@@ -733,19 +737,19 @@ mod tests {
                 },
                 columns: vec![
                     ChunkColumnSummary {
-                        name: Arc::new("c1".to_string()),
+                        name: "c1".into(),
                         estimated_bytes: 11,
                     },
                     ChunkColumnSummary {
-                        name: Arc::new("__other".to_string()),
+                        name: "__other".into(),
                         estimated_bytes: 13,
                     },
                 ],
             },
             DetailedChunkSummary {
                 inner: ChunkSummary {
-                    partition_key: Arc::new("p1".to_string()),
-                    table_name: Arc::new("t1".to_string()),
+                    partition_key: "p1".into(),
+                    table_name: "t1".into(),
                     id: 43,
                     storage: ChunkStorage::OpenMutableBuffer,
                     estimated_bytes: 23754,
@@ -757,11 +761,11 @@ mod tests {
                 // two entries for c2 (they need to be aggregated)
                 columns: vec![
                     ChunkColumnSummary {
-                        name: Arc::new("c2".to_string()),
+                        name: "c2".into(),
                         estimated_bytes: 100,
                     },
                     ChunkColumnSummary {
-                        name: Arc::new("c2".to_string()),
+                        name: "c2".into(),
                         estimated_bytes: 200,
                     },
                 ],

@@ -150,7 +150,7 @@ impl Table {
             .iter()
             .flat_map(|rg| rg.column_sizes())
             .map(|(name, estimated_bytes)| ChunkColumnSummary {
-                name: Arc::new(name.to_string()),
+                name: name.into(),
                 estimated_bytes,
             })
             .collect()

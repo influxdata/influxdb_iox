@@ -76,7 +76,7 @@ pub struct ChunkSummary {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ChunkColumnSummary {
     /// Column name
-    pub name: Arc<String>,
+    pub name: Arc<str>,
 
     /// Estimated size, in bytes, consumed by this column.
     pub estimated_bytes: usize,
@@ -156,8 +156,8 @@ mod test {
     fn coalesce_summary() {
         let mut detailed_summary = DetailedChunkSummary {
             inner: ChunkSummary {
-                partition_key: Arc::new("foo".to_string()),
-                table_name: Arc::new("bar".to_string()),
+                partition_key: Arc::from("foo"),
+                table_name: Arc::from("bar"),
                 id: 42,
                 estimated_bytes: 1234,
                 row_count: 321,
@@ -168,23 +168,23 @@ mod test {
             },
             columns: vec![
                 ChunkColumnSummary {
-                    name: Arc::new("c3".to_string()),
+                    name: Arc::from("c3"),
                     estimated_bytes: 1000,
                 },
                 ChunkColumnSummary {
-                    name: Arc::new("c1".to_string()),
+                    name: Arc::from("c1"),
                     estimated_bytes: 11,
                 },
                 ChunkColumnSummary {
-                    name: Arc::new("c2".to_string()),
+                    name: Arc::from("c2"),
                     estimated_bytes: 100,
                 },
                 ChunkColumnSummary {
-                    name: Arc::new("c2".to_string()),
+                    name: Arc::from("c2"),
                     estimated_bytes: 200,
                 },
                 ChunkColumnSummary {
-                    name: Arc::new("c1".to_string()),
+                    name: Arc::from("c1"),
                     estimated_bytes: 200,
                 },
             ],
@@ -194,15 +194,15 @@ mod test {
             inner: detailed_summary.inner.clone(),
             columns: vec![
                 ChunkColumnSummary {
-                    name: Arc::new("c1".to_string()),
+                    name: Arc::from("c1"),
                     estimated_bytes: 211,
                 },
                 ChunkColumnSummary {
-                    name: Arc::new("c2".to_string()),
+                    name: Arc::from("c2"),
                     estimated_bytes: 300,
                 },
                 ChunkColumnSummary {
-                    name: Arc::new("c3".to_string()),
+                    name: Arc::from("c3"),
                     estimated_bytes: 1000,
                 },
             ],

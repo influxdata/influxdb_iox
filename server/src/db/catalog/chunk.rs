@@ -266,7 +266,7 @@ impl Chunk {
 
         fn to_summary(v: (&str, usize)) -> ChunkColumnSummary {
             ChunkColumnSummary {
-                name: Arc::new(v.0.to_string()),
+                name: v.0.into(),
                 estimated_bytes: v.1,
             }
         }
