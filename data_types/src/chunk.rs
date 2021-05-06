@@ -92,38 +92,6 @@ pub struct DetailedChunkSummary {
     pub columns: Vec<ChunkColumnSummary>,
 }
 
-impl DetailedChunkSummary {
-    /// aggregates any duplicate entries in `columns`
-    pub fn coalesce(&mut self) {
-        self.columns.sort_by(|c1, c2| c1.name.cmp(&c2.name));
-        let has_dupes = self
-            .columns
-            .iter()
-            .zip(self.columns.iter().skip(1))
-            .any(|(c1, c2)| c1.name == c2.name);
-
-        if has_dupes {
-            let mut t = Vec::new();
-            std::mem::swap(&mut self.columns, &mut t);
-            let mut deduplicated = t
-                .into_iter()
-                .fold(std::collections::BTreeMap::new(), |mut map, c| {
-                    let entry = map.entry(c.name).or_insert(0);
-                    *entry += c.estimated_bytes;
-                    map
-                })
-                // now we have a hash map with the aggregated values
-                .into_iter()
-                .map(|(name, estimated_bytes)| ChunkColumnSummary {
-                    name,
-                    estimated_bytes,
-                })
-                .collect::<Vec<_>>();
-            std::mem::swap(&mut self.columns, &mut deduplicated);
-        }
-    }
-}
-
 impl ChunkSummary {
     /// Construct a ChunkSummary that has None for all timestamps
     pub fn new_without_timestamps(
@@ -145,72 +113,5 @@ impl ChunkSummary {
             time_of_last_write: None,
             time_closed: None,
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn coalesce_summary() {
-        let mut detailed_summary = DetailedChunkSummary {
-            inner: ChunkSummary {
-                partition_key: Arc::from("foo"),
-                table_name: Arc::from("bar"),
-                id: 42,
-                estimated_bytes: 1234,
-                row_count: 321,
-                storage: ChunkStorage::ObjectStoreOnly,
-                time_of_first_write: None,
-                time_of_last_write: None,
-                time_closed: None,
-            },
-            columns: vec![
-                ChunkColumnSummary {
-                    name: Arc::from("c3"),
-                    estimated_bytes: 1000,
-                },
-                ChunkColumnSummary {
-                    name: Arc::from("c1"),
-                    estimated_bytes: 11,
-                },
-                ChunkColumnSummary {
-                    name: Arc::from("c2"),
-                    estimated_bytes: 100,
-                },
-                ChunkColumnSummary {
-                    name: Arc::from("c2"),
-                    estimated_bytes: 200,
-                },
-                ChunkColumnSummary {
-                    name: Arc::from("c1"),
-                    estimated_bytes: 200,
-                },
-            ],
-        };
-
-        let expected = DetailedChunkSummary {
-            inner: detailed_summary.inner.clone(),
-            columns: vec![
-                ChunkColumnSummary {
-                    name: Arc::from("c1"),
-                    estimated_bytes: 211,
-                },
-                ChunkColumnSummary {
-                    name: Arc::from("c2"),
-                    estimated_bytes: 300,
-                },
-                ChunkColumnSummary {
-                    name: Arc::from("c3"),
-                    estimated_bytes: 1000,
-                },
-            ],
-        };
-
-        assert_ne!(&detailed_summary, &expected);
-
-        detailed_summary.coalesce();
-        assert_eq!(&detailed_summary, &expected);
     }
 }
