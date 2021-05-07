@@ -71,7 +71,7 @@ impl SystemSchemaProvider {
             inner: ChunkColumnsTable::new(catalog),
         });
         let operations = Arc::new(SystemTableProvider {
-            inner: OperationsTable::new(db_name.into(), jobs),
+            inner: OperationsTable::new(db_name, jobs),
         });
         Self {
             chunks,
