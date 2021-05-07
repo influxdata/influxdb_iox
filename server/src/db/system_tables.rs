@@ -26,7 +26,7 @@ use data_types::{
 };
 use datafusion::{
     catalog::schema::SchemaProvider,
-    datasource::{datasource::Statistics, MemTable, TableProvider},
+    datasource::{datasource::Statistics, TableProvider},
     error::{DataFusionError, Result as DataFusionResult},
     physical_plan::{memory::MemoryExec, ExecutionPlan},
 };
@@ -44,12 +44,10 @@ const CHUNK_COLUMNS: &str = "chunk_columns";
 const OPERATIONS: &str = "operations";
 
 pub struct SystemSchemaProvider {
-    db_name: String,
-    jobs: Arc<JobRegistry>,
-
     chunks: Arc<dyn TableProvider>,
     columns: Arc<dyn TableProvider>,
     chunk_columns: Arc<dyn TableProvider>,
+    operations: Arc<dyn TableProvider>,
 }
 
 impl std::fmt::Debug for SystemSchemaProvider {
@@ -72,12 +70,14 @@ impl SystemSchemaProvider {
         let chunk_columns = Arc::new(SystemTableProvider {
             inner: ChunkColumnsTable::new(catalog),
         });
+        let operations = Arc::new(SystemTableProvider {
+            inner: OperationsTable::new(db_name.into(), jobs),
+        });
         Self {
-            db_name,
-            jobs,
             chunks,
             columns,
             chunk_columns,
+            operations,
         }
     }
 }
@@ -98,25 +98,12 @@ impl SchemaProvider for SystemSchemaProvider {
 
     fn table(&self, name: &str) -> Option<Arc<dyn TableProvider>> {
         match name {
-            CHUNKS => return Some(Arc::clone(&self.chunks)),
-            COLUMNS => return Some(Arc::clone(&self.columns)),
-            CHUNK_COLUMNS => return Some(Arc::clone(&self.chunk_columns)),
-            _ => {}
-        };
-
-        // TEMP
-        let batch = match name {
-            OPERATIONS => from_task_trackers(&self.db_name, self.jobs.tracked())
-                .log_if_error("operations table")
-                .ok()?,
-            _ => return None,
-        };
-
-        let table = MemTable::try_new(batch.schema(), vec![vec![batch]])
-            .log_if_error("constructing chunks system table")
-            .ok()?;
-
-        Some(Arc::<MemTable>::new(table))
+            CHUNKS => Some(Arc::clone(&self.chunks)),
+            COLUMNS => Some(Arc::clone(&self.columns)),
+            CHUNK_COLUMNS => Some(Arc::clone(&self.chunk_columns)),
+            OPERATIONS => Some(Arc::clone(&self.operations)),
+            _ => None,
+        }
     }
 }
 
@@ -490,7 +477,52 @@ fn assemble_chunk_columns(
     )
 }
 
-fn from_task_trackers(db_name: &str, jobs: Vec<TaskTracker<Job>>) -> Result<RecordBatch> {
+/// Implementation of system.operations table
+#[derive(Debug)]
+struct OperationsTable {
+    schema: SchemaRef,
+    db_name: String,
+    jobs: Arc<JobRegistry>,
+}
+
+impl OperationsTable {
+    fn new(db_name: String, jobs: Arc<JobRegistry>) -> Self {
+        Self {
+            schema: operations_schema(),
+            db_name,
+            jobs,
+        }
+    }
+}
+
+impl IoxSystemTable for OperationsTable {
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
+
+    fn batch(&self) -> Result<RecordBatch> {
+        from_task_trackers(self.schema(), &self.db_name, self.jobs.tracked())
+    }
+}
+
+fn operations_schema() -> SchemaRef {
+    let ts = DataType::Time64(TimeUnit::Nanosecond);
+    Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Utf8, false),
+        Field::new("status", DataType::Utf8, true),
+        Field::new("cpu_time_used", ts.clone(), true),
+        Field::new("wall_time_used", ts, true),
+        Field::new("partition_key", DataType::Utf8, true),
+        Field::new("chunk_id", DataType::UInt32, true),
+        Field::new("description", DataType::Utf8, false),
+    ]))
+}
+
+fn from_task_trackers(
+    schema: SchemaRef,
+    db_name: &str,
+    jobs: Vec<TaskTracker<Job>>,
+) -> Result<RecordBatch> {
     let jobs = jobs
         .into_iter()
         .filter(|job| job.metadata().db_name() == Some(db_name))
@@ -512,15 +544,18 @@ fn from_task_trackers(db_name: &str, jobs: Vec<TaskTracker<Job>>) -> Result<Reco
     let descriptions =
         StringArray::from_iter(jobs.iter().map(|job| Some(job.metadata().description())));
 
-    RecordBatch::try_from_iter_with_nullable(vec![
-        ("id", Arc::new(ids) as ArrayRef, false),
-        ("status", Arc::new(statuses), true),
-        ("cpu_time_used", Arc::new(cpu_time_used), true),
-        ("wall_time_used", Arc::new(wall_time_used), true),
-        ("partition_key", Arc::new(partition_keys), true),
-        ("chunk_id", Arc::new(chunk_ids), true),
-        ("description", Arc::new(descriptions), true),
-    ])
+    RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(ids) as ArrayRef,
+            Arc::new(statuses),
+            Arc::new(cpu_time_used),
+            Arc::new(wall_time_used),
+            Arc::new(partition_keys),
+            Arc::new(chunk_ids),
+            Arc::new(descriptions),
+        ],
+    )
 }
 
 /// Creates a DataFusion ExecutionPlan node that scans a single batch
