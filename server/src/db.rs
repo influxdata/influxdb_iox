@@ -419,27 +419,23 @@ impl Db {
         metrics: Arc<MetricRegistry>,
     ) -> Self {
         let db_name = rules.name.clone();
-        let rules = RwLock::new(rules);
-        let server_id = server_id;
-        let store = Arc::clone(&object_store);
-        let write_buffer = write_buffer.map(Mutex::new);
-        let catalog = Arc::new(Catalog::new());
-        let system_tables =
-            SystemSchemaProvider::new(&db_name, Arc::clone(&catalog), Arc::clone(&jobs));
-        let system_tables = Arc::new(system_tables);
+        let domain = metrics.register_domain_with_labels(
+            "catalog",
+            vec![
+                metrics::KeyValue::new("db_name", db_name.to_string()),
+                metrics::KeyValue::new("svr_id", format!("{}", server_id)),
+            ],
+        );
 
-        let domain = metrics.register_domain("catalog");
-        let default_labels = vec![
-            metrics::KeyValue::new("db_name", db_name.to_string()),
-            metrics::KeyValue::new("svr_id", format!("{}", server_id)),
-        ];
+        let memory_registries = Default::default();
+        domain.register_observer(None, &[], &memory_registries);
 
         let db_metrics = DbMetrics {
             catalog_chunks: domain.register_counter_metric_with_labels(
                 "chunks",
                 None,
                 "In-memory chunks created in various life-cycle stages",
-                default_labels.clone(),
+                vec![],
             ),
             catalog_immutable_chunk_bytes: domain
                 .register_histogram_metric(
@@ -448,25 +444,23 @@ impl Db {
                     "bytes",
                     "The new size of an immutable chunk",
                 )
-                .with_labels(default_labels.clone())
                 .init(),
             catalog_chunk_bytes: domain.register_gauge_metric_with_labels(
                 "chunk_size",
                 Some("bytes"),
                 "The size in bytes of all chunks",
-                default_labels,
+                vec![],
             ),
         };
 
-        let memory_registries = Default::default();
-        domain.register_observer(
-            None,
-            &[
-                metrics::KeyValue::new("db_name", db_name.to_string()),
-                metrics::KeyValue::new("svr_id", format!("{}", server_id)),
-            ],
-            &memory_registries,
-        );
+        let rules = RwLock::new(rules);
+        let server_id = server_id;
+        let store = Arc::clone(&object_store);
+        let write_buffer = write_buffer.map(Mutex::new);
+        let catalog = Arc::new(Catalog::new(domain));
+        let system_tables =
+            SystemSchemaProvider::new(&db_name, Arc::clone(&catalog), Arc::clone(&jobs));
+        let system_tables = Arc::new(system_tables);
 
         Self {
             rules,
