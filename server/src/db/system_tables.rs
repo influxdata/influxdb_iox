@@ -1,4 +1,4 @@
-//! Contains implementation of IOx name: (), stats: () system tabl stats: () stats: ()es (aka tables in the `system` schema)
+//! Contains implementation of IOx name: (), stats: () system table stats: () stats: ()es (aka tables in the `system` schema)
 //!
 //! For example `SELECT * FROM system.chunks`
 
@@ -298,7 +298,7 @@ fn assemble_chunk_columns(
     let mut max_values = StringBuilder::new(row_estimate);
     let mut estimated_bytes = UInt64Builder::new(row_estimate);
 
-    // Note no rows are produced for partitions with no tabes, or
+    // Note no rows are produced for partitions with no tables, or
     // tables with no columns: There are other tables to list tables
     // and columns
     for partition in partitions {

@@ -170,11 +170,10 @@ impl Chunk {
         Self::base_size() + table_data.size()
     }
 
-    /// Return the estimated size, for each column in the specific table
-    /// if no such table exists in this chunk, an empty Vec is returned
+    /// Return the estimated size for each column in the specific table.
+    /// Note there may be multiple entries for each column.
     ///
-    /// The estimated size for each column in this table. Note there
-    /// may be multiple entries for each column.
+    /// If no such table exists in this chunk, an empty Vec is returned.
     pub fn column_sizes(&self, table_name: &str) -> Vec<ChunkColumnSummary> {
         let chunk_data = self.chunk_data.read();
         chunk_data
