@@ -179,8 +179,8 @@ impl IoxSystemTable for ChunksTable {
     }
 
     fn batch(&self) -> Result<RecordBatch> {
-        let chunks = self.catalog.chunk_summaries();
-        from_chunk_summaries(self.schema(), chunks)
+        from_chunk_summaries(self.schema(), self.catalog.chunk_summaries())
+            .log_if_error("system.chunks table")
     }
 }
 
@@ -255,6 +255,7 @@ impl IoxSystemTable for ColumnsTable {
     }
     fn batch(&self) -> Result<RecordBatch> {
         from_partition_summaries(self.schema(), self.catalog.partition_summaries())
+            .log_if_error("system.columns table")
     }
 }
 
@@ -339,6 +340,7 @@ impl IoxSystemTable for ChunkColumnsTable {
             self.catalog.unaggregated_partition_summaries(),
             self.catalog.detailed_chunk_summaries(),
         )
+        .log_if_error("system.column_chunks table")
     }
 }
 
@@ -502,6 +504,7 @@ impl IoxSystemTable for OperationsTable {
 
     fn batch(&self) -> Result<RecordBatch> {
         from_task_trackers(self.schema(), &self.db_name, self.jobs.tracked())
+            .log_if_error("system.operations table")
     }
 }
 
