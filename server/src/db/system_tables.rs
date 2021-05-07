@@ -43,24 +43,41 @@ const COLUMNS: &str = "columns";
 const CHUNK_COLUMNS: &str = "chunk_columns";
 const OPERATIONS: &str = "operations";
 
-#[derive(Debug)]
 pub struct SystemSchemaProvider {
     db_name: String,
     catalog: Arc<Catalog>,
     jobs: Arc<JobRegistry>,
 
-    chunks: Arc<ChunksProvider>,
+    /// system.chunks
+    chunks: Arc<dyn TableProvider>,
+
+    /// system.columns
+    columns: Arc<dyn TableProvider>,
+}
+
+impl std::fmt::Debug for SystemSchemaProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SystemSchemaProvider")
+            .field("fields", &"...")
+            .finish()
+    }
 }
 
 impl SystemSchemaProvider {
     pub fn new(db_name: impl Into<String>, catalog: Arc<Catalog>, jobs: Arc<JobRegistry>) -> Self {
         let db_name = db_name.into();
-        let chunks = Arc::new(ChunksProvider::new(Arc::clone(&catalog)));
+        let chunks = Arc::new(SystemTableProvider {
+            inner: ChunksTable::new(Arc::clone(&catalog)),
+        });
+        let columns = Arc::new(SystemTableProvider {
+            inner: ColumnsTable::new(Arc::clone(&catalog)),
+        });
         Self {
             db_name,
             catalog,
             jobs,
             chunks,
+            columns,
         }
     }
 }
@@ -80,11 +97,13 @@ impl SchemaProvider for SystemSchemaProvider {
     }
 
     fn table(&self, name: &str) -> Option<Arc<dyn TableProvider>> {
-        // TODO: Use of a MemTable potentially results in materializing redundant data
-        if name == CHUNKS {
-            return Some(Arc::clone(&self.chunks) as Arc<dyn TableProvider>);
-        }
+        match name {
+            CHUNKS => return Some(Arc::clone(&self.chunks)),
+            COLUMNS => return Some(Arc::clone(&self.columns)),
+            _ => {}
+        };
 
+        // TEMP
         let batch = match name {
             CHUNK_COLUMNS => assemble_chunk_columns(
                 self.catalog.unaggregated_partition_summaries(),
@@ -92,9 +111,6 @@ impl SchemaProvider for SystemSchemaProvider {
             )
             .log_if_error("chunk_columns table")
             .ok()?,
-            COLUMNS => from_partition_summaries(self.catalog.partition_summaries())
-                .log_if_error("chunks table")
-                .ok()?,
             OPERATIONS => from_task_trackers(&self.db_name, self.jobs.tracked())
                 .log_if_error("operations table")
                 .ok()?,
@@ -109,6 +125,51 @@ impl SchemaProvider for SystemSchemaProvider {
     }
 }
 
+/// The minimal thing that a system table needs to implement
+trait IoxSystemTable: Send + Sync {
+    /// Produce the schema from this system table
+    fn schema(&self) -> SchemaRef;
+
+    /// Get the contents of the system table as a single RecordBatch
+    fn batch(&self) -> Result<RecordBatch>;
+}
+
+/// Adapter that makes any `IoxSystemTable` a DataFusion `TableProvider`
+struct SystemTableProvider<T>
+where
+    T: IoxSystemTable,
+{
+    inner: T,
+}
+
+impl<T> TableProvider for SystemTableProvider<T>
+where
+    T: IoxSystemTable + 'static,
+{
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn schema(&self) -> SchemaRef {
+        self.inner.schema()
+    }
+
+    fn scan(
+        &self,
+        projection: &Option<Vec<usize>>,
+        _batch_size: usize,
+        // It would be cool to push projection and limit down
+        _filters: &[datafusion::logical_plan::Expr],
+        _limit: Option<usize>,
+    ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+        scan_batch(self.inner.batch()?, self.schema(), projection.as_ref())
+    }
+
+    fn statistics(&self) -> Statistics {
+        Statistics::default()
+    }
+}
+
 // TODO: Use a custom proc macro or serde to reduce the boilerplate
 fn time_to_ts(time: Option<DateTime<Utc>>) -> Option<i64> {
     time.map(|ts| ts.timestamp_nanos())
@@ -116,20 +177,26 @@ fn time_to_ts(time: Option<DateTime<Utc>>) -> Option<i64> {
 
 /// Implementation of system.chunks table
 #[derive(Debug)]
-struct ChunksProvider {
+struct ChunksTable {
     schema: SchemaRef,
     catalog: Arc<Catalog>,
 }
 
-impl ChunksProvider {
+impl ChunksTable {
     fn new(catalog: Arc<Catalog>) -> Self {
         Self {
             schema: chunk_summaries_schema(),
             catalog,
         }
     }
+}
 
-    fn chunk_summaries(&self) -> Result<RecordBatch> {
+impl IoxSystemTable for ChunksTable {
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
+
+    fn batch(&self) -> Result<RecordBatch> {
         let chunks = self.catalog.chunk_summaries();
         from_chunk_summaries(self.schema(), chunks)
     }
@@ -184,33 +251,45 @@ fn from_chunk_summaries(schema: SchemaRef, chunks: Vec<ChunkSummary>) -> Result<
     )
 }
 
-impl TableProvider for ChunksProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
+/// Implementation of `system.columns` system table
+#[derive(Debug)]
+struct ColumnsTable {
+    schema: SchemaRef,
+    catalog: Arc<Catalog>,
+}
 
-    fn schema(&self) -> arrow::datatypes::SchemaRef {
-        Arc::clone(&self.schema)
-    }
-
-    fn scan(
-        &self,
-        projection: &Option<Vec<usize>>,
-        _batch_size: usize,
-        // It would be cool to push projection and limit down
-        _filters: &[datafusion::logical_plan::Expr],
-        _limit: Option<usize>,
-    ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        let batch = self.chunk_summaries().log_if_error("chunks table")?;
-        scan_batch(batch, self.schema(), projection.as_ref())
-    }
-
-    fn statistics(&self) -> Statistics {
-        Statistics::default()
+impl ColumnsTable {
+    fn new(catalog: Arc<Catalog>) -> Self {
+        Self {
+            schema: partition_summaries_schema(),
+            catalog,
+        }
     }
 }
 
-fn from_partition_summaries(partitions: Vec<PartitionSummary>) -> Result<RecordBatch> {
+impl IoxSystemTable for ColumnsTable {
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
+    fn batch(&self) -> Result<RecordBatch> {
+        from_partition_summaries(self.schema(), self.catalog.partition_summaries())
+    }
+}
+
+fn partition_summaries_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("partition_key", DataType::Utf8, false),
+        Field::new("table_name", DataType::Utf8, false),
+        Field::new("column_name", DataType::Utf8, false),
+        Field::new("column_type", DataType::Utf8, false),
+        Field::new("influxdb_type", DataType::Utf8, false),
+    ]))
+}
+
+fn from_partition_summaries(
+    schema: SchemaRef,
+    partitions: Vec<PartitionSummary>,
+) -> Result<RecordBatch> {
     // Assume each partition has roughly 5 tables with 5 columns
     let row_estimate = partitions.len() * 25;
 
@@ -239,19 +318,16 @@ fn from_partition_summaries(partitions: Vec<PartitionSummary>) -> Result<RecordB
         }
     }
 
-    let partition_key = partition_key.finish();
-    let table_name = table_name.finish();
-    let column_name = column_name.finish();
-    let column_type = column_type.finish();
-    let influxdb_type = influxdb_type.finish();
-
-    RecordBatch::try_from_iter_with_nullable(vec![
-        ("partition_key", Arc::new(partition_key) as ArrayRef, false),
-        ("table_name", Arc::new(table_name), false),
-        ("column_name", Arc::new(column_name), false),
-        ("column_type", Arc::new(column_type), false),
-        ("influxdb_type", Arc::new(influxdb_type), true),
-    ])
+    RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(partition_key.finish()) as ArrayRef,
+            Arc::new(table_name.finish()),
+            Arc::new(column_name.finish()),
+            Arc::new(column_type.finish()),
+            Arc::new(influxdb_type.finish()),
+        ],
+    )
 }
 
 fn assemble_chunk_columns(
@@ -565,7 +641,7 @@ mod tests {
             "+---------------+------------+-------------+-------------+---------------+",
         ];
 
-        let batch = from_partition_summaries(partitions).unwrap();
+        let batch = from_partition_summaries(partition_summaries_schema(), partitions).unwrap();
         assert_batches_eq!(&expected, &[batch]);
     }
 
