@@ -45,14 +45,11 @@ const OPERATIONS: &str = "operations";
 
 pub struct SystemSchemaProvider {
     db_name: String,
-    catalog: Arc<Catalog>,
     jobs: Arc<JobRegistry>,
 
-    /// system.chunks
     chunks: Arc<dyn TableProvider>,
-
-    /// system.columns
     columns: Arc<dyn TableProvider>,
+    chunk_columns: Arc<dyn TableProvider>,
 }
 
 impl std::fmt::Debug for SystemSchemaProvider {
@@ -72,12 +69,15 @@ impl SystemSchemaProvider {
         let columns = Arc::new(SystemTableProvider {
             inner: ColumnsTable::new(Arc::clone(&catalog)),
         });
+        let chunk_columns = Arc::new(SystemTableProvider {
+            inner: ChunkColumnsTable::new(catalog),
+        });
         Self {
             db_name,
-            catalog,
             jobs,
             chunks,
             columns,
+            chunk_columns,
         }
     }
 }
@@ -100,17 +100,12 @@ impl SchemaProvider for SystemSchemaProvider {
         match name {
             CHUNKS => return Some(Arc::clone(&self.chunks)),
             COLUMNS => return Some(Arc::clone(&self.columns)),
+            CHUNK_COLUMNS => return Some(Arc::clone(&self.chunk_columns)),
             _ => {}
         };
 
         // TEMP
         let batch = match name {
-            CHUNK_COLUMNS => assemble_chunk_columns(
-                self.catalog.unaggregated_partition_summaries(),
-                self.catalog.detailed_chunk_summaries(),
-            )
-            .log_if_error("chunk_columns table")
-            .ok()?,
             OPERATIONS => from_task_trackers(&self.db_name, self.jobs.tracked())
                 .log_if_error("operations table")
                 .ok()?,
@@ -330,7 +325,52 @@ fn from_partition_summaries(
     )
 }
 
+/// Implementation of system.column_chunks table
+#[derive(Debug)]
+struct ChunkColumnsTable {
+    schema: SchemaRef,
+    catalog: Arc<Catalog>,
+}
+
+impl ChunkColumnsTable {
+    fn new(catalog: Arc<Catalog>) -> Self {
+        Self {
+            schema: chunk_columns_schema(),
+            catalog,
+        }
+    }
+}
+
+impl IoxSystemTable for ChunkColumnsTable {
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
+
+    fn batch(&self) -> Result<RecordBatch> {
+        assemble_chunk_columns(
+            self.schema(),
+            self.catalog.unaggregated_partition_summaries(),
+            self.catalog.detailed_chunk_summaries(),
+        )
+    }
+}
+
+fn chunk_columns_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("partition_key", DataType::Utf8, false),
+        Field::new("chunk_id", DataType::UInt32, false),
+        Field::new("table_name", DataType::Utf8, false),
+        Field::new("column_name", DataType::Utf8, false),
+        Field::new("storage", DataType::Utf8, false),
+        Field::new("count", DataType::UInt64, false),
+        Field::new("min_value", DataType::Utf8, false),
+        Field::new("max_value", DataType::Utf8, false),
+        Field::new("estimated_bytes", DataType::UInt64, false),
+    ]))
+}
+
 fn assemble_chunk_columns(
+    schema: SchemaRef,
     partitions: Vec<UnaggregatedPartitionSummary>,
     chunk_summaries: Vec<DetailedChunkSummary>,
 ) -> Result<RecordBatch> {
@@ -434,21 +474,20 @@ fn assemble_chunk_columns(
         }
     }
 
-    RecordBatch::try_from_iter_with_nullable(vec![
-        (
-            "partition_key",
+    RecordBatch::try_new(
+        schema,
+        vec![
             Arc::new(partition_key.finish()) as ArrayRef,
-            false,
-        ),
-        ("chunk_id", Arc::new(chunk_id.finish()), false),
-        ("table_name", Arc::new(table_name.finish()), false),
-        ("column_name", Arc::new(column_name.finish()), false),
-        ("storage", Arc::new(storage.finish()), false),
-        ("count", Arc::new(count.finish()), false),
-        ("min_value", Arc::new(min_values.finish()), true),
-        ("max_value", Arc::new(max_values.finish()), true),
-        ("estimated_bytes", Arc::new(estimated_bytes.finish()), true),
-    ])
+            Arc::new(chunk_id.finish()),
+            Arc::new(table_name.finish()),
+            Arc::new(column_name.finish()),
+            Arc::new(storage.finish()),
+            Arc::new(count.finish()),
+            Arc::new(min_values.finish()),
+            Arc::new(max_values.finish()),
+            Arc::new(estimated_bytes.finish()),
+        ],
+    )
 }
 
 fn from_task_trackers(db_name: &str, jobs: Vec<TaskTracker<Job>>) -> Result<RecordBatch> {
@@ -860,7 +899,8 @@ mod tests {
             "+---------------+----------+------------+-------------+-------------------+-------+-----------+-----------+-----------------+",
         ];
 
-        let batch = assemble_chunk_columns(partitions, chunk_summaries).unwrap();
+        let batch =
+            assemble_chunk_columns(chunk_columns_schema(), partitions, chunk_summaries).unwrap();
         assert_batches_eq!(&expected, &[batch]);
     }
 }
