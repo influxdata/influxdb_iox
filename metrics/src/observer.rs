@@ -49,10 +49,10 @@ enum Callbacks {
 impl std::fmt::Debug for Callbacks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
-            Callbacks::U64Value(_) => write!(f, "U64Value"),
-            Callbacks::U64Sum(_) => write!(f, "U64Sum"),
-            Callbacks::F64Value(_) => write!(f, "F64Value"),
-            Callbacks::F64Sum(_) => write!(f, "F64Sum"),
+            Self::U64Value(_) => write!(f, "U64Value"),
+            Self::U64Sum(_) => write!(f, "U64Sum"),
+            Self::F64Value(_) => write!(f, "F64Value"),
+            Self::F64Sum(_) => write!(f, "F64Sum"),
         }
     }
 }
