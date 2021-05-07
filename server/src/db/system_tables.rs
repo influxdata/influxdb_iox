@@ -264,7 +264,7 @@ fn partition_summaries_schema() -> SchemaRef {
         Field::new("table_name", DataType::Utf8, false),
         Field::new("column_name", DataType::Utf8, false),
         Field::new("column_type", DataType::Utf8, false),
-        Field::new("influxdb_type", DataType::Utf8, false),
+        Field::new("influxdb_type", DataType::Utf8, true),
     ]))
 }
 
@@ -349,10 +349,10 @@ fn chunk_columns_schema() -> SchemaRef {
         Field::new("table_name", DataType::Utf8, false),
         Field::new("column_name", DataType::Utf8, false),
         Field::new("storage", DataType::Utf8, false),
-        Field::new("count", DataType::UInt64, false),
-        Field::new("min_value", DataType::Utf8, false),
-        Field::new("max_value", DataType::Utf8, false),
-        Field::new("estimated_bytes", DataType::UInt64, false),
+        Field::new("count", DataType::UInt64, true),
+        Field::new("min_value", DataType::Utf8, true),
+        Field::new("max_value", DataType::Utf8, true),
+        Field::new("estimated_bytes", DataType::UInt64, true),
     ]))
 }
 
@@ -514,7 +514,7 @@ fn operations_schema() -> SchemaRef {
         Field::new("wall_time_used", ts, true),
         Field::new("partition_key", DataType::Utf8, true),
         Field::new("chunk_id", DataType::UInt32, true),
-        Field::new("description", DataType::Utf8, false),
+        Field::new("description", DataType::Utf8, true),
     ]))
 }
 
