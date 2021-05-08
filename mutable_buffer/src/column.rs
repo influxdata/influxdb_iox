@@ -1,10 +1,9 @@
+use std::iter::FromIterator;
+use std::mem;
+use std::sync::Arc;
+
 use snafu::{ensure, Snafu};
 
-use crate::dictionary::{Dictionary, DID};
-use data_types::partition_metadata::{StatValues, Statistics};
-use entry::Column as EntryColumn;
-
-use crate::bitset::{iter_set_positions, BitSet};
 use arrow::{
     array::{
         ArrayData, ArrayDataBuilder, ArrayRef, BooleanArray, DictionaryArray, Float64Array,
@@ -12,10 +11,12 @@ use arrow::{
     },
     datatypes::{DataType, Int32Type},
 };
+use arrow_util::bitset::{iter_set_positions, BitSet};
+use data_types::partition_metadata::{StatValues, Statistics};
+use entry::Column as EntryColumn;
 use internal_types::schema::{InfluxColumnType, InfluxFieldType, TIME_DATA_TYPE};
-use std::iter::FromIterator;
-use std::mem;
-use std::sync::Arc;
+
+use crate::dictionary::{Dictionary, DID};
 
 #[derive(Debug, Snafu)]
 #[allow(missing_copy_implementations)]
@@ -80,9 +81,7 @@ impl Column {
             InfluxColumnType::Field(InfluxFieldType::String) => {
                 ColumnData::String(vec![String::new(); row_count], StatValues::default())
             }
-            InfluxColumnType::Tag => {
-                ColumnData::Tag(vec![DID::invalid(); row_count], StatValues::default())
-            }
+            InfluxColumnType::Tag => ColumnData::Tag(vec![-1; row_count], StatValues::default()),
         };
 
         Self {
@@ -200,7 +199,7 @@ impl Column {
                     .expect("invalid payload");
 
                 let data_offset = col_data.len();
-                col_data.resize(data_offset + row_count, DID::invalid());
+                col_data.resize(data_offset + row_count, -1);
 
                 let initial_non_null_count = stats.count;
                 let to_add = entry_data.len();
@@ -232,7 +231,7 @@ impl Column {
             ColumnData::U64(data, _) => data.resize(len, 0),
             ColumnData::String(data, _) => data.resize(len, String::new()),
             ColumnData::Bool(data, _) => data.append_unset(delta),
-            ColumnData::Tag(data, _) => data.resize(len, DID::invalid()),
+            ColumnData::Tag(data, _) => data.resize(len, -1),
         }
     }
 
@@ -335,7 +334,7 @@ impl Column {
                     Box::new(DataType::Utf8),
                 ))
                 .len(data.len())
-                .add_buffer(data.iter().map(|x| x.as_i32()).collect())
+                .add_buffer(data.iter().cloned().collect())
                 .null_bit_buffer(nulls)
                 .add_child_data(dictionary.clone())
                 .build();
