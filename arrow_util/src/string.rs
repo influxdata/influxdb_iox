@@ -4,7 +4,7 @@ use arrow::buffer::Buffer;
 use num_traits::{AsPrimitive, FromPrimitive, Zero};
 use std::fmt::Debug;
 
-/// A packed string array that stores start and and end indexes into
+/// A packed string array that stores start and end indexes into
 /// a contiguous string slice.
 ///
 /// The type parameter O alters the type used to store the offsets
@@ -55,7 +55,7 @@ impl<O: AsPrimitive<usize> + FromPrimitive + Zero> PackedStringArray<O> {
 
     /// Return the amount of memory in bytes taken up by this array
     pub fn size(&self) -> usize {
-        self.storage.len() + self.offsets.len() * std::mem::size_of::<i32>()
+        self.storage.len() + self.offsets.len() * std::mem::size_of::<O>()
     }
 }
 

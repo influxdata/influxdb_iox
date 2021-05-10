@@ -7,4 +7,4 @@
 #[allow(clippy::upper_case_acronyms)]
 pub type DID = i32;
 
-pub type Dictionary = arrow_util::dictionary::StringDictionary<i32>;
+pub type Dictionary = arrow_util::dictionary::StringDictionary<DID>;

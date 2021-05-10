@@ -79,8 +79,6 @@ impl<K: AsPrimitive<usize> + FromPrimitive + Zero> StringDictionary<K> {
     }
 
     /// Returns the ID in self.dictionary that corresponds to `value`, if any.
-    /// Returns an error if no such value is found. Does not add the value
-    /// to the dictionary.
     pub fn lookup_value(&self, value: &str) -> Option<K> {
         self.id(value)
     }
