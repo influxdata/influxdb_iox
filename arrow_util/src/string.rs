@@ -16,10 +16,10 @@ pub struct PackedStringArray<O> {
     storage: String,
 }
 
-impl<K: Zero> Default for PackedStringArray<K> {
+impl<O: Zero> Default for PackedStringArray<O> {
     fn default() -> Self {
         Self {
-            offsets: vec![K::zero()],
+            offsets: vec![O::zero()],
             storage: String::new(),
         }
     }
