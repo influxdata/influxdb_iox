@@ -228,7 +228,7 @@ impl Table {
             .iter()
             .map(|&column_name| {
                 let column_id = dictionary
-                    .id(column_name)
+                    .lookup_value(column_name)
                     .context(ColumnNameNotFoundInDictionary { column_name })?;
 
                 Ok(ColSelection {

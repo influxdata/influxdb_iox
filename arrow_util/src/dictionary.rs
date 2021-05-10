@@ -67,20 +67,13 @@ impl<K: AsPrimitive<usize> + FromPrimitive + Zero> StringDictionary<K> {
         }
     }
 
-    /// Returns the ID in self.dictionary that corresponds to `value`,
-    /// if any. No error is returned to avoid an allocation when no value is
-    /// present
-    pub fn id(&self, value: &str) -> Option<K> {
+    /// Returns the ID in self.dictionary that corresponds to `value`, if any.
+    pub fn lookup_value(&self, value: &str) -> Option<K> {
         let hash = hash_str(&self.hash, value);
         self.dedup
             .raw_entry()
             .from_hash(hash, |key| value == self.storage.get(key.as_()).unwrap())
             .map(|(&symbol, &())| symbol)
-    }
-
-    /// Returns the ID in self.dictionary that corresponds to `value`, if any.
-    pub fn lookup_value(&self, value: &str) -> Option<K> {
-        self.id(value)
     }
 
     /// Returns the str in self.dictionary that corresponds to `id`
@@ -133,7 +126,7 @@ mod test {
         assert_eq!(cupcake, "cupcake");
         assert_eq!(womble, "womble");
 
-        assert!(dictionary.id("foo").is_none());
+        assert!(dictionary.lookup_value("foo").is_none());
         assert!(dictionary.lookup_id(-1).is_none());
         assert_eq!(arrow_expected, arrow_actual);
     }
