@@ -12,9 +12,12 @@ use arrow::record_batch::RecordBatch;
 use data_types::{chunk::ChunkColumnSummary, partition_metadata::TableSummary};
 use internal_types::selection::Selection;
 
-use crate::row_group::{self, ColumnName, Predicate, RowGroup};
 use crate::schema::{AggregateType, ColumnType, LogicalDataType, ResultSchema};
 use crate::value::{OwnedValue, Scalar, Value};
+use crate::{
+    column,
+    row_group::{self, ColumnName, Predicate, RowGroup},
+};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -513,6 +516,16 @@ impl Table {
             .iter()
             .any(|row_group| row_group.satisfies_predicate(predicate))
     }
+
+    pub(crate) fn column_storage_statistics(&self) -> Vec<column::Statistics> {
+        let table_data = self.table_data.read();
+        table_data
+            .data
+            .iter()
+            .map(|rg| rg.column_storage_statistics())
+            .flatten()
+            .collect()
+    }
 }
 
 // TODO(edd): reduce owned strings here by, e.g., using references as keys.
@@ -661,32 +674,32 @@ impl MetaData {
                 let stats = match &column_meta.range {
                     (OwnedValue::String(min), OwnedValue::String(max)) => {
                         Statistics::String(StatValues {
-                            min: min.to_string(),
-                            max: max.to_string(),
+                            min: Some(min.to_string()),
+                            max: Some(max.to_string()),
                             count,
                         })
                     }
                     (OwnedValue::Boolean(min), OwnedValue::Boolean(max)) => {
                         Statistics::Bool(StatValues {
-                            min: *min,
-                            max: *max,
+                            min: Some(*min),
+                            max: Some(*max),
                             count,
                         })
                     }
                     (OwnedValue::Scalar(min), OwnedValue::Scalar(max)) => match (min, max) {
                         (Scalar::I64(min), Scalar::I64(max)) => Statistics::I64(StatValues {
-                            min: *min,
-                            max: *max,
+                            min: Some(*min),
+                            max: Some(*max),
                             count,
                         }),
                         (Scalar::U64(min), Scalar::U64(max)) => Statistics::U64(StatValues {
-                            min: *min,
-                            max: *max,
+                            min: Some(*min),
+                            max: Some(*max),
                             count,
                         }),
                         (Scalar::F64(min), Scalar::F64(max)) => Statistics::F64(StatValues {
-                            min: *min,
-                            max: *max,
+                            min: Some(*min),
+                            max: Some(*max),
                             count,
                         }),
                         _ => panic!(
