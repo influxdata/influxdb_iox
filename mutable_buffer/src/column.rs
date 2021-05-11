@@ -12,7 +12,7 @@ use arrow::{
     datatypes::{DataType, Int32Type},
 };
 use arrow_util::bitset::{iter_set_positions, BitSet};
-use data_types::partition_metadata::{StatValues, Statistics};
+use data_types::partition_metadata::{IsNan, StatValues, Statistics};
 use entry::Column as EntryColumn;
 use internal_types::schema::{InfluxColumnType, InfluxFieldType, TIME_DATA_TYPE};
 
@@ -389,7 +389,7 @@ fn handle_write<T, E>(
     col_data: &mut Vec<T>,
     stats: &mut StatValues<T>,
 ) where
-    T: Clone + Default + PartialOrd,
+    T: Clone + Default + PartialOrd + IsNan,
     E: Iterator<Item = T> + ExactSizeIterator,
 {
     let data_offset = col_data.len();
