@@ -61,21 +61,22 @@ impl ChunkSnapshot {
         let batch = table.to_arrow(&chunk.dictionary, Selection::All).unwrap();
         let name = chunk.table_name.as_ref();
 
-        let timestamp_range = chunk
-            .dictionary
-            .lookup_value(TIME_COLUMN_NAME)
-            .and_then(|column_id| {
-                table
-                    .column(column_id)
-                    .ok()
-                    .and_then(|column| match column.stats() {
-                        Statistics::I64(stats) => match (stats.min, stats.max) {
-                            (Some(min), Some(max)) => Some(TimestampRange::new(min, max)),
+        let timestamp_range =
+            chunk
+                .dictionary
+                .lookup_value(TIME_COLUMN_NAME)
+                .and_then(|column_id| {
+                    table
+                        .column(column_id)
+                        .ok()
+                        .and_then(|column| match column.stats() {
+                            Statistics::I64(stats) => match (stats.min, stats.max) {
+                                (Some(min), Some(max)) => Some(TimestampRange::new(min, max)),
+                                _ => None,
+                            },
                             _ => None,
-                        },
-                        _ => None,
-                    })
-            });
+                        })
+                });
 
         records.insert(
             name.to_string(),

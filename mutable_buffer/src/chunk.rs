@@ -217,7 +217,7 @@ impl Chunk {
 
     /// Return true if this chunk has the specified table name
     pub fn has_table(&self, table_name: &str) -> bool {
-        matches!(self.dictionary.lookup_value(table_name), Some(self.table.id))
+        table_name == self.table_name.as_ref()
     }
 }
 
