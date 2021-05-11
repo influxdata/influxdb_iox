@@ -8,7 +8,7 @@ use internal_types::selection::Selection;
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use super::Chunk;
-use data_types::partition_metadata::Statistics;
+use data_types::{error::ErrorLogger, partition_metadata::Statistics};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -57,8 +57,15 @@ impl ChunkSnapshot {
         let mut records: HashMap<String, TableSnapshot> = Default::default();
         let table = &chunk.table;
 
-        let schema = table.schema(&chunk.dictionary, Selection::All).unwrap();
-        let batch = table.to_arrow(&chunk.dictionary, Selection::All).unwrap();
+        let schema = table
+            .schema(&chunk.dictionary, Selection::All)
+            .log_if_error("ChunkSnapshot getting table schema")
+            .unwrap();
+        let batch = table
+            .to_arrow(&chunk.dictionary, Selection::All)
+            .log_if_error("ChunkSnapshot converting table to arrow")
+            .unwrap();
+
         let name = chunk.table_name.as_ref();
 
         let timestamp_range =
