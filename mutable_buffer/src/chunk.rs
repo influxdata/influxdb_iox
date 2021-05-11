@@ -78,7 +78,7 @@ impl Chunk {
         let table_name = table_name.as_ref();
         let mut dictionary = Dictionary::new();
         let table_id = dictionary.lookup_value_or_insert(table_name);
-        let table_name = Arc::from(table_name.as_ref());
+        let table_name = Arc::from(table_name);
 
         let mut chunk = Self {
             id,
