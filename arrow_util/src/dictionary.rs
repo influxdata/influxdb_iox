@@ -4,8 +4,8 @@ use hashbrown::HashMap;
 
 use crate::string::PackedStringArray;
 use num_traits::{AsPrimitive, FromPrimitive, Zero};
-use std::convert::TryFrom;
 use snafu::Snafu;
+use std::convert::TryFrom;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
