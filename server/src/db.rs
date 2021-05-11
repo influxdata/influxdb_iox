@@ -370,6 +370,11 @@ struct DbMetrics {
     // Tracks the current total size in bytes of all chunks in the catalog.
     // sizes are segmented by database and chunk location.
     catalog_chunk_bytes: metrics::Gauge,
+
+    // Metrics associated with Read Buffer chunks. Due to the behaviour of the
+    // open telemetry observers, we allocate a single source of metrics and push
+    // them into each new read buffer chunk.
+    read_buffer_chunk_metrics: Arc<read_buffer::ChunkMetrics>,
 }
 
 impl DbMetrics {
@@ -419,27 +424,23 @@ impl Db {
         metrics: Arc<MetricRegistry>,
     ) -> Self {
         let db_name = rules.name.clone();
-        let rules = RwLock::new(rules);
-        let server_id = server_id;
-        let store = Arc::clone(&object_store);
-        let write_buffer = write_buffer.map(Mutex::new);
-        let catalog = Arc::new(Catalog::new());
-        let system_tables =
-            SystemSchemaProvider::new(&db_name, Arc::clone(&catalog), Arc::clone(&jobs));
-        let system_tables = Arc::new(system_tables);
+        let domain = metrics.register_domain_with_labels(
+            "catalog",
+            vec![
+                metrics::KeyValue::new("db_name", db_name.to_string()),
+                metrics::KeyValue::new("svr_id", format!("{}", server_id)),
+            ],
+        );
 
-        let domain = metrics.register_domain("catalog");
-        let default_labels = vec![
-            metrics::KeyValue::new("db_name", db_name.to_string()),
-            metrics::KeyValue::new("svr_id", format!("{}", server_id)),
-        ];
+        let memory_registries = Default::default();
+        domain.register_observer(None, &[], &memory_registries);
 
         let db_metrics = DbMetrics {
             catalog_chunks: domain.register_counter_metric_with_labels(
                 "chunks",
                 None,
                 "In-memory chunks created in various life-cycle stages",
-                default_labels.clone(),
+                vec![],
             ),
             catalog_immutable_chunk_bytes: domain
                 .register_histogram_metric(
@@ -448,25 +449,27 @@ impl Db {
                     "bytes",
                     "The new size of an immutable chunk",
                 )
-                .with_labels(default_labels.clone())
                 .init(),
             catalog_chunk_bytes: domain.register_gauge_metric_with_labels(
                 "chunk_size",
                 Some("bytes"),
                 "The size in bytes of all chunks",
-                default_labels,
+                vec![],
             ),
+            read_buffer_chunk_metrics: Arc::new(read_buffer::ChunkMetrics::new_with_db(
+                &metrics,
+                db_name.to_string(),
+            )),
         };
 
-        let memory_registries = Default::default();
-        domain.register_observer(
-            None,
-            &[
-                metrics::KeyValue::new("db_name", db_name.to_string()),
-                metrics::KeyValue::new("svr_id", format!("{}", server_id)),
-            ],
-            &memory_registries,
-        );
+        let rules = RwLock::new(rules);
+        let server_id = server_id;
+        let store = Arc::clone(&object_store);
+        let write_buffer = write_buffer.map(Mutex::new);
+        let catalog = Arc::new(Catalog::new(domain));
+        let system_tables =
+            SystemSchemaProvider::new(&db_name, Arc::clone(&catalog), Arc::clone(&jobs));
+        let system_tables = Arc::new(system_tables);
 
         Self {
             rules,
@@ -679,7 +682,7 @@ impl Db {
         let rb_chunk = ReadBufferChunk::new_with_registries(
             chunk_id,
             &self.memory_registries.read_buffer,
-            &self.metrics_registry,
+            Arc::clone(&self.metrics.read_buffer_chunk_metrics),
         );
 
         // load table into the new chunk one by one.
@@ -1501,7 +1504,7 @@ mod tests {
         // verify chunk size updated (chunk moved from closing to moving to moved)
         catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "closed", 0).unwrap();
         catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "moving", 0).unwrap();
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "moved", 1318).unwrap();
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "moved", 1230).unwrap();
 
         db.write_chunk_to_object_store("1970-01-01T00", "cpu", 0)
             .await
@@ -1520,8 +1523,8 @@ mod tests {
             .eq(1.0)
             .unwrap();
 
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "moved", 1318).unwrap();
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "os", 2009).unwrap(); // now also in OS
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "moved", 1230).unwrap();
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "os", 1921).unwrap(); // now also in OS
 
         db.unload_read_buffer("1970-01-01T00", "cpu", 0)
             .await
@@ -1537,7 +1540,7 @@ mod tests {
             .unwrap();
 
         // verify chunk size not increased for OS (it was in OS before unload)
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "os", 2009).unwrap();
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "os", 1921).unwrap();
         // verify chunk size for RB has decreased
         catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "moved", 0).unwrap();
     }
@@ -1679,7 +1682,7 @@ mod tests {
             .unwrap();
 
         // verify chunk size updated (chunk moved from moved to writing to written)
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "moved", 1318).unwrap();
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "moved", 1230).unwrap();
 
         // drop, the chunk from the read buffer
         db.drop_chunk(partition_key, "cpu", mb_chunk.id()).unwrap();
@@ -1758,7 +1761,7 @@ mod tests {
                 ("svr_id", "1"),
             ])
             .histogram()
-            .sample_sum_eq(3635.0)
+            .sample_sum_eq(3547.0)
             .unwrap();
 
         let rb = collect_read_filter(&rb_chunk, "cpu").await;
@@ -1862,7 +1865,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(2009.0)
+            .sample_sum_eq(1921.0)
             .unwrap();
 
         // it should be the same chunk!
@@ -1986,7 +1989,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(2009.0)
+            .sample_sum_eq(1921.0)
             .unwrap();
 
         // Unload RB chunk but keep it in OS
@@ -2385,7 +2388,7 @@ mod tests {
                 Arc::from("cpu"),
                 0,
                 ChunkStorage::ReadBufferAndObjectStore,
-                2000, // size of RB and OS chunks
+                1912, // size of RB and OS chunks
                 1,
             ),
             ChunkSummary::new_without_timestamps(
@@ -2421,7 +2424,7 @@ mod tests {
         );
 
         assert_eq!(db.memory_registries.mutable_buffer.bytes(), 100 + 129 + 131);
-        assert_eq!(db.memory_registries.read_buffer.bytes(), 1309);
+        assert_eq!(db.memory_registries.read_buffer.bytes(), 1221);
         assert_eq!(db.memory_registries.parquet.bytes(), 89); // TODO: This 89 must be replaced with 675. Ticket #1311
     }
 
@@ -2450,7 +2453,7 @@ mod tests {
             .await
             .unwrap();
 
-        // write into a separate partitiion
+        // write into a separate partition
         write_lp(&db, "cpu bar=1 400000000000000");
         write_lp(&db, "mem frob=3 400000000000001");
 
@@ -2701,5 +2704,177 @@ mod tests {
         assert_eq!(db.write_buffer.as_ref().unwrap().lock().size(), 0);
         write_lp(db.as_ref(), "cpu bar=1 10");
         assert_ne!(db.write_buffer.as_ref().unwrap().lock().size(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn lock_tracker_metrics() {
+        // Test that data can be written into parquet files and then
+        // remove it from read buffer and make sure we are still
+        // be able to read data from object store
+
+        // Create an object store with a specified location in a local disk
+        let root = TempDir::new().unwrap();
+        let object_store = Arc::new(ObjectStore::new_file(File::new(root.path())));
+
+        // Create a DB given a server id, an object store and a db name
+        let server_id = ServerId::try_from(10).unwrap();
+        let db_name = "lock_tracker";
+        let test_db = TestDb::builder()
+            .server_id(server_id)
+            .object_store(Arc::clone(&object_store))
+            .db_name(db_name)
+            .build();
+
+        let db = Arc::new(test_db.db);
+
+        // Expect partition lock registry to have been created
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_lock_total")
+            .with_labels(&[
+                ("db_name", "lock_tracker"),
+                ("lock", "partition"),
+                ("svr_id", "10"),
+                ("access", "exclusive"),
+            ])
+            .counter()
+            .eq(0.)
+            .unwrap();
+
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_lock_total")
+            .with_labels(&[
+                ("db_name", "lock_tracker"),
+                ("lock", "partition"),
+                ("svr_id", "10"),
+                ("access", "shared"),
+            ])
+            .counter()
+            .eq(0.)
+            .unwrap();
+
+        write_lp(db.as_ref(), "cpu bar=1 10");
+
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_lock_total")
+            .with_labels(&[
+                ("db_name", "lock_tracker"),
+                ("lock", "partition"),
+                ("svr_id", "10"),
+                ("access", "exclusive"),
+            ])
+            .counter()
+            .eq(1.)
+            .unwrap();
+
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_lock_total")
+            .with_labels(&[
+                ("db_name", "lock_tracker"),
+                ("lock", "partition"),
+                ("svr_id", "10"),
+                ("access", "shared"),
+            ])
+            .counter()
+            .eq(0.)
+            .unwrap();
+
+        let partition_key = db
+            .catalog
+            .partitions()
+            .next()
+            .unwrap()
+            .read()
+            .key()
+            .to_string();
+
+        let chunks = db.catalog.chunks();
+        assert_eq!(chunks.len(), 1);
+
+        let chunk_a = Arc::clone(&chunks[0]);
+        let chunk_b = Arc::clone(&chunks[0]);
+
+        let chunk_b = chunk_b.write();
+
+        let task = tokio::spawn(async move {
+            let _ = chunk_a.read();
+        });
+
+        // Hold lock for 100 seconds blocking background task
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        std::mem::drop(chunk_b);
+        task.await.unwrap();
+
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_lock_total")
+            .with_labels(&[
+                ("db_name", "lock_tracker"),
+                ("lock", "partition"),
+                ("svr_id", "10"),
+                ("access", "exclusive"),
+            ])
+            .counter()
+            .eq(1.)
+            .unwrap();
+
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_lock_total")
+            .with_labels(&[
+                ("db_name", "lock_tracker"),
+                ("lock", "partition"),
+                ("svr_id", "10"),
+                ("access", "shared"),
+            ])
+            .counter()
+            .eq(2.)
+            .unwrap();
+
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_lock_total")
+            .with_labels(&[
+                ("db_name", "lock_tracker"),
+                ("lock", "chunk"),
+                ("partition", &partition_key),
+                ("svr_id", "10"),
+                ("access", "exclusive"),
+            ])
+            .counter()
+            .eq(2.)
+            .unwrap();
+
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_lock_total")
+            .with_labels(&[
+                ("db_name", "lock_tracker"),
+                ("lock", "chunk"),
+                ("partition", &partition_key),
+                ("svr_id", "10"),
+                ("access", "shared"),
+            ])
+            .counter()
+            .eq(2.)
+            .unwrap();
+
+        test_db
+            .metric_registry
+            .has_metric_family("catalog_lock_wait_seconds_total")
+            .with_labels(&[
+                ("db_name", "lock_tracker"),
+                ("lock", "chunk"),
+                ("svr_id", "10"),
+                ("partition", &partition_key),
+                ("access", "shared"),
+            ])
+            .counter()
+            .gt(0.07)
+            .unwrap();
     }
 }
