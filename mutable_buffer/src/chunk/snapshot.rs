@@ -55,15 +55,16 @@ impl TableSnapshot {
 impl ChunkSnapshot {
     pub fn new(chunk: &Chunk) -> Self {
         let mut records: HashMap<String, TableSnapshot> = Default::default();
-        for (id, table) in &chunk.tables {
-            let schema = table.schema(&chunk.dictionary, Selection::All).unwrap();
-            let batch = table.to_arrow(&chunk.dictionary, Selection::All).unwrap();
-            let name = chunk.dictionary.lookup_id(*id).unwrap();
+        let table = &chunk.table;
 
-            let timestamp_range = chunk
+        let schema = table.schema(&chunk.dictionary, Selection::All).unwrap();
+        let batch = table.to_arrow(&chunk.dictionary, Selection::All).unwrap();
+        let name = chunk.table_name.as_ref();
+
+        let timestamp_range =
+            chunk
                 .dictionary
                 .lookup_value(TIME_COLUMN_NAME)
-                .ok()
                 .and_then(|column_id| {
                     table
                         .column(column_id)
@@ -77,15 +78,14 @@ impl ChunkSnapshot {
                         })
                 });
 
-            records.insert(
-                name.to_string(),
-                TableSnapshot {
-                    schema,
-                    batch,
-                    timestamp_range,
-                },
-            );
-        }
+        records.insert(
+            name.to_string(),
+            TableSnapshot {
+                schema,
+                batch,
+                timestamp_range,
+            },
+        );
 
         Self {
             chunk_id: chunk.id,
