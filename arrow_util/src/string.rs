@@ -10,7 +10,7 @@ use std::fmt::Debug;
 /// The type parameter O alters the type used to store the offsets
 #[derive(Debug)]
 pub struct PackedStringArray<O> {
-    /// The start and end of strings stored in storage
+    /// The start and end offsets of strings stored in storage
     offsets: Vec<O>,
     /// A contiguous array of string data
     storage: String,

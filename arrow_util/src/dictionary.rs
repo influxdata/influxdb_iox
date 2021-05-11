@@ -1,4 +1,4 @@
-//! Contains a structure to map from strings to u32 symbols based on
+//! Contains a structure to map from strings to integer symbols based on
 //! string interning.
 use hashbrown::HashMap;
 
@@ -12,7 +12,7 @@ use num_traits::{AsPrimitive, FromPrimitive, Zero};
 #[derive(Debug)]
 pub struct StringDictionary<K> {
     hash: ahash::RandomState,
-    /// Used to provide a lookup from string value to DID
+    /// Used to provide a lookup from string value to key type
     ///
     /// Note: K's hash implementation is not used, instead the raw entry
     /// API is used to store keys w.r.t the hash of the strings themselves
