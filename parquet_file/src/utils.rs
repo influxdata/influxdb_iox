@@ -26,7 +26,6 @@ use parquet::{
     arrow::{ArrowReader, ParquetFileArrowReader},
     file::serialized_reader::{SerializedFileReader, SliceableCursor},
 };
-use tracker::MemRegistry;
 
 use crate::{chunk::Chunk, storage::Storage};
 
@@ -105,13 +104,12 @@ async fn make_chunk_common(
     column_summaries: Vec<ColumnSummary>,
     time_range: TimestampRange,
 ) -> Chunk {
-    let memory_registry = MemRegistry::new();
     let server_id = ServerId::new(NonZeroU32::new(1).unwrap());
     let db_name = "db1";
     let part_key = "part1";
     let table_name = table;
     let chunk_id = 1;
-    let mut chunk = Chunk::new(part_key.to_string(), chunk_id, &memory_registry);
+    let mut chunk = Chunk::new(part_key.to_string(), chunk_id, Default::default());
 
     let storage = Storage::new(Arc::clone(&store), server_id, db_name.to_string());
 

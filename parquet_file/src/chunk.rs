@@ -7,8 +7,8 @@ use datafusion::physical_plan::SendableRecordBatchStream;
 use internal_types::{schema::Schema, selection::Selection};
 use object_store::{path::Path, ObjectStore};
 use query::predicate::Predicate;
-use tracker::{MemRegistry, MemTracker};
 
+use metrics::GaugeValue;
 use std::mem;
 
 #[derive(Debug, Snafu)]
@@ -42,6 +42,18 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+#[derive(Debug, Default)]
+pub struct ChunkMetrics {
+    /// keep track of memory used by chunk
+    memory_bytes: GaugeValue,
+}
+
+impl ChunkMetrics {
+    pub fn new(_metrics: &metrics::Domain, memory_bytes: GaugeValue) -> Self {
+        Self { memory_bytes }
+    }
+}
+
 #[derive(Debug)]
 pub struct Chunk {
     /// Partition this chunk belongs to
@@ -53,19 +65,18 @@ pub struct Chunk {
     /// Tables of this chunk
     tables: Vec<Table>,
 
-    /// Track memory used by this chunk
-    memory_tracker: MemTracker,
+    metrics: ChunkMetrics,
 }
 
 impl Chunk {
-    pub fn new(part_key: String, chunk_id: u32, memory_registry: &MemRegistry) -> Self {
+    pub fn new(part_key: String, chunk_id: u32, metrics: ChunkMetrics) -> Self {
         let mut chunk = Self {
             partition_key: part_key,
             id: chunk_id,
             tables: Default::default(),
-            memory_tracker: memory_registry.register(),
+            metrics,
         };
-        chunk.memory_tracker.set_bytes(chunk.size());
+        chunk.metrics.memory_bytes.set(chunk.size());
         chunk
     }
 
