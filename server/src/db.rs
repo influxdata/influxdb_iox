@@ -38,7 +38,7 @@ use parquet_file::{
 use query::predicate::{Predicate, PredicateBuilder};
 use query::{exec::Executor, Database, DEFAULT_SCHEMA};
 use read_buffer::{Chunk as ReadBufferChunk, ChunkMetrics as ReadBufferChunkMetrics};
-use snafu::{ResultExt, Snafu};
+use snafu::{ensure, ResultExt, Snafu};
 use std::{
     any::Any,
     convert::{TryFrom, TryInto},
@@ -423,7 +423,7 @@ impl Db {
                     chunk_id,
                 })?;
             let chunk = chunk.read();
-            chunk_state = chunk.state().name();
+            let chunk_state = chunk.state().name();
 
             // prevent chunks that are actively being moved. TODO it
             // would be nicer to allow this to happen have the chunk
@@ -431,7 +431,7 @@ impl Db {
             // weren't prevented from dropping chunks due to
             // background tasks
             ensure!(
-                !matches!(chunk.state(), ChunkState::Moving(_)),
+                !matches!(chunk.state(), catalog::chunk::ChunkState::Moving(_)),
                 DropMovingChunk {
                     partition_key,
                     table_name,
@@ -538,6 +538,8 @@ impl Db {
             table_name,
             chunk_id,
         })?;
+
+        debug!(%partition_key, %table_name, %chunk_id, "chunk marked MOVED. loading complete");
 
         Ok(DbChunk::snapshot(&chunk))
     }
