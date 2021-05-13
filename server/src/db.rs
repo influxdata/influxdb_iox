@@ -353,7 +353,7 @@ impl Db {
             system_tables,
             sequence: AtomicU64::new(STARTING_SEQUENCE),
             worker_iterations: AtomicUsize::new(0),
-            metric_labels
+            metric_labels,
         }
     }
 
@@ -924,9 +924,10 @@ impl Db {
                             check_chunk_closed(&mut *chunk, mutable_size_threshold);
                         }
                         None => {
-                            let metrics = self
-                                .metrics_registry
-                                .register_domain_with_labels("mutable_buffer", self.metric_labels.clone());
+                            let metrics = self.metrics_registry.register_domain_with_labels(
+                                "mutable_buffer",
+                                self.metric_labels.clone(),
+                            );
                             let mut mb_chunk = MutableBufferChunk::new(
                                 mutable_buffer::chunk::INVALID_CHUNK_ID, // ID will be set by the catalog
                                 table_batch.name(),

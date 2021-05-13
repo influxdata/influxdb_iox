@@ -27,11 +27,11 @@ use parquet::{
     file::serialized_reader::{SerializedFileReader, SliceableCursor},
 };
 
-use snafu::{OptionExt, ResultExt, Snafu};
 use crate::{
     chunk::{self, Chunk},
     storage::Storage,
 };
+use snafu::{OptionExt, ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
