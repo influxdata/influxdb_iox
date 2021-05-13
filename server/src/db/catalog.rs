@@ -98,11 +98,10 @@ impl Catalog {
     #[cfg(test)]
     fn test() -> Self {
         let registry = ::metrics::MetricRegistry::new();
-        let domain = registry.register_domain("catalog");
-        Self::new(Arc::new(domain))
+        Self::new(registry.register_domain("catalog"))
     }
 
-    pub fn new(metrics_domain: Arc<::metrics::Domain>) -> Self {
+    pub fn new(metrics_domain: ::metrics::Domain) -> Self {
         let metrics = CatalogMetrics::new(metrics_domain);
 
         Self {

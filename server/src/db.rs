@@ -300,9 +300,6 @@ pub struct Db {
     // The metrics registry to inject into created components in the Db.
     metrics_registry: Arc<metrics::MetricRegistry>,
 
-    // The metrics domain for the catalog
-    metrics_domain: Arc<metrics::Domain>,
-
     /// The system schema provider
     system_tables: Arc<SystemSchemaProvider>,
 
@@ -324,19 +321,19 @@ impl Db {
         metrics_registry: Arc<MetricRegistry>,
     ) -> Self {
         let db_name = rules.name.clone();
-        let metrics_domain = Arc::new(metrics_registry.register_domain_with_labels(
+        let metrics_domain = metrics_registry.register_domain_with_labels(
             "catalog",
             vec![
                 metrics::KeyValue::new("db_name", db_name.to_string()),
                 metrics::KeyValue::new("svr_id", format!("{}", server_id)),
             ],
-        ));
+        );
 
         let rules = RwLock::new(rules);
         let server_id = server_id;
         let store = Arc::clone(&object_store);
         let write_buffer = write_buffer.map(Mutex::new);
-        let catalog = Arc::new(Catalog::new(Arc::clone(&metrics_domain)));
+        let catalog = Arc::new(Catalog::new(metrics_domain));
         let system_tables =
             SystemSchemaProvider::new(&db_name, Arc::clone(&catalog), Arc::clone(&jobs));
         let system_tables = Arc::new(system_tables);
@@ -349,7 +346,6 @@ impl Db {
             catalog,
             write_buffer,
             jobs,
-            metrics_domain,
             metrics_registry,
             system_tables,
             sequence: AtomicU64::new(STARTING_SEQUENCE),

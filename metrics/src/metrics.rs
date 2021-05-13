@@ -73,6 +73,7 @@ pub struct RedMetric {
 }
 
 /// Workaround self-recursive OT instruments
+/// https://github.com/open-telemetry/opentelemetry-rust/issues/550
 impl std::fmt::Debug for RedMetric {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RedMetric")
@@ -238,6 +239,7 @@ pub struct Counter {
 }
 
 /// Workaround self-recursive OT instruments
+/// https://github.com/open-telemetry/opentelemetry-rust/issues/550
 impl std::fmt::Debug for Counter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Counter")
@@ -305,6 +307,7 @@ pub struct Histogram {
 }
 
 /// Workaround self-recursive OT instruments
+/// https://github.com/open-telemetry/opentelemetry-rust/issues/550
 impl std::fmt::Debug for Histogram {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Histogram")

@@ -8,12 +8,12 @@ use dashmap::DashMap;
 use crate::KeyValue;
 use observability_deps::opentelemetry::labels::{DefaultLabelEncoder, LabelSet};
 
-/// A `Gauge` allows tracking multiple usize values by tagset
+/// A `Gauge` allows tracking multiple usize values by label set
 ///
 /// Metrics can be recorded directly on the Gauge or when the labels are
-/// known ahead of time a `GaugeValue` can be obtained using
+/// known ahead of time a `GaugeValue` can be obtained with `Gauge::gauge_value`
 ///
-/// When a `Gauge` is dropped any contributions it made to any tagsets
+/// When a `Gauge` is dropped any contributions it made to any label sets
 /// will be deducted
 #[derive(Debug, Default)]
 pub struct Gauge {
@@ -53,7 +53,7 @@ impl Gauge {
         self.shared.gauge_value(encoded, keys)
     }
 
-    /// Visits the totals for all tagsets recorded by this Gauge
+    /// Visits the totals for all label sets recorded by this Gauge
     pub fn visit_values(&self, f: impl Fn(usize, &Vec<KeyValue>)) {
         for data in self.shared.values.iter() {
             let (data, labels) = data.value();

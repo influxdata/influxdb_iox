@@ -1,12 +1,11 @@
 use crate::db::catalog::chunk::ChunkMetrics;
 use metrics::{Counter, GaugeValue, Histogram, KeyValue};
-use std::sync::Arc;
 use tracker::{LockTracker, RwLock};
 
 #[derive(Debug)]
 pub struct CatalogMetrics {
     /// Metrics domain
-    pub metrics_domain: Arc<metrics::Domain>,
+    metrics_domain: metrics::Domain,
 
     /// Memory registries
     memory_metrics: MemoryMetrics,
@@ -16,7 +15,7 @@ pub struct CatalogMetrics {
 }
 
 impl CatalogMetrics {
-    pub fn new(metrics_domain: Arc<metrics::Domain>) -> Self {
+    pub fn new(metrics_domain: metrics::Domain) -> Self {
         let lock_tracker = Default::default();
         metrics_domain.register_observer(
             None,
@@ -25,7 +24,7 @@ impl CatalogMetrics {
         );
 
         Self {
-            memory_metrics: MemoryMetrics::new(metrics_domain.as_ref()),
+            memory_metrics: MemoryMetrics::new(&metrics_domain),
             metrics_domain,
             lock_tracker,
         }
