@@ -24,7 +24,7 @@ use datafusion::{
 use entry::{ClockValue, ClockValueError, Entry, OwnedSequencedEntry, SequencedEntry};
 use internal_types::{arrow::sort::sort_record_batch, selection::Selection};
 use lifecycle::LifecycleManager;
-use metrics::MetricRegistry;
+use metrics::{KeyValue, MetricRegistry};
 use mutable_buffer::chunk::{
     Chunk as MutableBufferChunk, ChunkMetrics as MutableBufferChunkMetrics,
 };
@@ -308,6 +308,9 @@ pub struct Db {
 
     /// Number of iterations of the worker loop for this Db
     worker_iterations: AtomicUsize,
+
+    /// Metric labels
+    metric_labels: Vec<KeyValue>,
 }
 
 impl Db {
@@ -321,13 +324,13 @@ impl Db {
         metrics_registry: Arc<MetricRegistry>,
     ) -> Self {
         let db_name = rules.name.clone();
-        let metrics_domain = metrics_registry.register_domain_with_labels(
-            "catalog",
-            vec![
-                metrics::KeyValue::new("db_name", db_name.to_string()),
-                metrics::KeyValue::new("svr_id", format!("{}", server_id)),
-            ],
-        );
+        let metric_labels = vec![
+            KeyValue::new("db_name", db_name.to_string()),
+            KeyValue::new("svr_id", format!("{}", server_id)),
+        ];
+
+        let metrics_domain =
+            metrics_registry.register_domain_with_labels("catalog", metric_labels.clone());
 
         let rules = RwLock::new(rules);
         let server_id = server_id;
@@ -350,6 +353,7 @@ impl Db {
             system_tables,
             sequence: AtomicU64::new(STARTING_SEQUENCE),
             worker_iterations: AtomicUsize::new(0),
+            metric_labels
         }
     }
 
@@ -475,7 +479,9 @@ impl Db {
         let table_summary = mb_chunk.table_summary();
 
         // create a new read buffer chunk with memory tracking
-        let metrics = self.metrics_registry.register_domain("read_buffer");
+        let metrics = self
+            .metrics_registry
+            .register_domain_with_labels("read_buffer", self.metric_labels.clone());
         let mut rb_chunk = ReadBufferChunk::new(
             chunk_id,
             ReadBufferChunkMetrics::new(&metrics, self.catalog.metrics().memory().read_buffer()),
@@ -559,7 +565,9 @@ impl Db {
         let table_stats = rb_chunk.table_summaries();
 
         // Create a parquet chunk for this chunk
-        let metrics = self.metrics_registry.register_domain("parquet");
+        let metrics = self
+            .metrics_registry
+            .register_domain_with_labels("parquet", self.metric_labels.clone());
         let mut parquet_chunk = ParquetChunk::new(
             partition_key.to_string(),
             chunk_id,
@@ -916,7 +924,9 @@ impl Db {
                             check_chunk_closed(&mut *chunk, mutable_size_threshold);
                         }
                         None => {
-                            let metrics = self.metrics_registry.register_domain("mutable_buffer");
+                            let metrics = self
+                                .metrics_registry
+                                .register_domain_with_labels("mutable_buffer", self.metric_labels.clone());
                             let mut mb_chunk = MutableBufferChunk::new(
                                 mutable_buffer::chunk::INVALID_CHUNK_ID, // ID will be set by the catalog
                                 table_batch.name(),
