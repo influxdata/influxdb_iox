@@ -414,7 +414,34 @@ impl Db {
         // with it while we drop the chunk
         let mut partition = partition.write();
 
-        debug!(%partition_key, %table_name, %chunk_id, "dropping chunk");
+        {
+            let chunk = partition
+                .chunk(table_name, chunk_id)
+                .context(DroppingChunk {
+                    partition_key,
+                    table_name,
+                    chunk_id,
+                })?;
+            let chunk = chunk.read();
+            chunk_state = chunk.state().name();
+
+            // prevent chunks that are actively being moved. TODO it
+            // would be nicer to allow this to happen have the chunk
+            // migration logic cleanup afterwards so that users
+            // weren't prevented from dropping chunks due to
+            // background tasks
+            ensure!(
+                !matches!(chunk.state(), ChunkState::Moving(_)),
+                DropMovingChunk {
+                    partition_key,
+                    table_name,
+                    chunk_id,
+                    chunk_state,
+                }
+            );
+
+            debug!(%partition_key, %table_name, %chunk_id, %chunk_state, "dropping chunk");
+        }
 
         partition
             .drop_chunk(table_name, chunk_id)
