@@ -232,7 +232,7 @@ where
 /// If you want to track some notion of success, failure and latency consider
 /// using a `REDMetric` instead rather than expressing that with labels on a
 /// `Counter`.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Counter {
     counter: Option<OTCounter<u64>>,
     default_labels: Vec<KeyValue>,
@@ -249,6 +249,15 @@ impl std::fmt::Debug for Counter {
 }
 
 impl Counter {
+    /// Creates a new Counter that isn't registered with and
+    /// consequently won't report to any metrics registry
+    pub fn new_unregistered() -> Self {
+        Self {
+            counter: None,
+            default_labels: vec![],
+        }
+    }
+
     pub(crate) fn new(counter: OTCounter<u64>, default_labels: Vec<KeyValue>) -> Self {
         Self {
             counter: Some(counter),
@@ -300,7 +309,7 @@ impl Counter {
 }
 
 /// A Histogram is a metric exposing a distribution of observations.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Histogram {
     histogram: Option<OTHistogram<f64>>,
     default_labels: Vec<KeyValue>,
@@ -317,6 +326,15 @@ impl std::fmt::Debug for Histogram {
 }
 
 impl Histogram {
+    /// Creates a new Histogram that isn't registered with and
+    /// consequently won't report to any metrics registry
+    pub fn new_unregistered() -> Self {
+        Self {
+            histogram: None,
+            default_labels: vec![],
+        }
+    }
+
     pub(crate) fn new(histogram: OTHistogram<f64>, default_labels: Vec<KeyValue>) -> Self {
         Self {
             histogram: Some(histogram),

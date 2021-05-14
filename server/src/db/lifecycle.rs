@@ -360,6 +360,7 @@ fn can_move(rules: &LifecycleRules, chunk: &Chunk, now: DateTime<Utc>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::catalog::chunk::ChunkMetrics;
     use data_types::server_id::ServerId;
     use entry::{test_helpers::lp_to_entry, ClockValue};
     use std::{
@@ -390,7 +391,7 @@ mod tests {
             )
             .unwrap();
 
-        let mut chunk = Chunk::new_open("", mb_chunk, Default::default()).unwrap();
+        let mut chunk = Chunk::new_open("", mb_chunk, ChunkMetrics::new_unregistered()).unwrap();
         chunk.set_timestamps(
             time_of_first_write.map(from_secs),
             time_of_last_write.map(from_secs),
@@ -738,7 +739,10 @@ mod tests {
             ..Default::default()
         };
 
-        let rb = Arc::new(read_buffer::Chunk::new(22, Default::default()));
+        let rb = Arc::new(read_buffer::Chunk::new(
+            22,
+            read_buffer::ChunkMetrics::new_unregistered(),
+        ));
 
         let chunks = vec![new_chunk(0, Some(0), Some(0))];
 
@@ -779,7 +783,10 @@ mod tests {
             ..Default::default()
         };
 
-        let rb = Arc::new(read_buffer::Chunk::new(22, Default::default()));
+        let rb = Arc::new(read_buffer::Chunk::new(
+            22,
+            read_buffer::ChunkMetrics::new_unregistered(),
+        ));
 
         let chunks = vec![new_chunk(0, Some(0), Some(0))];
 
@@ -830,7 +837,10 @@ mod tests {
             ..Default::default()
         };
 
-        let rb = Arc::new(read_buffer::Chunk::new(22, Default::default()));
+        let rb = Arc::new(read_buffer::Chunk::new(
+            22,
+            read_buffer::ChunkMetrics::new_unregistered(),
+        ));
 
         let chunks = vec![
             // still moving => cannot write

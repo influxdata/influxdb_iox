@@ -620,7 +620,7 @@ impl std::fmt::Debug for Chunk {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ChunkMetrics {
     /// keep track of memory used by table data in chunk
     memory_bytes: GaugeValue,
@@ -665,6 +665,20 @@ impl ChunkMetrics {
                 Some("bytes"),
                 "The number of bytes used by all columns if they were uncompressed in the Read Buffer",
             ),
+        }
+    }
+
+    /// Creates an instance of ChunkMetrics that isn't registered with a central
+    /// metrics registry. Observations made to instruments on this ChunkMetrics instance
+    /// will therefore not be visible to other ChunkMetrics instances or metric instruments
+    /// created on a metrics domain, and vice versa
+    pub fn new_unregistered() -> Self {
+        Self {
+            memory_bytes: GaugeValue::new_unregistered(),
+            columns_total: Gauge::new_unregistered(),
+            column_values_total: Gauge::new_unregistered(),
+            column_bytes_total: Gauge::new_unregistered(),
+            column_raw_bytes_total: Gauge::new_unregistered(),
         }
     }
 
@@ -1049,7 +1063,7 @@ mod test {
 
     #[test]
     fn read_filter_table_schema() {
-        let mut chunk = Chunk::new(22, Default::default());
+        let mut chunk = Chunk::new(22, ChunkMetrics::new_unregistered());
 
         // Add a new table to the chunk.
         chunk.upsert_table("a_table", gen_recordbatch());
@@ -1093,7 +1107,7 @@ mod test {
 
     #[test]
     fn has_table() {
-        let mut chunk = Chunk::new(22, Default::default());
+        let mut chunk = Chunk::new(22, ChunkMetrics::new_unregistered());
 
         // Add a new table to the chunk.
         chunk.upsert_table("a_table", gen_recordbatch());
@@ -1103,7 +1117,7 @@ mod test {
 
     #[test]
     fn table_summaries() {
-        let mut chunk = Chunk::new(22, Default::default());
+        let mut chunk = Chunk::new(22, ChunkMetrics::new_unregistered());
 
         let schema = SchemaBuilder::new()
             .non_null_tag("env")
@@ -1217,7 +1231,7 @@ mod test {
 
     #[test]
     fn read_filter() {
-        let mut chunk = Chunk::new(22, Default::default());
+        let mut chunk = Chunk::new(22, ChunkMetrics::new_unregistered());
 
         // Add a bunch of row groups to a single table in a single chunk
         for &i in &[100, 200, 300] {
@@ -1316,7 +1330,7 @@ mod test {
 
     #[test]
     fn could_pass_predicate() {
-        let mut chunk = Chunk::new(22, Default::default());
+        let mut chunk = Chunk::new(22, ChunkMetrics::new_unregistered());
 
         // Add a new table to the chunk.
         chunk.upsert_table("a_table", gen_recordbatch());
@@ -1343,7 +1357,7 @@ mod test {
         let rg = RowGroup::new(6, columns);
         let table = Table::new("table_1", rg);
 
-        let mut chunk = Chunk::new_with_table(22, table, Default::default());
+        let mut chunk = Chunk::new_with_table(22, table, ChunkMetrics::new_unregistered());
 
         // All table names returned when no predicate.
         let table_names = chunk.table_names(&Predicate::default(), &BTreeSet::new());
@@ -1442,7 +1456,7 @@ mod test {
 
     #[test]
     fn column_names() {
-        let mut chunk = Chunk::new(22, Default::default());
+        let mut chunk = Chunk::new(22, ChunkMetrics::new_unregistered());
 
         let schema = SchemaBuilder::new()
             .non_null_tag("region")
@@ -1516,7 +1530,7 @@ mod test {
 
     #[test]
     fn column_values() {
-        let mut chunk = Chunk::new(22, Default::default());
+        let mut chunk = Chunk::new(22, ChunkMetrics::new_unregistered());
 
         let schema = SchemaBuilder::new()
             .non_null_tag("region")

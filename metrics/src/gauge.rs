@@ -15,7 +15,7 @@ use observability_deps::opentelemetry::labels::{DefaultLabelEncoder, LabelSet};
 ///
 /// When a `Gauge` is dropped any contributions it made to any label sets
 /// will be deducted
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Gauge {
     /// `GaugeState` stores the underlying state for this `Gauge`
     state: Arc<GaugeState>,
@@ -26,6 +26,21 @@ pub struct Gauge {
 }
 
 impl Gauge {
+    /// Creates a new Gauge that isn't registered with and consequently
+    /// won't report to any metrics registry
+    ///
+    /// Observations made to this Gauge, and any GaugeValues it creates,
+    /// will still be computed correctly and visible but will not be
+    /// reported to a central metric registry, and will not be visible
+    /// to any other Gauge instance
+    pub fn new_unregistered() -> Self {
+        Self {
+            state: Arc::new(Default::default()),
+            values: Default::default(),
+            default_labels: vec![],
+        }
+    }
+
     pub(crate) fn new(state: Arc<GaugeState>, default_labels: Vec<KeyValue>) -> Self {
         Self {
             values: Default::default(),
@@ -145,6 +160,18 @@ pub struct GaugeValue {
 }
 
 impl GaugeValue {
+    /// Creates a new GaugeValue that isn't associated with any Gauge
+    ///
+    /// Observations made to this GaugeValue, and any GaugeValue it creates,
+    /// will still be computed correctly and visible but will not be reported
+    /// to a Gauge, nor a metric registry, or any independently created GaugeValue
+    pub fn new_unregistered() -> Self {
+        Self {
+            shared: Arc::new(Default::default()),
+            local: 0,
+        }
+    }
+
     /// Creates a new GaugeValue with no local observation that refers to the same
     /// underlying backing store as this GaugeValue
     pub fn clone_empty(&self) -> Self {

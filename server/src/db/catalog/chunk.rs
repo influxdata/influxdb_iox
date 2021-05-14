@@ -107,10 +107,23 @@ macro_rules! unexpected_state {
     };
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ChunkMetrics {
     pub(super) state: Counter,
     pub(super) immutable_chunk_size: Histogram,
+}
+
+impl ChunkMetrics {
+    /// Creates an instance of ChunkMetrics that isn't registered with a central
+    /// metrics registry. Observations made to instruments on this ChunkMetrics instance
+    /// will therefore not be visible to other ChunkMetrics instances or metric instruments
+    /// created on a metrics domain, and vice versa
+    pub fn new_unregistered() -> Self {
+        Self {
+            state: Counter::new_unregistered(),
+            immutable_chunk_size: Histogram::new_unregistered(),
+        }
+    }
 }
 
 impl Chunk {

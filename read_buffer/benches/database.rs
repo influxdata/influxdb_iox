@@ -7,14 +7,14 @@ use arrow::{
     record_batch::RecordBatch,
 };
 use internal_types::schema::builder::SchemaBuilder;
-use read_buffer::{BinaryExpr, Chunk, Predicate};
+use read_buffer::{BinaryExpr, Chunk, ChunkMetrics, Predicate};
 
 const BASE_TIME: i64 = 1351700038292387000_i64;
 const ONE_MS: i64 = 1_000_000;
 
 fn table_names(c: &mut Criterion) {
     let rb = generate_row_group(500_000);
-    let mut chunk = Chunk::new(0, Default::default());
+    let mut chunk = Chunk::new(0, ChunkMetrics::new_unregistered());
     chunk.upsert_table("table_a", rb);
 
     // no predicate - return all the tables
