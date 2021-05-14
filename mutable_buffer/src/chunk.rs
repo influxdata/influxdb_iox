@@ -45,13 +45,23 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ChunkMetrics {
     /// keep track of memory used by chunk
     memory_bytes: GaugeValue,
 }
 
 impl ChunkMetrics {
+    /// Creates an instance of ChunkMetrics that isn't registered with a central
+    /// metrics registry. Observations made to instruments on this ChunkMetrics instance
+    /// will therefore not be visible to other ChunkMetrics instances or metric instruments
+    /// created on a metrics domain, and vice versa
+    pub fn new_unregistered() -> Self {
+        Self {
+            memory_bytes: GaugeValue::new_unregistered(),
+        }
+    }
+
     pub fn new(_metrics: &metrics::Domain, memory_bytes: GaugeValue) -> Self {
         Self { memory_bytes }
     }
@@ -288,7 +298,7 @@ mod tests {
 
     #[test]
     fn writes_table_batches() {
-        let mut chunk = Chunk::new(Some(1), "cpu", Default::default());
+        let mut chunk = Chunk::new(Some(1), "cpu", ChunkMetrics::new_unregistered());
 
         let lp = vec!["cpu,host=a val=23 1", "cpu,host=b val=2 1"].join("\n");
 
@@ -309,7 +319,7 @@ mod tests {
 
     #[test]
     fn writes_table_3_batches() {
-        let mut chunk = Chunk::new(Some(1), "cpu", Default::default());
+        let mut chunk = Chunk::new(Some(1), "cpu", ChunkMetrics::new_unregistered());
 
         let lp = vec!["cpu,host=a val=23 1", "cpu,host=b val=2 1"].join("\n");
 
@@ -341,7 +351,7 @@ mod tests {
     #[test]
     #[cfg(not(feature = "nocache"))]
     fn test_snapshot() {
-        let mut chunk = Chunk::new(Some(1), "cpu", Default::default());
+        let mut chunk = Chunk::new(Some(1), "cpu", ChunkMetrics::new_unregistered());
 
         let lp = vec!["cpu,host=a val=23 1", "cpu,host=b val=2 1"].join("\n");
 

@@ -27,6 +27,7 @@ use parquet::{
     file::serialized_reader::{SerializedFileReader, SliceableCursor},
 };
 
+use crate::chunk::ChunkMetrics;
 use crate::{
     chunk::{self, Chunk},
     storage::Storage,
@@ -135,6 +136,8 @@ pub async fn make_chunk_no_row_group(store: Arc<ObjectStore>, column_prefix: &st
 }
 
 /// Common code for all [`make_chunk`] and [`make_chunk_no_row_group`].
+///
+/// TODO: This code creates a chunk that isn't hooked up with metrics
 async fn make_chunk_common(
     store: Arc<ObjectStore>,
     record_batches: Vec<RecordBatch>,
@@ -148,7 +151,11 @@ async fn make_chunk_common(
     let part_key = "part1";
     let table_name = table;
     let chunk_id = 1;
-    let mut chunk = Chunk::new(part_key.to_string(), chunk_id, Default::default());
+    let mut chunk = Chunk::new(
+        part_key.to_string(),
+        chunk_id,
+        ChunkMetrics::new_unregistered(),
+    );
 
     let storage = Storage::new(Arc::clone(&store), server_id, db_name.to_string());
 

@@ -4,7 +4,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use data_types::server_id::ServerId;
 use entry::{test_helpers::lp_to_entries, ClockValue};
 use flate2::read::GzDecoder;
-use mutable_buffer::chunk::Chunk;
+use mutable_buffer::chunk::{Chunk, ChunkMetrics};
 
 #[inline]
 fn snapshot_chunk(chunk: &Chunk) {
@@ -13,7 +13,7 @@ fn snapshot_chunk(chunk: &Chunk) {
 
 fn chunk(count: usize) -> Chunk {
     // m0 is hard coded into tag_values.lp.gz
-    let mut chunk = Chunk::new(Some(0), "m0", Default::default());
+    let mut chunk = Chunk::new(Some(0), "m0", ChunkMetrics::new_unregistered());
 
     let raw = include_bytes!("../../tests/fixtures/lineproto/tag_values.lp.gz");
     let mut gz = GzDecoder::new(&raw[..]);

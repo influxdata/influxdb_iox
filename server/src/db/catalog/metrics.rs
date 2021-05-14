@@ -95,7 +95,7 @@ impl PartitionMetrics {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MemoryMetrics {
     mutable_buffer: GaugeValue,
     read_buffer: GaugeValue,

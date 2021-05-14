@@ -921,7 +921,11 @@ mod test {
         let registry = reg.registry();
         let domain =
             registry.register_domain_with_labels("read_buffer", vec![KeyValue::new("db", "mydb")]);
-        let mut chunk = Chunk::new(22, ChunkMetrics::new(&domain, Default::default()));
+
+        let mut chunk = Chunk::new(
+            22,
+            ChunkMetrics::new(&domain, GaugeValue::new_unregistered()),
+        );
 
         // Add a new table to the chunk.
         chunk.upsert_table("a_table", gen_recordbatch());

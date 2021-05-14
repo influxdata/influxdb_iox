@@ -120,7 +120,8 @@ impl GaugeState {
             .entry(encoded)
             .or_insert_with(|| {
                 (
-                    Default::default(),
+                    // It is created unregistered, adding it to values "registers" it
+                    GaugeValue::new_unregistered(),
                     keys.iter()
                         .map(|(key, value)| KeyValue::new(key.clone(), value.clone()))
                         .collect(),
@@ -151,7 +152,7 @@ struct GaugeValueShared {
 /// updates the total in `GaugeValueShared` by the same amount. When dropped it
 /// removes any contribution it made to the total in `GaugeValueShared`
 ///
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GaugeValue {
     /// A reference to the shared pool
     shared: Arc<GaugeValueShared>,
@@ -226,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_tracker() {
-        let start = GaugeValue::default();
+        let start = GaugeValue::new_unregistered();
         let mut t1 = start.clone_empty();
         let mut t2 = start.clone_empty();
 

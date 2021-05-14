@@ -4,12 +4,12 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use data_types::server_id::ServerId;
 use entry::{test_helpers::lp_to_entries, ClockValue, Entry};
 use flate2::read::GzDecoder;
-use mutable_buffer::chunk::Chunk;
+use mutable_buffer::chunk::{Chunk, ChunkMetrics};
 
 #[inline]
 fn write_chunk(count: usize, entries: &[Entry]) {
     // m0 is hard coded into tag_values.lp.gz
-    let mut chunk = Chunk::new(Some(0), "m0", Default::default());
+    let mut chunk = Chunk::new(Some(0), "m0", ChunkMetrics::new_unregistered());
 
     for _ in 0..count {
         for entry in entries {
