@@ -97,6 +97,7 @@ impl Partition {
             .tables
             .entry(table_name)
             .or_insert_with(PartitionTable::new);
+
         let chunk_id = table.next_chunk_id;
         chunk.set_id(chunk_id);
 

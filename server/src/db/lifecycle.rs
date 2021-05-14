@@ -380,7 +380,8 @@ mod tests {
         let entry = lp_to_entry("table1 bar=10 10");
         let write = entry.partition_writes().unwrap().remove(0);
         let batch = write.table_batches().remove(0);
-        let mut mb_chunk = mutable_buffer::chunk::Chunk::new(id, "table1", Default::default());
+        let mut mb_chunk =
+            mutable_buffer::chunk::Chunk::new(Some(id), "table1", Default::default());
         mb_chunk
             .write_table_batch(
                 ClockValue::try_from(5).unwrap(),

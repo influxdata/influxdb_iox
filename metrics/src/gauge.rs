@@ -1,11 +1,11 @@
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use hashbrown::HashMap;
 
 use crate::KeyValue;
+use hashbrown::hash_map::RawEntryMut;
 use observability_deps::opentelemetry::labels::{DefaultLabelEncoder, LabelSet};
 
 /// A `Gauge` allows tracking multiple usize values by label set
@@ -17,48 +17,28 @@ use observability_deps::opentelemetry::labels::{DefaultLabelEncoder, LabelSet};
 /// will be deducted
 #[derive(Debug, Default)]
 pub struct Gauge {
-    shared: Arc<GaugeShared>,
+    /// `GaugeState` stores the underlying state for this `Gauge`
+    state: Arc<GaugeState>,
+    /// Any contributions made by this instance of `Gauge` to the totals
+    /// stored in `GaugeState`
     values: HashMap<String, GaugeValue>,
     default_labels: Vec<KeyValue>,
 }
 
-impl Clone for Gauge {
-    fn clone(&self) -> Self {
-        Self {
-            shared: Arc::clone(&self.shared),
-            values: Default::default(),
-            default_labels: self.default_labels.clone(),
-        }
-    }
-}
-
 impl Gauge {
-    pub fn new(default_labels: Vec<KeyValue>) -> Self {
+    pub(crate) fn new(state: Arc<GaugeState>, default_labels: Vec<KeyValue>) -> Self {
         Self {
-            shared: Default::default(),
             values: Default::default(),
+            state,
             default_labels,
         }
     }
 
-    /// Sets the default labels for this Guage
-    pub(crate) fn set_labels(&mut self, default_labels: Vec<KeyValue>) {
-        self.default_labels = default_labels;
-    }
-
     /// Gets a `GaugeValue` for a given set of labels
-    /// This allows fast value updates and retrieval when the tags are known in advance
+    /// This allows fast value updates and retrieval when the labels are known in advance
     pub fn gauge_value(&self, labels: &[KeyValue]) -> GaugeValue {
         let (encoded, keys) = self.encode_labels(labels);
-        self.shared.gauge_value(encoded, keys)
-    }
-
-    /// Visits the totals for all label sets recorded by this Gauge
-    pub fn visit_values(&self, f: impl Fn(usize, &Vec<KeyValue>)) {
-        for data in self.shared.values.iter() {
-            let (data, labels) = data.value();
-            f(data.get_total(), labels)
-        }
+        self.state.gauge_value_encoded(encoded, keys)
     }
 
     pub fn inc(&mut self, delta: usize, labels: &[KeyValue]) {
@@ -74,38 +54,53 @@ impl Gauge {
     }
 
     fn encode_labels(&self, labels: &[KeyValue]) -> (String, LabelSet) {
-        self.shared
-            .encode_labels(self.default_labels.iter().chain(labels).cloned())
+        GaugeState::encode_labels(self.default_labels.iter().chain(labels).cloned())
     }
 
     fn call(&mut self, labels: &[KeyValue], f: impl Fn(&mut GaugeValue)) {
         let (encoded, keys) = self.encode_labels(labels);
 
-        match self.values.entry(encoded.clone()) {
-            Entry::Occupied(mut occupied) => f(occupied.get_mut()),
-            Entry::Vacant(vacant) => {
-                let observer = self.shared.gauge_value(encoded, keys);
-                f(vacant.insert(observer))
+        match self.values.raw_entry_mut().from_key(&encoded) {
+            RawEntryMut::Occupied(mut occupied) => f(occupied.get_mut()),
+            RawEntryMut::Vacant(vacant) => {
+                let (_, observer) = vacant.insert(
+                    encoded.clone(),
+                    self.state.gauge_value_encoded(encoded, keys),
+                );
+                f(observer)
             }
         }
     }
 }
 
+/// The shared state for a `Gauge`
 #[derive(Debug, Default)]
-struct GaugeShared {
-    /// Maps a set of tags to a gauge and its tags
+pub(crate) struct GaugeState {
+    /// Keep tracks of every label set observed by this gauge
+    ///
+    /// The key is a sorted encoding of this label set, that reconciles
+    /// duplicates in the same manner as OpenTelemetry (it uses the same encoder)
+    /// which appears to be last-writer-wins
     values: DashMap<String, (GaugeValue, Vec<KeyValue>)>,
 }
 
-impl GaugeShared {
-    fn encode_labels(&self, labels: impl IntoIterator<Item = KeyValue>) -> (String, LabelSet) {
+impl GaugeState {
+    /// Visits the totals for all recorded label sets
+    pub fn visit_values(&self, f: impl Fn(usize, &Vec<KeyValue>)) {
+        for data in self.values.iter() {
+            let (data, labels) = data.value();
+            f(data.get_total(), labels)
+        }
+    }
+
+    fn encode_labels(labels: impl IntoIterator<Item = KeyValue>) -> (String, LabelSet) {
         let set = LabelSet::from_labels(labels);
         let encoded = set.encoded(Some(&DefaultLabelEncoder));
 
         (encoded, set)
     }
 
-    fn gauge_value(&self, encoded: String, keys: LabelSet) -> GaugeValue {
+    fn gauge_value_encoded(&self, encoded: String, keys: LabelSet) -> GaugeValue {
         self.values
             .entry(encoded)
             .or_insert_with(|| {
@@ -118,41 +113,51 @@ impl GaugeShared {
             })
             .value()
             .0
-            .clone()
+            .clone_empty()
     }
 }
 
 #[derive(Debug, Default)]
 struct GaugeValueShared {
-    /// The total bytes across all associated `GaugeValueHandle`s
-    bytes: AtomicUsize,
+    /// The total contribution from all associated `GaugeValue`s
+    total: AtomicUsize,
 }
 
 /// A `GaugeValue` is a single measurement associated with a `Gauge`
 ///
 /// When the `GaugeValue` is dropped any contribution it made to the total
 /// will be deducted from the `GaugeValue` total
+///
+/// Each `GaugeValue` stores a reference to `GaugeValueShared`. The construction
+/// of `Gauge` ensures that all registered `GaugeValue`s for the same label set
+/// refer to the same `GaugeValueShared` that isn't shared with any others
+///
+/// Each `GaugeValue` also stores its local observation, when updated it also
+/// updates the total in `GaugeValueShared` by the same amount. When dropped it
+/// removes any contribution it made to the total in `GaugeValueShared`
+///
 #[derive(Debug, Default)]
 pub struct GaugeValue {
+    /// A reference to the shared pool
     shared: Arc<GaugeValueShared>,
     /// The locally observed value
     local: usize,
 }
 
-impl Clone for GaugeValue {
-    fn clone(&self) -> Self {
+impl GaugeValue {
+    /// Creates a new GaugeValue with no local observation that refers to the same
+    /// underlying backing store as this GaugeValue
+    pub fn clone_empty(&self) -> Self {
         Self {
             shared: Arc::clone(&self.shared),
             local: 0,
         }
     }
-}
 
-impl GaugeValue {
     /// Gets the total value from across all `GaugeValue` associated
     /// with this `Gauge`
     pub fn get_total(&self) -> usize {
-        self.shared.bytes.load(Ordering::Relaxed)
+        self.shared.total.load(Ordering::Relaxed)
     }
 
     /// Gets the local contribution from this instance
@@ -163,13 +168,13 @@ impl GaugeValue {
     /// Increment the local value for this GaugeValue
     pub fn inc(&mut self, delta: usize) {
         self.local += delta;
-        self.shared.bytes.fetch_add(delta, Ordering::Relaxed);
+        self.shared.total.fetch_add(delta, Ordering::Relaxed);
     }
 
     /// Decrement the local value for this GaugeValue
     pub fn decr(&mut self, delta: usize) {
         self.local -= delta;
-        self.shared.bytes.fetch_sub(delta, Ordering::Relaxed);
+        self.shared.total.fetch_sub(delta, Ordering::Relaxed);
     }
 
     /// Sets the local value for this GaugeValue
@@ -184,7 +189,7 @@ impl GaugeValue {
 
 impl Drop for GaugeValue {
     fn drop(&mut self) {
-        self.shared.bytes.fetch_sub(self.local, Ordering::Relaxed);
+        self.shared.total.fetch_sub(self.local, Ordering::Relaxed);
     }
 }
 
@@ -195,8 +200,8 @@ mod tests {
     #[test]
     fn test_tracker() {
         let start = GaugeValue::default();
-        let mut t1 = start.clone();
-        let mut t2 = start.clone();
+        let mut t1 = start.clone_empty();
+        let mut t2 = start.clone_empty();
 
         t1.set(200);
 
@@ -230,8 +235,9 @@ mod tests {
 
     #[test]
     fn test_mixed() {
-        let mut gauge = Gauge::new(vec![KeyValue::new("foo", "bar")]);
-        let mut gauge2 = gauge.clone();
+        let gauge_state = Arc::new(GaugeState::default());
+        let mut gauge = Gauge::new(Arc::clone(&gauge_state), vec![KeyValue::new("foo", "bar")]);
+        let mut gauge2 = Gauge::new(gauge_state, vec![KeyValue::new("foo", "bar")]);
 
         gauge.set(32, &[KeyValue::new("bingo", "bongo")]);
         gauge2.set(64, &[KeyValue::new("bingo", "bongo")]);

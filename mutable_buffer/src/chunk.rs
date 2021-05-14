@@ -15,9 +15,6 @@ use metrics::GaugeValue;
 
 pub mod snapshot;
 
-/// A sentinel value used to indicate a chunk that isn't in the catalog
-pub const INVALID_CHUNK_ID: u32 = u32::MAX;
-
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Error writing table '{}': {}", table_name, source))]
@@ -65,7 +62,7 @@ impl ChunkMetrics {
 #[derive(Debug)]
 pub struct Chunk {
     /// The id for this chunk
-    id: u32,
+    id: Option<u32>,
 
     /// `dictionary` maps &str -> DID. The DIDs are used in place of String or
     /// str to avoid slow string operations. The same dictionary is used for
@@ -89,7 +86,7 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(id: u32, table_name: impl AsRef<str>, metrics: ChunkMetrics) -> Self {
+    pub fn new(id: Option<u32>, table_name: impl AsRef<str>, metrics: ChunkMetrics) -> Self {
         let table_name = table_name.as_ref();
         let mut dictionary = Dictionary::new();
         let table_id = dictionary.lookup_value_or_insert(table_name);
@@ -173,15 +170,12 @@ impl Chunk {
 
     /// return the ID of this chunk
     pub fn id(&self) -> u32 {
-        self.id
+        self.id.expect("expected id to be set")
     }
 
     pub fn set_id(&mut self, id: u32) {
-        assert_eq!(
-            self.id, INVALID_CHUNK_ID,
-            "cannot change ID once it has been set"
-        );
-        self.id = id;
+        assert_eq!(self.id, None, "cannot change ID once it has been set");
+        self.id = Some(id);
     }
 
     /// Return the name of the table in this chunk
@@ -294,7 +288,7 @@ mod tests {
 
     #[test]
     fn writes_table_batches() {
-        let mut chunk = Chunk::new(1, "cpu", Default::default());
+        let mut chunk = Chunk::new(Some(1), "cpu", Default::default());
 
         let lp = vec!["cpu,host=a val=23 1", "cpu,host=b val=2 1"].join("\n");
 
@@ -315,7 +309,7 @@ mod tests {
 
     #[test]
     fn writes_table_3_batches() {
-        let mut chunk = Chunk::new(1, "cpu", Default::default());
+        let mut chunk = Chunk::new(Some(1), "cpu", Default::default());
 
         let lp = vec!["cpu,host=a val=23 1", "cpu,host=b val=2 1"].join("\n");
 
@@ -346,7 +340,7 @@ mod tests {
 
     #[test]
     fn test_snapshot() {
-        let mut chunk = Chunk::new(1, "cpu", Default::default());
+        let mut chunk = Chunk::new(Some(1), "cpu", Default::default());
 
         let lp = vec!["cpu,host=a val=23 1", "cpu,host=b val=2 1"].join("\n");
 

@@ -628,8 +628,6 @@ impl ChunkMetrics {
     }
 
     // Updates column storage statistics for the Read Buffer.
-    // `drop` indicates whether to decrease the metrics (because the chunk is
-    // being dropped), or to increase the metrics because it's being created.
     fn update_column_storage_statistics(&mut self, statistics: &[Statistics]) {
         for stat in statistics {
             let labels = &[

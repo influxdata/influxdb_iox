@@ -9,7 +9,7 @@ use mutable_buffer::chunk::Chunk;
 #[inline]
 fn write_chunk(count: usize, entries: &[Entry]) {
     // m0 is hard coded into tag_values.lp.gz
-    let mut chunk = Chunk::new(0, "m0", Default::default());
+    let mut chunk = Chunk::new(Some(0), "m0", Default::default());
 
     for _ in 0..count {
         for entry in entries {

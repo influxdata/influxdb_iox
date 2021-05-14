@@ -6,8 +6,8 @@
     clippy::clone_on_ref_ptr
 )]
 
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use hashbrown::hash_map::Entry;
+use hashbrown::HashMap;
 use std::sync::Arc;
 
 use opentelemetry_prometheus::PrometheusExporter;
@@ -57,7 +57,15 @@ pub struct MetricRegistry {
     provider: RegistryMeterProvider,
     exporter: PrometheusExporter,
     observers: Arc<ObserverCollection>,
-    gauges: Arc<Mutex<HashMap<String, Gauge>>>,
+
+    /// Provides a mapping between metric name and Gauge
+    ///
+    /// These are registered on a single shared map to ensure if gauges with the
+    /// the same metric name are registered on different metrics domains they
+    /// both get the same underlying Gauge. If this didn't occur and both gauges
+    /// were used to publish to the same label set, they wouldn't be able to see
+    /// each other contributions, and only one would be reported to OT
+    gauges: Arc<Mutex<HashMap<String, Arc<GaugeState>>>>,
 }
 
 impl MetricRegistry {
@@ -180,9 +188,13 @@ impl Default for MetricRegistry {
 pub struct Domain {
     name: &'static str,
     meter: OTMeter,
-    observers: Arc<ObserverCollection>,
     default_labels: Vec<KeyValue>,
-    gauges: Arc<Mutex<HashMap<String, Gauge>>>,
+
+    /// A copy of the observer collection from the owning `MetricRegistry`
+    observers: Arc<ObserverCollection>,
+
+    /// A copy of the gauge map from the owning `MetricRegistry`
+    gauges: Arc<Mutex<HashMap<String, Arc<GaugeState>>>>,
 }
 
 impl Domain {
@@ -191,7 +203,7 @@ impl Domain {
         meter: OTMeter,
         observers: Arc<ObserverCollection>,
         default_labels: Vec<KeyValue>,
-        gauges: Arc<Mutex<HashMap<String, Gauge>>>,
+        gauges: Arc<Mutex<HashMap<String, Arc<GaugeState>>>>,
     ) -> Self {
         Self {
             name,
@@ -367,12 +379,13 @@ impl Domain {
         default_labels: &[KeyValue],
     ) -> Gauge {
         let name = self.build_metric_name(name, None, unit, None);
-        let mut gauge: Gauge = match self.gauges.lock().entry(name) {
-            Entry::Occupied(occupied) => occupied.get().clone(),
+
+        let gauge = match self.gauges.lock().entry(name) {
+            Entry::Occupied(occupied) => Arc::clone(occupied.get()),
             Entry::Vacant(vacant) => {
                 let key = vacant.key().clone();
-                let gauge = Gauge::default();
-                let captured = gauge.clone();
+                let gauge = Arc::new(GaugeState::default());
+                let captured = Arc::clone(&gauge);
                 self.observers
                     .u64_value_observer(key, description, move |observer| {
                         captured.visit_values(|data, labels| {
@@ -380,17 +393,17 @@ impl Domain {
                         });
                     });
 
-                vacant.insert(gauge).clone()
+                Arc::clone(vacant.insert(gauge))
             }
         };
-        gauge.set_labels([&self.default_labels[..], &default_labels].concat());
-        gauge
+        Gauge::new(gauge, [&self.default_labels[..], &default_labels].concat())
     }
 
     /// An observer can be used to provide asynchronous fetching of values from an object
     ///
     /// NB: If you register multiple observers with the same measurement name, they MUST
-    /// publish to disjoint tag sets
+    /// publish to disjoint label sets. If two or more observers publish to the same
+    /// measurement name and label set only one will be reported
     pub fn register_observer(
         &self,
         subname: Option<&str>,

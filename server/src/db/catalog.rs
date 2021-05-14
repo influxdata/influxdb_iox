@@ -317,11 +317,8 @@ mod tests {
         let write = entry.partition_writes().unwrap().remove(0);
         let batch = write.table_batches().remove(0);
         let mut partition = partition.write();
-        let mut mb_chunk = mutable_buffer::chunk::Chunk::new(
-            mutable_buffer::chunk::INVALID_CHUNK_ID,
-            batch.name(),
-            Default::default(),
-        );
+        let mut mb_chunk =
+            mutable_buffer::chunk::Chunk::new(None, batch.name(), Default::default());
 
         mb_chunk
             .write_table_batch(

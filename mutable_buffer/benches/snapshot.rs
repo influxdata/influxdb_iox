@@ -13,7 +13,7 @@ fn snapshot_chunk(chunk: &Chunk) {
 
 fn chunk(count: usize) -> Chunk {
     // m0 is hard coded into tag_values.lp.gz
-    let mut chunk = Chunk::new(0, "m0", Default::default());
+    let mut chunk = Chunk::new(Some(0), "m0", Default::default());
 
     let raw = include_bytes!("../../tests/fixtures/lineproto/tag_values.lp.gz");
     let mut gz = GzDecoder::new(&raw[..]);

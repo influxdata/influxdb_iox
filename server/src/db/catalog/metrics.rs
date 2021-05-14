@@ -119,17 +119,17 @@ impl MemoryMetrics {
 
     /// Returns the size of the mutable buffer
     pub fn mutable_buffer(&self) -> GaugeValue {
-        self.mutable_buffer.clone()
+        self.mutable_buffer.clone_empty()
     }
 
     /// Returns the size of the mutable buffer
     pub fn read_buffer(&self) -> GaugeValue {
-        self.read_buffer.clone()
+        self.read_buffer.clone_empty()
     }
 
     /// Returns the amount of data in parquet
     pub fn parquet(&self) -> GaugeValue {
-        self.parquet.clone()
+        self.parquet.clone_empty()
     }
 
     /// Total bytes over all registries.

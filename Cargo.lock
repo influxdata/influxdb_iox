@@ -1873,6 +1873,7 @@ name = "metrics"
 version = "0.1.0"
 dependencies = [
  "dashmap",
+ "hashbrown 0.11.2",
  "observability_deps",
  "opentelemetry-prometheus",
  "parking_lot",
