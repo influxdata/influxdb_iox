@@ -101,7 +101,7 @@ pub(crate) struct GaugeState {
 
 impl GaugeState {
     /// Visits the totals for all recorded label sets
-    pub fn visit_values(&self, f: impl Fn(usize, &Vec<KeyValue>)) {
+    pub fn visit_values(&self, f: impl Fn(usize, &[KeyValue])) {
         for data in self.values.iter() {
             let (data, labels) = data.value();
             f(data.get_total(), labels)

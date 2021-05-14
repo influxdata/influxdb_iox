@@ -388,9 +388,7 @@ impl Domain {
                 let captured = Arc::clone(&gauge);
                 self.observers
                     .u64_value_observer(key, description, move |observer| {
-                        captured.visit_values(|data, labels| {
-                            observer.observe(data as u64, labels.as_slice())
-                        });
+                        captured.visit_values(|data, labels| observer.observe(data as u64, labels));
                     });
 
                 Arc::clone(vacant.insert(gauge))
