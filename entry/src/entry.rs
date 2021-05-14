@@ -2142,6 +2142,79 @@ mod tests {
     }
 
     #[test]
+    fn missing_times_added_should_match_partition() {
+        use chrono::TimeZone;
+        use std::sync::Mutex;
+
+        struct FakeTimeProvider {
+            values: Mutex<Vec<DateTime<Utc>>>,
+        }
+        impl TimeProvider for FakeTimeProvider {
+            fn now(&self) -> DateTime<Utc> {
+                self.values.lock().unwrap().pop().unwrap()
+            }
+        }
+
+        let fake_time_provider = FakeTimeProvider {
+            values: Mutex::new(vec![
+                // returned second, just after the hour
+                Utc.datetime_from_str("2021-01-01 01:00:00 000000001", "%F %T %f")
+                    .unwrap(),
+                // returned first, just before the hour
+                Utc.datetime_from_str("2021-01-01 00:59:59 999999999", "%F %T %f")
+                    .unwrap(),
+            ]),
+        };
+
+        // One point that has no timestamp
+        let lp = "a val=1i";
+        let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
+
+        // Partition on the hour
+        let hour_partitioner = hour_partitioner();
+
+        // Extract the partition key the partitioned write was assigned
+        let sharded_entries = lines_to_sharded_entries_with_injected_time_provider(
+            &lines,
+            sharder(1).as_ref(),
+            &hour_partitioner,
+            fake_time_provider,
+        )
+        .unwrap();
+        let partition_writes = sharded_entries
+            .first()
+            .unwrap()
+            .entry
+            .partition_writes()
+            .unwrap();
+        let partition_write = partition_writes.first().unwrap();
+        let assigned_partition_key = partition_write.key();
+
+        // Extract the timestamp the point was assigned
+        let table_batches = partition_write.table_batches();
+        let batch = table_batches.first().unwrap();
+        let columns = batch.columns();
+        let col = columns.get(0).unwrap();
+        assert_eq!(col.name(), TIME_COLUMN_NAME);
+        let values = col.values().i64_values().unwrap();
+
+        // Recreate the `ParsedLine` with the assigned timestamp to re-partition this point
+        let lp_with_assigned_timestamp = format!("{} {}", lp, values[0].unwrap());
+        let reparsed_lines: Vec<_> = parse_lines(&lp_with_assigned_timestamp)
+            .map(|l| l.unwrap())
+            .collect();
+        let point_key = hour_partitioner
+            .partition_key(
+                &reparsed_lines[0],
+                &Utc::now(), // this is arbitrary; shouldn't be used since line now has timestamp
+            )
+            .unwrap();
+
+        // The point and the partitioned write it's in should have the same partition key
+        assert_eq!(point_key, assigned_partition_key);
+    }
+
+    #[test]
     fn field_type_conflict() {
         let lp = vec!["a val=1i 1", "a val=2.1 123"].join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
