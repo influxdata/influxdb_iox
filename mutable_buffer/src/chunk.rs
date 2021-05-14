@@ -339,6 +339,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "nocache"))]
     fn test_snapshot() {
         let mut chunk = Chunk::new(Some(1), "cpu", Default::default());
 
