@@ -94,10 +94,13 @@ impl ChunkSnapshot {
             },
         );
 
-        Self {
-            chunk_id: chunk.id.expect("cannot snapshot chunk without an ID"),
-            records,
-        }
+        let chunk_id = chunk
+            .id
+            .ok_or("cannot snapshot chunk without an ID")
+            .log_if_error("ChunkSnapshot determining chunk id")
+            .unwrap();
+
+        Self { chunk_id, records }
     }
 
     /// return the ID of the chunk this is a snapshot of
