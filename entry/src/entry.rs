@@ -9,7 +9,7 @@ use std::{
     num::NonZeroU64,
 };
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use flatbuffers::{FlatBufferBuilder, Follow, ForwardsUOffset, Vector, VectorIter, WIPOffset};
 use ouroboros::self_referencing;
 use snafu::{OptionExt, ResultExt, Snafu};
@@ -61,41 +61,14 @@ pub enum ColumnError {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 type ColumnResult<T, E = ColumnError> = std::result::Result<T, E>;
 
-trait TimeProvider {
-    fn now(&self) -> DateTime<Utc>;
-}
-
-struct ProductionTimeProvider {}
-
-impl TimeProvider for ProductionTimeProvider {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
-    }
-}
-
 /// Converts parsed line protocol into a collection of ShardedEntry with the
 /// underlying flatbuffers bytes generated.
 pub fn lines_to_sharded_entries(
     lines: &[ParsedLine<'_>],
+    default_time: i64,
     sharder: Option<&impl Sharder>,
     partitioner: &impl Partitioner,
 ) -> Result<Vec<ShardedEntry>> {
-    lines_to_sharded_entries_with_injected_time_provider(
-        lines,
-        sharder,
-        partitioner,
-        ProductionTimeProvider {},
-    )
-}
-
-/// Allows for injection of time for testing
-fn lines_to_sharded_entries_with_injected_time_provider(
-    lines: &[ParsedLine<'_>],
-    sharder: Option<&impl Sharder>,
-    partitioner: &impl Partitioner,
-    time_provider: impl TimeProvider,
-) -> Result<Vec<ShardedEntry>> {
-    let default_time = time_provider.now();
     let mut sharded_lines = BTreeMap::new();
 
     for line in lines {
@@ -104,7 +77,7 @@ fn lines_to_sharded_entries_with_injected_time_provider(
             None => None,
         };
         let partition_key = partitioner
-            .partition_key(line, &default_time)
+            .partition_key(line, default_time)
             .context(GeneratingPartitionKey)?;
         let table = line.series.measurement.as_str();
 
@@ -118,11 +91,9 @@ fn lines_to_sharded_entries_with_injected_time_provider(
             .push(line);
     }
 
-    let default_time = time_provider.now();
-
     let sharded_entries = sharded_lines
         .into_iter()
-        .map(|(shard_id, partitions)| build_sharded_entry(shard_id, partitions, &default_time))
+        .map(|(shard_id, partitions)| build_sharded_entry(shard_id, partitions, default_time))
         .collect::<Result<Vec<_>>>()?;
 
     Ok(sharded_entries)
@@ -131,7 +102,7 @@ fn lines_to_sharded_entries_with_injected_time_provider(
 fn build_sharded_entry(
     shard_id: Option<ShardId>,
     partitions: BTreeMap<String, BTreeMap<&str, Vec<&ParsedLine<'_>>>>,
-    default_time: &DateTime<Utc>,
+    default_time: i64,
 ) -> Result<ShardedEntry> {
     let mut fbb = flatbuffers::FlatBufferBuilder::new_with_capacity(1024);
 
@@ -170,7 +141,7 @@ fn build_partition_write<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     partition_key: String,
     tables: BTreeMap<&str, Vec<&'a ParsedLine<'_>>>,
-    default_time: &DateTime<Utc>,
+    default_time: i64,
 ) -> Result<flatbuffers::WIPOffset<entry_fb::PartitionWrite<'a>>> {
     let partition_key = fbb.create_string(&partition_key);
 
@@ -193,7 +164,7 @@ fn build_table_write_batch<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     table_name: &str,
     lines: Vec<&'a ParsedLine<'_>>,
-    default_time: &DateTime<Utc>,
+    default_time: i64,
 ) -> Result<flatbuffers::WIPOffset<entry_fb::TableWriteBatch<'a>>> {
     let mut columns = BTreeMap::new();
     for (i, line) in lines.iter().enumerate() {
@@ -284,10 +255,7 @@ fn build_table_write_batch<'a>(
             .entry(TIME_COLUMN_NAME)
             .or_insert_with(ColumnBuilder::new_time_column);
         builder
-            .push_time(
-                line.timestamp
-                    .unwrap_or_else(|| default_time.timestamp_nanos()),
-            )
+            .push_time(line.timestamp.unwrap_or(default_time))
             .context(TableColumnTypeMismatch {
                 table: table_name,
                 column: TIME_COLUMN_NAME,
@@ -1557,11 +1525,18 @@ pub mod test_helpers {
     pub fn lp_to_entry(lp: &str) -> Entry {
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        lines_to_sharded_entries(&lines, sharder(1).as_ref(), &hour_partitioner())
-            .unwrap()
-            .pop()
-            .unwrap()
-            .entry
+        let default_time = Utc::now().timestamp_nanos();
+
+        lines_to_sharded_entries(
+            &lines,
+            default_time,
+            sharder(1).as_ref(),
+            &hour_partitioner(),
+        )
+        .unwrap()
+        .pop()
+        .unwrap()
+        .entry
     }
 
     /// Converts the line protocol to a collection of `Entry` with a single
@@ -1570,14 +1545,21 @@ pub mod test_helpers {
     pub fn lp_to_entries(lp: &str) -> Vec<Entry> {
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
+        let default_time = Utc::now().timestamp_nanos();
+
         lines
             .chunks(LP_BATCH_SIZE)
             .map(|batch| {
-                lines_to_sharded_entries(batch, sharder(1).as_ref(), &hour_partitioner())
-                    .unwrap()
-                    .pop()
-                    .unwrap()
-                    .entry
+                lines_to_sharded_entries(
+                    batch,
+                    default_time,
+                    sharder(1).as_ref(),
+                    &hour_partitioner(),
+                )
+                .unwrap()
+                .pop()
+                .unwrap()
+                .entry
             })
             .collect::<Vec<_>>()
     }
@@ -1647,7 +1629,7 @@ pub mod test_helpers {
         fn partition_key(
             &self,
             _line: &ParsedLine<'_>,
-            _default_time: &DateTime<Utc>,
+            _default_time: i64,
         ) -> data_types::database_rules::Result<String> {
             let n = *self.n.borrow();
             self.n.replace(n + 1);
@@ -1663,15 +1645,14 @@ pub mod test_helpers {
         fn partition_key(
             &self,
             line: &ParsedLine<'_>,
-            default_time: &DateTime<Utc>,
+            default_time: i64,
         ) -> data_types::database_rules::Result<String> {
             const HOUR_FORMAT: &str = "%Y-%m-%dT%H";
 
-            let key = match line.timestamp {
-                Some(t) => Utc.timestamp_nanos(t).format(HOUR_FORMAT),
-                None => default_time.format(HOUR_FORMAT),
-            }
-            .to_string();
+            let key = Utc
+                .timestamp_nanos(line.timestamp.unwrap_or(default_time))
+                .format(HOUR_FORMAT)
+                .to_string();
 
             Ok(key)
         }
@@ -1686,6 +1667,8 @@ mod tests {
     use super::test_helpers::*;
     use super::*;
 
+    const ARBITRARY_DEFAULT_TIME: i64 = 456;
+
     #[test]
     fn shards_lines() {
         let lp = vec![
@@ -1696,8 +1679,13 @@ mod tests {
         .join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(2).as_ref(), &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(2).as_ref(),
+            &partitioner(1),
+        )
+        .unwrap();
 
         assert_eq!(sharded_entries.len(), 2);
         assert_eq!(sharded_entries[0].shard_id, Some(0));
@@ -1714,8 +1702,13 @@ mod tests {
         .join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, NO_SHARD_CONFIG, &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            NO_SHARD_CONFIG,
+            &partitioner(1),
+        )
+        .unwrap();
 
         assert_eq!(sharded_entries.len(), 1);
         assert_eq!(sharded_entries[0].shard_id, None);
@@ -1731,8 +1724,13 @@ mod tests {
         .join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(2)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(2),
+        )
+        .unwrap();
 
         let partition_writes = sharded_entries[0].entry.partition_writes().unwrap();
         assert_eq!(partition_writes.len(), 2);
@@ -1752,8 +1750,13 @@ mod tests {
         .join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        )
+        .unwrap();
 
         let partition_writes = sharded_entries[0].entry.partition_writes().unwrap();
         let table_batches = partition_writes[0].table_batches();
@@ -1769,8 +1772,13 @@ mod tests {
         let lp = vec!["a,host=a val=23 983", "a,host=a,region=west val2=23.2 2343"].join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        )
+        .unwrap();
 
         let partition_writes = sharded_entries[0].entry.partition_writes().unwrap();
         let table_batches = partition_writes[0].table_batches();
@@ -1811,8 +1819,13 @@ mod tests {
         .join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        )
+        .unwrap();
 
         let partition_writes = sharded_entries
             .first()
@@ -1882,8 +1895,13 @@ mod tests {
         .join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        )
+        .unwrap();
 
         let partition_writes = sharded_entries
             .first()
@@ -2007,8 +2025,13 @@ mod tests {
         let lp = vec!["a val=1i 1"].join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        )
+        .unwrap();
         let partition_writes = sharded_entries
             .first()
             .unwrap()
@@ -2038,8 +2061,13 @@ mod tests {
         .join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        )
+        .unwrap();
         let partition_writes = sharded_entries
             .first()
             .unwrap()
@@ -2082,8 +2110,13 @@ mod tests {
         .join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        )
+        .unwrap();
         let partition_writes = sharded_entries
             .first()
             .unwrap()
@@ -2119,10 +2152,11 @@ mod tests {
         let lp = vec!["a val=1i", "a val=2i 123"].join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let t = Utc::now().timestamp_nanos();
+        let default_time = Utc::now().timestamp_nanos();
 
         let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1)).unwrap();
+            lines_to_sharded_entries(&lines, default_time, sharder(1).as_ref(), &partitioner(1))
+                .unwrap();
 
         let partition_writes = sharded_entries
             .first()
@@ -2137,34 +2171,18 @@ mod tests {
         let col = columns.get(0).unwrap();
         assert_eq!(col.name(), TIME_COLUMN_NAME);
         let values = col.values().i64_values().unwrap();
-        assert!(values[0].unwrap() > t);
+        assert_eq!(values[0].unwrap(), default_time);
         assert_eq!(values[1], Some(123));
     }
 
     #[test]
     fn missing_times_added_should_match_partition() {
         use chrono::TimeZone;
-        use std::sync::Mutex;
 
-        struct FakeTimeProvider {
-            values: Mutex<Vec<DateTime<Utc>>>,
-        }
-        impl TimeProvider for FakeTimeProvider {
-            fn now(&self) -> DateTime<Utc> {
-                self.values.lock().unwrap().pop().unwrap()
-            }
-        }
-
-        let fake_time_provider = FakeTimeProvider {
-            values: Mutex::new(vec![
-                // returned second, just after the hour
-                Utc.datetime_from_str("2021-01-01 01:00:00 000000001", "%F %T %f")
-                    .unwrap(),
-                // returned first, just before the hour
-                Utc.datetime_from_str("2021-01-01 00:59:59 999999999", "%F %T %f")
-                    .unwrap(),
-            ]),
-        };
+        let default_time = Utc
+            .datetime_from_str("2021-01-01 00:59:59 999999999", "%F %T %f")
+            .unwrap()
+            .timestamp_nanos();
 
         // One point that has no timestamp
         let lp = "a val=1i";
@@ -2174,13 +2192,9 @@ mod tests {
         let hour_partitioner = hour_partitioner();
 
         // Extract the partition key the partitioned write was assigned
-        let sharded_entries = lines_to_sharded_entries_with_injected_time_provider(
-            &lines,
-            sharder(1).as_ref(),
-            &hour_partitioner,
-            fake_time_provider,
-        )
-        .unwrap();
+        let sharded_entries =
+            lines_to_sharded_entries(&lines, default_time, sharder(1).as_ref(), &hour_partitioner)
+                .unwrap();
         let partition_writes = sharded_entries
             .first()
             .unwrap()
@@ -2206,7 +2220,7 @@ mod tests {
         let point_key = hour_partitioner
             .partition_key(
                 &reparsed_lines[0],
-                &Utc::now(), // this is arbitrary; shouldn't be used since line now has timestamp
+                ARBITRARY_DEFAULT_TIME, // shouldn't be used since line now has timestamp
             )
             .unwrap();
 
@@ -2219,8 +2233,12 @@ mod tests {
         let lp = vec!["a val=1i 1", "a val=2.1 123"].join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1));
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        );
 
         assert!(sharded_entries.is_err());
     }
@@ -2230,8 +2248,12 @@ mod tests {
         let lp = vec!["a,host=a val=1i 1", "a host=\"b\" 123"].join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1));
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        );
 
         assert!(sharded_entries.is_err());
     }
@@ -2246,8 +2268,13 @@ mod tests {
         .join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        )
+        .unwrap();
 
         let entry_bytes = sharded_entries.first().unwrap().entry.data();
         let clock_value = ClockValue::try_from(23).unwrap();
@@ -2331,8 +2358,13 @@ mod tests {
         .join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        )
+        .unwrap();
 
         let entry_bytes = sharded_entries.first().unwrap().entry.data();
 
@@ -2371,8 +2403,13 @@ mod tests {
         .join("\n");
         let lines: Vec<_> = parse_lines(&lp).map(|l| l.unwrap()).collect();
 
-        let sharded_entries =
-            lines_to_sharded_entries(&lines, sharder(1).as_ref(), &partitioner(1)).unwrap();
+        let sharded_entries = lines_to_sharded_entries(
+            &lines,
+            ARBITRARY_DEFAULT_TIME,
+            sharder(1).as_ref(),
+            &partitioner(1),
+        )
+        .unwrap();
 
         let entry_bytes = sharded_entries.first().unwrap().entry.data();
 
