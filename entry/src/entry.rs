@@ -61,6 +61,18 @@ pub enum ColumnError {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 type ColumnResult<T, E = ColumnError> = std::result::Result<T, E>;
 
+trait TimeProvider {
+    fn now(&self) -> DateTime<Utc>;
+}
+
+struct ProductionTimeProvider {}
+
+impl TimeProvider for ProductionTimeProvider {
+    fn now(&self) -> DateTime<Utc> {
+        Utc::now()
+    }
+}
+
 /// Converts parsed line protocol into a collection of ShardedEntry with the
 /// underlying flatbuffers bytes generated.
 pub fn lines_to_sharded_entries(
@@ -68,7 +80,22 @@ pub fn lines_to_sharded_entries(
     sharder: Option<&impl Sharder>,
     partitioner: &impl Partitioner,
 ) -> Result<Vec<ShardedEntry>> {
-    let default_time = Utc::now();
+    lines_to_sharded_entries_with_injected_time_provider(
+        lines,
+        sharder,
+        partitioner,
+        ProductionTimeProvider {},
+    )
+}
+
+/// Allows for injection of time for testing
+fn lines_to_sharded_entries_with_injected_time_provider(
+    lines: &[ParsedLine<'_>],
+    sharder: Option<&impl Sharder>,
+    partitioner: &impl Partitioner,
+    time_provider: impl TimeProvider,
+) -> Result<Vec<ShardedEntry>> {
+    let default_time = time_provider.now();
     let mut sharded_lines = BTreeMap::new();
 
     for line in lines {
@@ -91,7 +118,7 @@ pub fn lines_to_sharded_entries(
             .push(line);
     }
 
-    let default_time = Utc::now();
+    let default_time = time_provider.now();
 
     let sharded_entries = sharded_lines
         .into_iter()
