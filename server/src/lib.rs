@@ -91,8 +91,6 @@ use object_store::{path::ObjectStorePath, ObjectStore, ObjectStoreApi};
 use query::{exec::Executor, DatabaseStore};
 use tracker::{TaskId, TaskRegistration, TaskRegistryWithHistory, TaskTracker, TrackedFutureExt};
 
-use futures::{pin_mut, FutureExt};
-
 use crate::{
     config::{
         object_store_path_for_database_config, Config, GRpcConnectionString, DB_RULES_FILE_NAME,
