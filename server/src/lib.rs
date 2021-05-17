@@ -801,21 +801,8 @@ impl<M: ConnectionManager> Server<M> {
             }
         }
 
-        info!("shutting down background worker");
-
-        let join = self.config.drain().fuse();
-        pin_mut!(join);
-
-        // Keep running reclaim whilst shutting down in case something
-        // is waiting on a tracker to complete
-        loop {
-            self.jobs.inner.lock().reclaim();
-
-            futures::select! {
-                _ = interval.tick().fuse() => {},
-                _ = join => break
-            }
-        }
+        info!("shutting down background workers");
+        self.config.drain().await;
 
         info!("draining tracker registry");
 
