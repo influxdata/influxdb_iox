@@ -135,7 +135,7 @@ impl fmt::Display for Predicate {
             write!(f, " range: [{} - {}]", range.start, range.end)?;
         }
 
-        if self.exprs.len() > 0 {
+        if !self.exprs.is_empty() {
             // Expr doesn't implement `Display` yet, so just the debug version
             // See https://github.com/apache/arrow-datafusion/issues/347
             let display_exprs = self.exprs.iter().map(|e| format!("{:?}", e));
