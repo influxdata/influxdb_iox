@@ -17,8 +17,6 @@ use std::mem::size_of;
 use std::ops::AddAssign;
 use std::{cmp::Ordering, iter};
 
-use arrow::array::Array;
-
 use crate::column::{cmp, RowIDs};
 
 pub const ENCODING_NAME: &str = "VEC";
@@ -551,65 +549,19 @@ fixed_from_impls! {
      (f32, f32),
 }
 
-// This macro implements the From trait for arrow arrays of various logical
-// types.
-//
-// Here is an example implementation:
-//
-//  impl From<Int64Array> for Fixed<i16> {
-//      fn from(arr: Int64Array) -> Self {
-//          assert_eq!(arr.null_count(), 0);
-//          let mut values = Vec::with_capacity(arr.len());
-//          for i in 0..arr.len(){
-//              values.push(arr.value(i) as i16);
-//          }
-//          Self{values}
-//      }
-//  }
-//
-macro_rules! fixed_from_arrow_impls {
-    ($(($type_from:ty, $type_to:ty),)*) => {
-        $(
-            impl From<$type_from> for Fixed<$type_to> {
-                fn from(arr: $type_from) -> Self {
-                    assert_eq!(arr.null_count(), 0);
-                    let mut values = Vec::with_capacity(arr.len());
-                    for i in 0..arr.len(){
-                        values.push(arr.value(i) as $type_to);
-                    }
-                    Self{values}
-                }
-            }
-        )*
-    };
-}
-
-fixed_from_arrow_impls! {
-    (arrow::array::Int64Array, i64),
-    (arrow::array::Int64Array, i32),
-    (arrow::array::Int64Array, i16),
-    (arrow::array::Int64Array, i8),
-    (arrow::array::Int64Array, u32),
-    (arrow::array::Int64Array, u16),
-    (arrow::array::Int64Array, u8),
-
-    (arrow::array::UInt64Array, u64),
-    (arrow::array::UInt64Array, u32),
-    (arrow::array::UInt64Array, u16),
-    (arrow::array::UInt64Array, u8),
+impl<T> From<Vec<T>> for Fixed<T>
+where
+    T: PartialOrd + Debug,
+{
+    fn from(values: Vec<T>) -> Self {
+        Self { values }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::cmp::Operator;
     use super::*;
-
-    #[test]
-    fn from_i64_to_i32() {
-        let input = vec![22_i64, 33, 18, 100_000_000];
-        let v = Fixed::<i32>::from(input.as_slice());
-        assert_eq!(v.values, vec![22_i32, 33, 18, 100_000_000]);
-    }
 
     #[test]
     fn first_row_id_eq_value() {

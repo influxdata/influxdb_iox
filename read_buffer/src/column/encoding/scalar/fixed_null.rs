@@ -14,7 +14,6 @@
 //! consumer of these encodings.
 use std::cmp::Ordering;
 use std::fmt::Debug;
-use std::iter::FromIterator;
 use std::mem::size_of;
 
 use crate::column::{cmp, RowIDs};
@@ -648,68 +647,14 @@ fixed_null_from_arrow_types! {
     (arrow::array::Float64Array, arrow::datatypes::Float64Type),
 }
 
-// This macro implements the From trait for Arrow arrays where some down-casting
-// to a smaller physical type happens. It is the caller's responsibility to
-// ensure that this down-casting is safe.
-//
-// Example implementation:
-//
-//  impl From<Int64Array> for FixedNull<Int32Type> {
-//    fn from(arr: Int64Array) -> Self {
-//      let arr: PrimitiveArray<Int32Type> =
-//          PrimitiveArray::from_iter(arr.iter().map(|v| v.map(|v| v as i32)));
-//      Self { arr }
-//    }
-//  }
-//
-macro_rules! fixed_null_from_arrow_types_down_cast {
-    ($(($type_from:ty, $type_to:ty, $rust_type:ty),)*) => {
-        $(
-            impl From<$type_from> for FixedNull<$type_to> {
-                fn from(arr: $type_from) -> Self {
-                    let arr: PrimitiveArray<$type_to> =
-                        PrimitiveArray::from_iter(arr.iter().map(|v| v.map(|v| v as $rust_type)));
-                    Self { arr }
-                }
-            }
-        )*
-    };
-}
-
-fixed_null_from_arrow_types_down_cast! {
-    (arrow::array::Int64Array, arrow::datatypes::Int32Type, i32),
-    (arrow::array::Int64Array, arrow::datatypes::UInt32Type, u32),
-    (arrow::array::Int64Array, arrow::datatypes::Int16Type, i16),
-    (arrow::array::Int64Array, arrow::datatypes::UInt16Type, u16),
-    (arrow::array::Int64Array, arrow::datatypes::Int8Type, i8),
-    (arrow::array::Int64Array, arrow::datatypes::UInt8Type, u8),
-    (arrow::array::UInt64Array, arrow::datatypes::UInt32Type, u32),
-    (arrow::array::UInt64Array, arrow::datatypes::UInt16Type, u16),
-    (arrow::array::UInt64Array, arrow::datatypes::UInt8Type, u8),
-}
-
 #[cfg(test)]
 mod test {
     use super::cmp::Operator;
     use super::*;
-    use arrow::array::*;
     use arrow::datatypes::*;
 
     fn some_vec<T: Copy>(v: Vec<T>) -> Vec<Option<T>> {
         v.iter().map(|x| Some(*x)).collect()
-    }
-
-    #[test]
-    fn from_arrow_downcast() {
-        let arr = Int64Array::from(vec![100, u8::MAX as i64]);
-        let exp_values = arr.iter().collect::<Vec<Option<i64>>>();
-        let enc: FixedNull<UInt8Type> = FixedNull::from(arr);
-        assert_eq!(enc.all_values(vec![]), exp_values);
-
-        let arr = Int64Array::from(vec![100, i32::MAX as i64]);
-        let exp_values = arr.iter().collect::<Vec<Option<i64>>>();
-        let enc: FixedNull<UInt32Type> = FixedNull::from(arr);
-        assert_eq!(enc.all_values(vec![]), exp_values);
     }
 
     #[test]
