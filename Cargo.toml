@@ -33,7 +33,6 @@ members = [
     "server",
     "test_helpers",
     "tracker",
-    "write_buffer",
 ]
 
 [profile.release]
