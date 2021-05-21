@@ -435,6 +435,10 @@ impl Chunk {
                     .state
                     .inc_with_labels(&[KeyValue::new("state", "moving")]);
 
+                self.metrics
+                    .immutable_chunk_size
+                    .observe_with_labels(chunk.size() as f64, &[KeyValue::new("state", "moving")]);
+
                 Ok(chunk)
             }
             state => {
