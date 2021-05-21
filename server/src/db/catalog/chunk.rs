@@ -210,6 +210,7 @@ impl Chunk {
             table_name,
             id: chunk_id,
             state,
+            lifecycle_action: None,
             metrics,
             time_of_first_write: None,
             time_of_last_write: None,
