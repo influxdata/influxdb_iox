@@ -342,8 +342,8 @@ impl TaskRegistration {
     }
 
     /// Converts the registration into a tracker with id 0 and no metadata
-    pub fn into_tracker(self) -> TaskTracker<()> {
-        TaskTracker::new(TaskId(0), &self, ())
+    pub fn into_tracker<T>(self, metadata: T) -> TaskTracker<T> {
+        TaskTracker::new(TaskId(0), &self, metadata)
     }
 }
 
