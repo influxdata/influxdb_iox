@@ -8,6 +8,7 @@ readme = "README.md"
 
 [dependencies]
 arrow = "4.0"
+data_types = { path = "../data_types" }
 snafu = "0.6"
 observability_deps = { path = "../observability_deps" }
 

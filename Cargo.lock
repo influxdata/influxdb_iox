@@ -1808,6 +1808,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "arrow_util",
+ "data_types",
  "observability_deps",
  "snafu",
 ]

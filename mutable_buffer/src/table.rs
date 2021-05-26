@@ -5,13 +5,10 @@ use crate::{
     column::Column,
     dictionary::{Dictionary, DID},
 };
-use data_types::{
-    partition_metadata::{ColumnSummary, InfluxDbType},
-    server_id::ServerId,
-};
+use data_types::{partition_metadata::ColumnSummary, server_id::ServerId};
 use entry::{self, ClockValue};
 use internal_types::{
-    schema::{builder::SchemaBuilder, InfluxColumnType, Schema},
+    schema::{builder::SchemaBuilder, Schema},
     selection::Selection,
 };
 
@@ -189,7 +186,7 @@ impl Table {
         Ok(())
     }
 
-    /// Returns the column selection for all the columns in this table, orderd
+    /// Returns the column selection for all the columns in this table, ordered
     /// by table name
     fn all_columns_selection<'a>(
         &self,
@@ -311,11 +308,7 @@ impl Table {
                 ColumnSummary {
                     name: column_name.to_string(),
                     stats: c.stats(),
-                    influxdb_type: Some(match c.influx_type() {
-                        InfluxColumnType::Tag => InfluxDbType::Tag,
-                        InfluxColumnType::Field(_) => InfluxDbType::Field,
-                        InfluxColumnType::Timestamp => InfluxDbType::Timestamp,
-                    }),
+                    influxdb_type: Some(c.influx_type().into()),
                 }
             })
             .collect()

@@ -275,11 +275,7 @@ impl Column {
             ColumnData::U64(v, stats) => mem::size_of::<u64>() * v.len() + mem::size_of_val(&stats),
             ColumnData::Bool(v, stats) => v.byte_len() + mem::size_of_val(&stats),
             ColumnData::Tag(v, stats) => mem::size_of::<DID>() * v.len() + mem::size_of_val(&stats),
-            ColumnData::String(v, stats) => {
-                let string_bytes_size = v.iter().fold(0, |acc, val| acc + val.len());
-                let vec_pointer_sizes = mem::size_of::<String>() * v.len();
-                string_bytes_size + vec_pointer_sizes + mem::size_of_val(&stats)
-            }
+            ColumnData::String(v, stats) => v.size() + mem::size_of_val(&stats),
         };
         data_size + self.valid.byte_len()
     }
