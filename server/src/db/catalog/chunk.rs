@@ -389,10 +389,10 @@ impl Chunk {
         std::mem::swap(&mut s, &mut self.state);
 
         match s {
-            ChunkState::Open(s) => {
+            ChunkState::Open(chunk) => {
                 assert!(self.time_closed.is_none());
                 self.time_closed = Some(Utc::now());
-                let s = s.snapshot();
+                let s = chunk.snapshot();
                 self.state = ChunkState::Closed(Arc::clone(&s));
                 self.metrics
                     .state
@@ -400,7 +400,7 @@ impl Chunk {
 
                 self.metrics
                     .immutable_chunk_size
-                    .observe_with_labels(s.size() as f64, &[KeyValue::new("state", "closed")]);
+                    .observe_with_labels(chunk.size() as f64, &[KeyValue::new("state", "closed")]);
 
                 Ok(s)
             }

@@ -1665,7 +1665,7 @@ mod tests {
                 ("svr_id", "1"),
             ])
             .histogram()
-            .sample_sum_eq(3967.0)
+            .sample_sum_eq(316.0)
             .unwrap();
 
         // RB chunk size
