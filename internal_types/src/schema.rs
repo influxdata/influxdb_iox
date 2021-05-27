@@ -11,7 +11,6 @@ use arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
     SchemaRef as ArrowSchemaRef, TimeUnit,
 };
-use data_types::partition_metadata::InfluxDbType;
 
 /// The name of the timestamp column in the InfluxDB datamodel
 pub const TIME_COLUMN_NAME: &str = "time";
@@ -603,16 +602,6 @@ impl InfluxColumnType {
                 let default_type: ArrowDataType = self.into();
                 data_type == &default_type
             }
-        }
-    }
-}
-
-impl From<InfluxColumnType> for InfluxDbType {
-    fn from(t: InfluxColumnType) -> Self {
-        match t {
-            InfluxColumnType::Tag => Self::Tag,
-            InfluxColumnType::Field(_) => Self::Field,
-            InfluxColumnType::Timestamp => Self::Timestamp,
         }
     }
 }

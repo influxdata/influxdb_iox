@@ -1383,7 +1383,7 @@ mod tests {
             .eq(1.0)
             .unwrap();
 
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "mutable_buffer", 976)
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "mutable_buffer", 1111)
             .unwrap();
 
         db.load_chunk_to_read_buffer("1970-01-01T00", "cpu", 0)
@@ -1665,7 +1665,7 @@ mod tests {
                 ("svr_id", "1"),
             ])
             .histogram()
-            .sample_sum_eq(3680.0)
+            .sample_sum_eq(3967.0)
             .unwrap();
 
         // RB chunk size
@@ -2294,7 +2294,7 @@ mod tests {
                 Arc::from("cpu"),
                 0,
                 ChunkStorage::ClosedMutableBuffer,
-                1856,
+                2126,
                 1,
             ),
             ChunkSummary::new_without_timestamps(
@@ -2320,7 +2320,7 @@ mod tests {
                 .memory()
                 .mutable_buffer()
                 .get_total(),
-            100 + 1856 + 131
+            100 + 2126 + 131
         );
         assert_eq!(
             db.catalog

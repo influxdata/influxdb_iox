@@ -275,7 +275,9 @@ impl Column {
             ColumnData::U64(v, stats) => mem::size_of::<u64>() * v.len() + mem::size_of_val(&stats),
             ColumnData::Bool(v, stats) => v.byte_len() + mem::size_of_val(&stats),
             ColumnData::Tag(v, stats) => mem::size_of::<DID>() * v.len() + mem::size_of_val(&stats),
-            ColumnData::String(v, stats) => v.size() + mem::size_of_val(&stats),
+            ColumnData::String(v, stats) => {
+                v.size() + mem::size_of_val(&stats) + stats.string_size()
+            }
         };
         data_size + self.valid.byte_len()
     }

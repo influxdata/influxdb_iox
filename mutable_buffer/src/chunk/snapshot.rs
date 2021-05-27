@@ -56,25 +56,8 @@ impl ChunkSnapshot {
             .log_if_error("ChunkSnapshot converting table to arrow")
             .unwrap();
 
-        // Cannot use table.stats as the order of columns might be different
-        let stats = batch
-            .schema()
-            .fields()
-            .iter()
-            .map(|field| {
-                let id = chunk
-                    .dictionary
-                    .lookup_value(field.name())
-                    .expect("failed to lookup column name");
-
-                let column = table.column(id).expect("failed to lookup column");
-                ColumnSummary {
-                    name: field.name().to_string(),
-                    influxdb_type: Some(column.influx_type().into()),
-                    stats: column.stats(),
-                }
-            })
-            .collect();
+        let mut stats = table.stats(&chunk.dictionary);
+        stats.sort_by(|a, b| a.name.cmp(&b.name));
 
         let mut s = Self {
             schema,
@@ -185,7 +168,7 @@ impl ChunkSnapshot {
     /// dictionary, tables, statistics and their rows.
     pub fn size(&self) -> usize {
         let columns = self.column_sizes().map(|(_, size)| size).sum::<usize>();
-        let stats = self.stats.len() * std::mem::size_of::<ColumnSummary>();
+        let stats = self.stats.iter().map(|c| c.size()).sum::<usize>();
         columns + stats + std::mem::size_of::<Self>()
     }
 
