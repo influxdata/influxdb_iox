@@ -1849,7 +1849,7 @@ mod tests {
         // Verify data written to the parquet file in object store
         //
         // First, there must be one path of object store in the catalog
-        let paths = pq_chunk.object_store_paths();
+        let paths = pq_chunk.object_store_path();
         assert_eq!(paths.len(), 1);
 
         // Check that the path must exist in the object store
@@ -1977,7 +1977,7 @@ mod tests {
         // Verify data written to the parquet file in object store
         //
         // First, there must be one path of object store in the catalog
-        let paths = pq_chunk.object_store_paths();
+        let paths = pq_chunk.object_store_path();
         assert_eq!(paths.len(), 1);
 
         // Check that the path must exist in the object store
