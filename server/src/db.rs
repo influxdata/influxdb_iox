@@ -909,7 +909,7 @@ impl Db {
         partition_key: &str,
         table_name: &str,
         chunk_id: u32,
-    ) -> Option<TableSummary> {
+    ) -> Option<Arc<TableSummary>> {
         if let Some(partition) = self.catalog.state().partition(partition_key) {
             let partition = partition.read();
             if let Ok(chunk) = partition.chunk(table_name, chunk_id) {
@@ -1482,7 +1482,7 @@ mod tests {
             .eq(1.0)
             .unwrap();
 
-        let expected_parquet_size = 807;
+        let expected_parquet_size = 727;
         catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "read_buffer", 1598).unwrap();
         // now also in OS
         catalog_chunk_size_bytes_metric_eq(
@@ -1838,7 +1838,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(2405.0)
+            .sample_sum_eq(2325.0)
             .unwrap();
 
         // it should be the same chunk!
@@ -1947,7 +1947,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(2405.0)
+            .sample_sum_eq(2325.0)
             .unwrap();
 
         // Unload RB chunk but keep it in OS
@@ -1975,7 +1975,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(807.0)
+            .sample_sum_eq(727.0)
             .unwrap();
 
         // Verify data written to the parquet file in object store
@@ -2336,7 +2336,7 @@ mod tests {
                 Arc::from("cpu"),
                 0,
                 ChunkStorage::ReadBufferAndObjectStore,
-                2396, // size of RB and OS chunks
+                2316, // size of RB and OS chunks
                 1,
             ),
             ChunkSummary::new_without_timestamps(
@@ -2391,7 +2391,7 @@ mod tests {
         );
         assert_eq!(
             db.catalog.state().metrics().memory().parquet().get_total(),
-            807
+            727
         );
     }
 
