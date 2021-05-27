@@ -92,6 +92,10 @@ pub struct Chunk {
     state: ChunkState,
 
     /// The active lifecycle task if any
+    ///
+    /// This is stored as a TaskTracker to allow monitoring the progress of the
+    /// action, detecting if the task failed, waiting for the task to complete
+    /// or even triggering graceful termination of it
     lifecycle_action: Option<TaskTracker<ChunkLifecycleAction>>,
 
     /// The metrics for this chunk
