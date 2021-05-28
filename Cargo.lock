@@ -905,7 +905,7 @@ dependencies = [
 [[package]]
 name = "datafusion"
 version = "4.0.0-SNAPSHOT"
-source = "git+https://github.com/apache/arrow-datafusion.git?rev=d9b044787ce465e2597f9ab37f601ae8515921ee#d9b044787ce465e2597f9ab37f601ae8515921ee"
+source = "git+https://github.com/apache/arrow-datafusion.git?rev=c9ed34c16e47bd5da58b98f64a017e38ab8c946f#c9ed34c16e47bd5da58b98f64a017e38ab8c946f"
 dependencies = [
  "ahash 0.7.4",
  "arrow",
@@ -1614,9 +1614,9 @@ dependencies = [
 
 [[package]]
 name = "inferno"
-version = "0.10.5"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37fb405dbcc505ed20838c4f8dad7b901094de90add237755df54bd5dcda2fdd"
+checksum = "3c3cbcc228d2ad2e99328c2b19f38d80ec387ca6a29f778e40e32ca9f25448c3"
 dependencies = [
  "ahash 0.6.3",
  "atty",
@@ -2025,9 +2025,9 @@ dependencies = [
 
 [[package]]
 name = "memoffset"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f83fb6581e8ed1f85fd45c116db8405483899489e38406156c25eb743554361d"
+checksum = "59accc507f1338036a0477ef61afdae33cde60840f4dfe481319ce3ad116ddf9"
 dependencies = [
  "autocfg",
 ]
