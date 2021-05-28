@@ -56,15 +56,11 @@ impl ChunkSnapshot {
             .log_if_error("ChunkSnapshot converting table to arrow")
             .unwrap();
 
-        // The returned record batch has its columns sorted by name so must also sort the stats
-        let mut stats = table.stats();
-        stats.sort_by(|a, b| a.name.cmp(&b.name));
-
         let mut s = Self {
             schema,
             batch,
             table_name: Arc::clone(&chunk.table_name),
-            stats,
+            stats: table.stats(),
             memory,
         };
         s.memory.set(s.size());

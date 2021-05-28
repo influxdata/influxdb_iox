@@ -149,7 +149,9 @@ impl Table {
         Ok(())
     }
 
-    /// Converts this table to an arrow record batch.
+    /// Converts this table to an arrow record batch
+    ///
+    /// If Selection::All the returned columns are sorted by name
     pub fn to_arrow(&self, selection: Selection<'_>) -> Result<RecordBatch> {
         let schema = self.schema(selection)?;
         let columns = schema
@@ -169,6 +171,9 @@ impl Table {
         RecordBatch::try_new(schema.into(), columns).context(ArrowError {})
     }
 
+    /// Returns the schema for a given selection
+    ///
+    /// If Selection::All the returned columns are sorted by name
     pub fn schema(&self, selection: Selection<'_>) -> Result<Schema> {
         let mut schema_builder = SchemaBuilder::new();
         let schema = match selection {
@@ -195,6 +200,7 @@ impl Table {
         Ok(schema)
     }
 
+    /// Returns a summary of all the columns, sorted by column name
     pub fn stats(&self) -> Vec<ColumnSummary> {
         let mut columns: Vec<_> = self
             .columns
