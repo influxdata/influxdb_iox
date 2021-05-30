@@ -664,7 +664,7 @@ impl InfluxRpcPlanner {
                     .map_err(|e| Box::new(e) as _)
                     .context(InternalTableNamePlanForDefault)?
                     // unwrap the Option (table didn't match)
-                    .unwrap_or_else(move || no_tables)
+                    .unwrap_or(no_tables)
             }
         };
         Ok(table_names)
