@@ -14,7 +14,7 @@ use datafusion::physical_plan::{common::SizedRecordBatchStream, SendableRecordBa
 use crate::exec::Executor;
 use crate::{
     exec::stringset::{StringSet, StringSetRef},
-    Database, DatabaseStore, PartitionChunk, Predicate,
+    Database, DatabaseStore, PartitionChunk, Predicate, PredicateMatch,
 };
 
 use internal_types::{
@@ -307,6 +307,10 @@ impl PartitionChunk for TestChunk {
         self.id
     }
 
+    fn table_name(&self) -> &str {
+        self.table_name.as_ref().map(|s| s.as_str()).unwrap()
+    }
+
     fn read_filter(
         &self,
         predicate: &Predicate,
@@ -322,29 +326,21 @@ impl PartitionChunk for TestChunk {
         Ok(Box::pin(stream))
     }
 
-    fn table_names(
-        &self,
-        predicate: &Predicate,
-        _known_tables: &StringSet,
-    ) -> Result<Option<StringSet>, Self::Error> {
-        self.check_error()?;
-
+    fn apply_predicate(&self, predicate: &Predicate) -> PredicateMatch {
         // save the predicate
         self.predicates.lock().push(predicate.clone());
 
         // do basic filtering based on table name predicate.
-
-        Ok(self
-            .table_name
+        self.table_name
             .as_ref()
-            .filter(|table_name| predicate.should_include_table(&table_name))
-            .map(|table_name| std::iter::once(table_name.to_string()).collect::<StringSet>()))
-    }
-
-    fn all_table_names(&self, known_tables: &mut StringSet) {
-        if let Some(table_name) = self.table_name.as_ref() {
-            known_tables.insert(table_name.to_string());
-        }
+            .map(|table_name| {
+                if !predicate.should_include_table(&table_name) {
+                    PredicateMatch::Zero
+                } else {
+                    PredicateMatch::Unknown
+                }
+            })
+            .unwrap_or(PredicateMatch::Unknown)
     }
 
     fn table_schema(&self, selection: Selection<'_>) -> Result<Schema, Self::Error> {
@@ -364,13 +360,6 @@ impl PartitionChunk for TestChunk {
     ) -> Result<Option<StringSet>, Self::Error> {
         // Model not being able to get column values from metadata
         Ok(None)
-    }
-
-    fn has_table(&self, table_name: &str) -> bool {
-        self.table_name
-            .as_ref()
-            .map(|n| n == table_name)
-            .unwrap_or(false)
     }
 
     fn column_names(

@@ -281,13 +281,7 @@ impl Chunk {
         metrics: ChunkMetrics,
     ) -> Self {
         // workaround until https://github.com/influxdata/influxdb_iox/issues/1295 is fixed
-        let table_name = Arc::from(
-            chunk
-                .table_names(None)
-                .next()
-                .expect("chunk must have exactly 1 table")
-                .as_ref(),
-        );
+        let table_name = Arc::from(chunk.table_name());
 
         // Cache table summary + schema
         let meta = Arc::new(ChunkMetadata {
