@@ -2384,48 +2384,6 @@ mod tests {
         grpc_request_metric_has_count(&fixture, "measurement_fields", "ok", 1).unwrap();
     }
 
-    #[tokio::test]
-    async fn test_measurement_fields_error() {
-        test_helpers::maybe_start_logging();
-        // Start a test gRPC server on a randomally allocated port
-        let mut fixture = Fixture::new().await.expect("Connecting to test server");
-
-        let db_info = OrgAndBucket::new(123, 456);
-        let partition_id = 1;
-
-        let chunk = TestChunk::new(0).with_error("Sugar we are going down");
-
-        fixture
-            .test_storage
-            .db_or_create(&db_info.db_name)
-            .await
-            .unwrap()
-            .add_chunk("my_partition_key", Arc::new(chunk));
-
-        let source = Some(StorageClientWrapper::read_source(
-            db_info.org_id,
-            db_info.bucket_id,
-            partition_id,
-        ));
-
-        // ---
-        // test error
-        // ---
-        let request = MeasurementFieldsRequest {
-            source: source.clone(),
-            measurement: "TheMeasurement".into(),
-            range: None,
-            predicate: None,
-        };
-
-        let response_string = fixture
-            .storage_client
-            .measurement_fields(request)
-            .await
-            .unwrap_err()
-            .to_string();
-        assert_contains!(response_string, "Sugar we are going down");
-    }
 
     fn make_timestamp_range(start: i64, end: i64) -> TimestampRange {
         TimestampRange { start, end }
