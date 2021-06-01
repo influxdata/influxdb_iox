@@ -133,6 +133,9 @@ pub struct TestChunk {
 
     /// A saved error that is returned instead of actual results
     saved_error: Option<String>,
+
+    /// Return value for apply_predicate, if desired
+    predicate_match: Option<PredicateMatch>,
 }
 
 impl TestChunk {
@@ -147,6 +150,12 @@ impl TestChunk {
     /// specified
     pub fn with_error(mut self, error_message: impl Into<String>) -> Self {
         self.saved_error = Some(error_message.into());
+        self
+    }
+
+    /// specify that any call to apply_predicate should return this value
+    pub fn with_predicate_match(mut self, predicate_match: PredicateMatch) -> Self {
+        self.predicate_match = Some(predicate_match);
         self
     }
 
@@ -326,12 +335,20 @@ impl PartitionChunk for TestChunk {
         Ok(Box::pin(stream))
     }
 
-    fn apply_predicate(&self, predicate: &Predicate) -> PredicateMatch {
+    fn apply_predicate(&self, predicate: &Predicate) -> Result<PredicateMatch> {
+        self.check_error()?;
+
         // save the predicate
         self.predicates.lock().push(predicate.clone());
 
-        // do basic filtering based on table name predicate.
-        self.table_name
+        // check if there is a saved result to return
+        if let Some(&predicate_match) = self.predicate_match.as_ref() {
+            return Ok(predicate_match);
+        }
+
+        // otherwise fall back to basic filtering based on table name predicate.
+        let predicate_match = self
+            .table_name
             .as_ref()
             .map(|table_name| {
                 if !predicate.should_include_table(&table_name) {
@@ -340,7 +357,9 @@ impl PartitionChunk for TestChunk {
                     PredicateMatch::Unknown
                 }
             })
-            .unwrap_or(PredicateMatch::Unknown)
+            .unwrap_or(PredicateMatch::Unknown);
+
+        Ok(predicate_match)
     }
 
     fn table_schema(&self, selection: Selection<'_>) -> Result<Schema, Self::Error> {

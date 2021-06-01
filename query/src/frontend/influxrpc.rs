@@ -196,7 +196,15 @@ impl InfluxRpcPlanner {
         let mut builder = StringSetPlanBuilder::new();
 
         for chunk in database.chunks(&predicate) {
-            builder = match chunk.apply_predicate(&predicate) {
+            // Try and apply the predicate using only metadata
+            let pred_result = chunk
+                .apply_predicate(&predicate)
+                .map_err(|e| Box::new(e) as _)
+                .context(CheckingChunkPredicate {
+                    chunk_id: chunk.id(),
+                })?;
+
+            builder = match pred_result {
                 PredicateMatch::AtLeastOne => builder.append_table(chunk.table_name()),
                 // no match, ignore table
                 PredicateMatch::Zero => builder,
@@ -243,21 +251,30 @@ impl InfluxRpcPlanner {
 
         let mut known_columns = BTreeSet::new();
         for chunk in database.chunks(&predicate) {
-            if matches!(chunk.apply_predicate(&predicate), PredicateMatch::Zero) {
+            // Try and apply the predicate using only metadata
+            let pred_result = chunk
+                .apply_predicate(&predicate)
+                .map_err(|e| Box::new(e) as _)
+                .context(CheckingChunkPredicate {
+                    chunk_id: chunk.id(),
+                })?;
+
+            if matches!(pred_result, PredicateMatch::Zero) {
                 continue;
             }
             let table_name = chunk.table_name();
-
-            debug!(
-                table_name,
-                chunk_id = chunk.id(),
-                "finding columns in table"
-            );
+            let chunk_id = chunk.id();
+            debug!(table_name, chunk_id, "finding columns in table");
 
             // get only tag columns from metadata
             let schema = chunk
                 .table_schema(Selection::All)
-                .expect("to be able to get table schema");
+                .map_err(|e| Box::new(e) as _)
+                .context(GettingTableSchema {
+                    table_name,
+                    chunk_id,
+                })?;
+
             let column_names: Vec<&str> = schema
                 .tags_iter()
                 .map(|f| f.name().as_str())
@@ -348,21 +365,29 @@ impl InfluxRpcPlanner {
 
         let mut known_values = BTreeSet::new();
         for chunk in database.chunks(&predicate) {
-            if matches!(chunk.apply_predicate(&predicate), PredicateMatch::Zero) {
+            // Try and apply the predicate using only metadata
+            let pred_result = chunk
+                .apply_predicate(&predicate)
+                .map_err(|e| Box::new(e) as _)
+                .context(CheckingChunkPredicate {
+                    chunk_id: chunk.id(),
+                })?;
+
+            if matches!(pred_result, PredicateMatch::Zero) {
                 continue;
             }
             let table_name = chunk.table_name();
-
-            debug!(
-                table_name,
-                chunk_id = chunk.id(),
-                "finding columns in table"
-            );
+            let chunk_id = chunk.id();
+            debug!(table_name, chunk_id, "finding columns in table");
 
             // use schema to validate column type
             let schema = chunk
                 .table_schema(Selection::All)
-                .expect("to be able to get table schema");
+                .map_err(|e| Box::new(e) as _)
+                .context(GettingTableSchema {
+                    table_name,
+                    chunk_id,
+                })?;
 
             // Skip this table if the tag_name is not a column in this table
             let idx = if let Some(idx) = schema.find_index_of(tag_name) {
@@ -623,7 +648,15 @@ impl InfluxRpcPlanner {
     {
         let mut table_chunks = BTreeMap::new();
         for chunk in chunks {
-            match chunk.apply_predicate(predicate) {
+            // Try and apply the predicate using only metadata
+            let pred_result = chunk
+                .apply_predicate(&predicate)
+                .map_err(|e| Box::new(e) as _)
+                .context(CheckingChunkPredicate {
+                    chunk_id: chunk.id(),
+                })?;
+
+            match pred_result {
                 PredicateMatch::AtLeastOne |
                 // have to include chunk as we can't rule it out
                 PredicateMatch::Unknown => {

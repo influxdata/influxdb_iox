@@ -204,23 +204,27 @@ impl PartitionChunk for DbChunk {
         self.table_name.as_ref()
     }
 
-    fn apply_predicate(&self, predicate: &Predicate) -> PredicateMatch {
+    fn apply_predicate(&self, predicate: &Predicate) -> Result<PredicateMatch> {
         if !predicate.should_include_table(self.table_name().as_ref()) {
-            return PredicateMatch::Zero;
+            return Ok(PredicateMatch::Zero);
         }
 
         // TODO apply predicate pruning here...
 
-        match &self.state {
+        let pred_result = match &self.state {
             State::MutableBuffer { chunk, .. } => {
                 if predicate.has_exprs() {
                     // TODO: Support more predicates
                     PredicateMatch::Unknown
                 } else if chunk.has_timerange(&predicate.range) {
-                    // TODO: this isn't precise (correct?) -- if the
+                    // Note: this isn't precise / correct: if the
                     // chunk has the timerange, some other part of the
-                    // predicate may rule out the rows -- it should
-                    // really be "Unknown"
+                    // predicate may rule out the rows, and thus
+                    // without further work this clause should return
+                    // "Unknown" rather than falsely claiming that
+                    // there is at least one row:
+                    //
+                    // https://github.com/influxdata/influxdb_iox/issues/1590
                     PredicateMatch::AtLeastOne
                 } else {
                     PredicateMatch::Zero
@@ -233,7 +237,7 @@ impl PartitionChunk for DbChunk {
                     Ok(rb_predicate) => rb_predicate,
                     Err(e) => {
                         debug!(?predicate, %e, "read buffer predicate not supported for table_names, falling back");
-                        return PredicateMatch::Unknown;
+                        return Ok(PredicateMatch::Unknown);
                     }
                 };
 
@@ -259,7 +263,9 @@ impl PartitionChunk for DbChunk {
                     PredicateMatch::Zero
                 }
             }
-        }
+        };
+
+        Ok(pred_result)
     }
 
     fn table_schema(&self, selection: Selection<'_>) -> Result<Schema, Self::Error> {

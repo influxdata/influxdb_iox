@@ -67,9 +67,9 @@ pub trait PartitionChunk: Debug + Send + Sync {
     /// using an efficient, but inexact method, based on metadata.
     ///
     /// NOTE: This method is suitable for calling during planning, and
-    /// may return PredicateMatch::Unknown for certain types pf
+    /// may return PredicateMatch::Unknown for certain types of
     /// predicates.
-    fn apply_predicate(&self, predicate: &Predicate) -> PredicateMatch;
+    fn apply_predicate(&self, predicate: &Predicate) -> Result<PredicateMatch, Self::Error>;
 
     /// Returns a set of Strings with column names from the specified
     /// table that have at least one row that matches `predicate`, if

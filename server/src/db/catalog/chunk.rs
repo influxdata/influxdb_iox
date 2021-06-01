@@ -280,7 +280,6 @@ impl Chunk {
         chunk: Arc<parquet_file::chunk::Chunk>,
         metrics: ChunkMetrics,
     ) -> Self {
-        // workaround until https://github.com/influxdata/influxdb_iox/issues/1295 is fixed
         let table_name = Arc::from(chunk.table_name());
 
         // Cache table summary + schema
