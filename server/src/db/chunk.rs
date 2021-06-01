@@ -243,7 +243,7 @@ impl PartitionChunk for DbChunk {
 
                 // TODO align API in read_buffer
                 let table_names = chunk.table_names(&rb_predicate, &BTreeSet::new());
-                if table_names.len() > 0 {
+                if !table_names.is_empty() {
                     // As above, this should really be "Unknown" rather than AtLeastOne
                     // for precision / correctness.
                     PredicateMatch::AtLeastOne
