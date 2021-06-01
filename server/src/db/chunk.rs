@@ -15,7 +15,9 @@ use parquet_file::chunk::Chunk as ParquetChunk;
 use query::{exec::stringset::StringSet, predicate::Predicate, PartitionChunk};
 use read_buffer::Chunk as ReadBufferChunk;
 
-use super::{pred::to_read_buffer_predicate, streams::ReadFilterResultsStream};
+use super::{
+    catalog::chunk::ChunkMetadata, pred::to_read_buffer_predicate, streams::ReadFilterResultsStream,
+};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -58,6 +60,11 @@ pub enum Error {
         source: datafusion::error::DataFusionError,
     },
 
+    #[snafu(display("Failed to select columns: {}", source))]
+    SelectColumns {
+        source: internal_types::schema::Error,
+    },
+
     #[snafu(display("arrow conversion error: {}", source))]
     ArrowConversion { source: arrow::error::ArrowError },
 }
@@ -68,7 +75,9 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug)]
 pub struct DbChunk {
     id: u32,
+    table_name: Arc<str>,
     state: State,
+    meta: Arc<ChunkMetadata>,
 }
 
 #[derive(Debug)]
@@ -90,33 +99,52 @@ impl DbChunk {
     pub fn snapshot(chunk: &super::catalog::chunk::Chunk) -> Arc<Self> {
         let partition_key = Arc::from(chunk.key());
 
-        use super::catalog::chunk::ChunkState;
+        use super::catalog::chunk::{ChunkStage, ChunkStageFrozenRepr};
 
-        let state = match chunk.state() {
-            ChunkState::Open(chunk) => State::MutableBuffer {
-                chunk: chunk.snapshot(),
-            },
-            ChunkState::Closed(chunk) => State::MutableBuffer {
-                chunk: Arc::clone(chunk),
-            },
-            ChunkState::Moved(chunk) => State::ReadBuffer {
-                chunk: Arc::clone(chunk),
-                partition_key,
-            },
-            ChunkState::WrittenToObjectStore(chunk, _) => State::ReadBuffer {
-                // Since data exists in both read buffer and object store, we should
-                // snapshot the chunk of read buffer
-                chunk: Arc::clone(chunk),
-                partition_key,
-            },
-            ChunkState::ObjectStoreOnly(chunk) => {
-                let chunk = Arc::clone(chunk);
-                State::ParquetFile { chunk }
+        let (state, meta) = match chunk.stage() {
+            ChunkStage::Open(stage) => {
+                let snapshot = stage.mb_chunk.snapshot();
+                let state = State::MutableBuffer {
+                    chunk: Arc::clone(&snapshot),
+                };
+                let meta = ChunkMetadata {
+                    table_summary: Arc::new(stage.mb_chunk.table_summary()),
+                    schema: snapshot.full_schema(),
+                };
+                (state, Arc::new(meta))
+            }
+            ChunkStage::Frozen(stage) => {
+                let state = match &stage.representation {
+                    ChunkStageFrozenRepr::MutableBufferSnapshot(snapshot) => State::MutableBuffer {
+                        chunk: Arc::clone(snapshot),
+                    },
+                    ChunkStageFrozenRepr::ReadBuffer(repr) => State::ReadBuffer {
+                        chunk: Arc::clone(repr),
+                        partition_key,
+                    },
+                };
+                (state, Arc::clone(&stage.meta))
+            }
+            ChunkStage::Persisted(stage) => {
+                let state = if let Some(read_buffer) = &stage.read_buffer {
+                    State::ReadBuffer {
+                        chunk: Arc::clone(read_buffer),
+                        partition_key,
+                    }
+                } else {
+                    State::ParquetFile {
+                        chunk: Arc::clone(&stage.parquet),
+                    }
+                };
+                (state, Arc::clone(&stage.meta))
             }
         };
+
         Arc::new(Self {
             id: chunk.id(),
+            table_name: chunk.table_name(),
             state,
+            meta,
         })
     }
 
@@ -126,19 +154,22 @@ impl DbChunk {
     /// reason we have this function is because the above snapshot
     /// function always returns the read buffer one for the same state
     pub fn parquet_file_snapshot(chunk: &super::catalog::chunk::Chunk) -> Arc<Self> {
-        use super::catalog::chunk::ChunkState;
+        use super::catalog::chunk::ChunkStage;
 
-        let state = match chunk.state() {
-            ChunkState::WrittenToObjectStore(_, chunk) => {
-                let chunk = Arc::clone(chunk);
-                State::ParquetFile { chunk }
+        let (state, meta) = match chunk.stage() {
+            ChunkStage::Persisted(stage) => {
+                let chunk = Arc::clone(&stage.parquet);
+                let state = State::ParquetFile { chunk };
+                (state, Arc::clone(&stage.meta))
             }
             _ => {
-                panic!("Internal error: This chunk's state is not WrittenToObjectStore");
+                panic!("Internal error: This chunk's stage is not Persisted");
             }
         };
         Arc::new(Self {
             id: chunk.id(),
+            table_name: chunk.table_name(),
+            meta,
             state,
         })
     }
@@ -151,6 +182,11 @@ impl DbChunk {
             _ => None,
         }
     }
+
+    /// Return the name of the table in this chunk
+    pub fn table_name(&self) -> Arc<str> {
+        Arc::clone(&self.table_name)
+    }
 }
 
 impl PartitionChunk for DbChunk {
@@ -161,21 +197,10 @@ impl PartitionChunk for DbChunk {
     }
 
     fn all_table_names(&self, known_tables: &mut StringSet) {
-        match &self.state {
-            State::MutableBuffer { chunk, .. } => known_tables.append(&mut chunk.table_names(None)),
-            State::ReadBuffer { chunk, .. } => {
-                // TODO - align APIs so they behave in the same way...
-                let rb_names = chunk.all_table_names(known_tables);
-                for name in rb_names {
-                    known_tables.insert(name);
-                }
-            }
-            State::ParquetFile { chunk, .. } => {
-                let table_name = chunk.table_name();
-                if !known_tables.contains(table_name) {
-                    known_tables.insert(table_name.to_string());
-                }
-            }
+        // TODO remove this function (use name from TableSummary directly!)
+        let table_name = &self.meta.table_summary.name;
+        if !known_tables.contains(table_name) {
+            known_tables.insert(table_name.to_string());
         }
     }
 
@@ -218,47 +243,26 @@ impl PartitionChunk for DbChunk {
         ))
     }
 
-    fn table_schema(
-        &self,
-        table_name: &str,
-        selection: Selection<'_>,
-    ) -> Result<Schema, Self::Error> {
-        match &self.state {
-            State::MutableBuffer { chunk, .. } => chunk
-                .table_schema(table_name, selection)
-                .context(MutableBufferChunk),
-            State::ReadBuffer { chunk, .. } => {
-                // Get the expected output schema for the read_filter operation
-                chunk
-                    .read_filter_table_schema(table_name, selection)
-                    .context(ReadBufferChunkError {
-                        chunk_id: self.id(),
-                    })
+    fn table_schema(&self, selection: Selection<'_>) -> Result<Schema, Self::Error> {
+        Ok(match selection {
+            Selection::All => self.meta.schema.as_ref().clone(),
+            Selection::Some(columns) => {
+                let columns = self.meta.schema.select(columns).context(SelectColumns)?;
+                self.meta.schema.project(&columns)
             }
-            State::ParquetFile { chunk, .. } => {
-                chunk
-                    .table_schema(selection)
-                    .context(ParquetFileChunkError {
-                        chunk_id: self.id(),
-                    })
-            }
-        }
+        })
     }
 
     fn has_table(&self, table_name: &str) -> bool {
-        match &self.state {
-            State::MutableBuffer { chunk, .. } => chunk.has_table(table_name),
-            State::ReadBuffer { chunk, .. } => chunk.has_table(table_name),
-            State::ParquetFile { chunk, .. } => chunk.has_table(table_name),
-        }
+        table_name == self.meta.table_summary.name
     }
 
     fn read_filter(
         &self,
-        table_name: &str,
         predicate: &Predicate,
         selection: Selection<'_>,
     ) -> Result<SendableRecordBatchStream, Self::Error> {
+        let table_name = self.table_name.as_ref();
         // Predicate is not required to be applied for correctness. We only pushed it down
         // when possible for performance gain
 
@@ -305,10 +309,10 @@ impl PartitionChunk for DbChunk {
 
     fn column_names(
         &self,
-        table_name: &str,
         predicate: &Predicate,
         columns: Selection<'_>,
     ) -> Result<Option<StringSet>, Self::Error> {
+        let table_name = self.table_name.as_ref();
         match &self.state {
             State::MutableBuffer { chunk, .. } => {
                 if !predicate.is_empty() {
@@ -346,10 +350,10 @@ impl PartitionChunk for DbChunk {
 
     fn column_values(
         &self,
-        table_name: &str,
         column_name: &str,
         predicate: &Predicate,
     ) -> Result<Option<StringSet>, Self::Error> {
+        let table_name = self.table_name.as_ref();
         match &self.state {
             State::MutableBuffer { .. } => {
                 // There is no advantage to manually implementing this

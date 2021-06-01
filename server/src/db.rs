@@ -508,7 +508,7 @@ impl Db {
                     chunk_id,
                 })?;
             let chunk = chunk.read();
-            let chunk_state = chunk.state().name();
+            let chunk_state = chunk.stage().name();
 
             // prevent chunks that are actively being moved. TODO it
             // would be nicer to allow this to happen have the chunk
@@ -1298,7 +1298,9 @@ mod tests {
         test_helpers::{try_write_lp, write_lp},
         *,
     };
-    use crate::db::catalog::chunk::ChunkState;
+    use crate::db::catalog::chunk::{
+        ChunkStage, ChunkStageFrozen, ChunkStageFrozenRepr, ChunkStagePersisted,
+    };
     use crate::query_tests::utils::{make_db, TestDb};
     use ::test_helpers::assert_contains;
     use arrow::record_batch::RecordBatch;
@@ -1672,9 +1674,9 @@ mod tests {
         // cpu").await; assert_batches_eq!(expected, &batches);
     }
 
-    async fn collect_read_filter(chunk: &DbChunk, table_name: &str) -> Vec<RecordBatch> {
+    async fn collect_read_filter(chunk: &DbChunk) -> Vec<RecordBatch> {
         chunk
-            .read_filter(table_name, &Default::default(), Selection::All)
+            .read_filter(&Default::default(), Selection::All)
             .unwrap()
             .collect::<Vec<_>>()
             .await
@@ -1702,7 +1704,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        let mb = collect_read_filter(&mb_chunk, "cpu").await;
+        let mb = collect_read_filter(&mb_chunk).await;
 
         let rb_chunk = db
             .load_chunk_to_read_buffer(partition_key, "cpu", mb_chunk.id(), &Default::default())
@@ -1735,7 +1737,7 @@ mod tests {
             .sample_sum_eq(3231.0)
             .unwrap();
 
-        let rb = collect_read_filter(&rb_chunk, "cpu").await;
+        let rb = collect_read_filter(&rb_chunk).await;
 
         // Test that data on load into the read buffer is sorted
 
@@ -2090,8 +2092,20 @@ mod tests {
 
         let chunks: Vec<_> = partition.chunks().collect();
         assert_eq!(chunks.len(), 2);
-        assert!(matches!(chunks[0].read().state(), ChunkState::Closed(_)));
-        assert!(matches!(chunks[1].read().state(), ChunkState::Closed(_)));
+        assert!(matches!(
+            chunks[0].read().stage(),
+            ChunkStage::Frozen(ChunkStageFrozen {
+                meta: _,
+                representation: ChunkStageFrozenRepr::MutableBufferSnapshot(_)
+            })
+        ));
+        assert!(matches!(
+            chunks[1].read().stage(),
+            ChunkStage::Frozen(ChunkStageFrozen {
+                meta: _,
+                representation: ChunkStageFrozenRepr::MutableBufferSnapshot(_)
+            })
+        ));
     }
 
     #[tokio::test]
@@ -2887,8 +2901,8 @@ mod tests {
                 partition.chunk(table_name, *chunk_id).unwrap()
             };
             let chunk = chunk.read();
-            if let ChunkState::WrittenToObjectStore(_, chunk) = chunk.state() {
-                paths_expected.push(chunk.table_path().display());
+            if let ChunkStage::Persisted(stage) = chunk.stage() {
+                paths_expected.push(stage.parquet.table_path().display());
             } else {
                 panic!("Wrong chunk state.");
             }
@@ -2936,7 +2950,14 @@ mod tests {
                 partition.chunk(table_name, *chunk_id).unwrap()
             };
             let chunk = chunk.read();
-            assert!(matches!(chunk.state(), ChunkState::ObjectStoreOnly(_)));
+            assert!(matches!(
+                chunk.stage(),
+                ChunkStage::Persisted(ChunkStagePersisted {
+                    parquet: _,
+                    read_buffer: None,
+                    meta: _,
+                })
+            ));
         }
 
         // ==================== check: DB still writable ====================
@@ -2973,8 +2994,8 @@ mod tests {
                 partition.chunk(table_name.clone(), chunk_id).unwrap()
             };
             let chunk = chunk.read();
-            if let ChunkState::WrittenToObjectStore(_, chunk) = chunk.state() {
-                paths_keep.push(chunk.table_path());
+            if let ChunkStage::Persisted(stage) = chunk.stage() {
+                paths_keep.push(stage.parquet.table_path());
             } else {
                 panic!("Wrong chunk state.");
             }
