@@ -317,7 +317,7 @@ impl PartitionChunk for TestChunk {
     }
 
     fn table_name(&self) -> &str {
-        self.table_name.as_ref().map(|s| s.as_str()).unwrap()
+        self.table_name.as_deref().unwrap()
     }
 
     fn read_filter(
