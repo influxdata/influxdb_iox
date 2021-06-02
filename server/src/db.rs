@@ -18,7 +18,7 @@ use datafusion::{
     catalog::{catalog::CatalogProvider, schema::SchemaProvider},
     physical_plan::SendableRecordBatchStream,
 };
-use entry::Entry;
+use entry::{Entry, SequencedEntry};
 use internal_types::{arrow::sort::sort_record_batch, selection::Selection};
 use lifecycle::LifecycleManager;
 use metrics::{KeyValue, MetricRegistry};
@@ -191,7 +191,7 @@ pub enum Error {
     },
 
     #[snafu(display("Error building sequenced entry: {}", source))]
-    SequencedEntryError { source: entry::Error },
+    SequencedEntryError { source: entry::SequencedEntryError },
 
     #[snafu(display("Error building sequenced entry: {}", source))]
     SchemaConversion {
@@ -963,8 +963,26 @@ impl Db {
         info!("finished background worker");
     }
 
-    /// Stores an entry based on the configuration.
+    /// Stores an entry based on the configuration. The Entry will first be
+    /// converted into a `SequencedEntry` with sequence information assigned
+    /// from the database, and then the `SequencedEntry` will be passed to
+    /// `store_sequenced_entry`.
     pub fn store_entry(&self, entry: Entry) -> Result<()> {
+        let sequenced_entry = Arc::new(
+            SequencedEntry::new_from_process_clock(
+                self.process_clock.next(),
+                self.server_id,
+                entry.data(),
+            )
+            .context(SequencedEntryError)?,
+        );
+
+        self.store_sequenced_entry(sequenced_entry)
+    }
+
+    /// Given a `SequencedEntry`, if the mutable buffer is configured, the `SequencedEntry` is then
+    /// written into the mutable buffer.
+    pub fn store_sequenced_entry(&self, sequenced_entry: Arc<SequencedEntry>) -> Result<()> {
         let rules = self.rules.read();
         let mutable_size_threshold = rules.lifecycle_rules.mutable_size_threshold;
         if rules.lifecycle_rules.immutable {
@@ -979,9 +997,7 @@ impl Db {
 
         // TODO: Direct writes to closing chunks
 
-        let process_clock = self.process_clock.next();
-
-        if let Some(partitioned_writes) = entry.partition_writes() {
+        if let Some(partitioned_writes) = sequenced_entry.partition_writes() {
             for write in partitioned_writes {
                 let partition_key = write.key();
                 let partition = self.catalog.state().get_or_create_partition(partition_key);
@@ -999,7 +1015,11 @@ impl Db {
                                 chunk.mutable_buffer().expect("cannot mutate open chunk");
 
                             mb_chunk
-                                .write_table_batch(process_clock, self.server_id, table_batch)
+                                .write_table_batch(
+                                    sequenced_entry.sequencer_id(),
+                                    sequenced_entry.sequence_number(),
+                                    table_batch,
+                                )
                                 .context(WriteEntry {
                                     partition_key,
                                     chunk_id,
@@ -1021,7 +1041,11 @@ impl Db {
                             );
 
                             mb_chunk
-                                .write_table_batch(process_clock, self.server_id, table_batch)
+                                .write_table_batch(
+                                    sequenced_entry.sequencer_id(),
+                                    sequenced_entry.sequence_number(),
+                                    table_batch,
+                                )
                                 .context(WriteEntryInitial { partition_key })?;
 
                             let new_chunk = partition
