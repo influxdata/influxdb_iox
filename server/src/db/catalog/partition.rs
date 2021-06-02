@@ -1,6 +1,9 @@
 //! The catalog representation of a Partition
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use chrono::{DateTime, Utc};
 use snafu::OptionExt;
@@ -9,7 +12,6 @@ use data_types::chunk_metadata::ChunkSummary;
 use data_types::partition_metadata::{
     PartitionSummary, UnaggregatedPartitionSummary, UnaggregatedTableSummary,
 };
-use query::predicate::Predicate;
 use tracker::RwLock;
 
 use crate::db::catalog::metrics::PartitionMetrics;
@@ -231,16 +233,30 @@ impl Partition {
         self.tables.values().flat_map(|table| table.chunks.values())
     }
 
-    /// Return an iterator over chunks in this partition that
-    /// may pass the provided predicate
+    /// Return an iterator over chunks in this partition
+    ///
+    /// If `table_names` is Some(table_names) only returns chunks that store
+    /// data for a table in that list. Otherwise returns all chunks
     pub fn filtered_chunks<'a>(
         &'a self,
-        predicate: &'a Predicate,
+        table_names: Option<&'a BTreeSet<String>>,
     ) -> impl Iterator<Item = &Arc<RwLock<Chunk>>> + 'a {
         self.tables
             .iter()
-            .filter(move |(table_name, _)| predicate.should_include_table(table_name))
-            .flat_map(|(_, table)| table.chunks.values())
+            .filter_map(move |(partition_table_name, partition_table)| {
+                match table_names {
+                    Some(table_names) => {
+                        if table_names.contains(partition_table_name) {
+                            Some(partition_table.chunks.values())
+                        } else {
+                            None
+                        }
+                    }
+                    // No tablename provided
+                    None => Some(partition_table.chunks.values()),
+                }
+            })
+            .flatten()
     }
 
     /// Return the unaggregated chunk summary information for tables

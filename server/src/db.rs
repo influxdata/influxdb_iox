@@ -39,8 +39,7 @@ use parquet_file::{
     },
     storage::Storage,
 };
-use query::predicate::{Predicate, PredicateBuilder};
-use query::{exec::Executor, Database, DEFAULT_SCHEMA};
+use query::{exec::Executor, predicate::Predicate, Database, DEFAULT_SCHEMA};
 use rand_distr::{Distribution, Poisson};
 use read_buffer::{Chunk as ReadBufferChunk, ChunkMetrics as ReadBufferChunkMetrics};
 use snafu::{ResultExt, Snafu};
@@ -880,10 +879,11 @@ impl Db {
     /// Return chunk summary information for all chunks in the specified
     /// partition across all storage systems
     pub fn partition_chunk_summaries(&self, partition_key: &str) -> Vec<ChunkSummary> {
-        self.catalog.state().filtered_chunks(
-            &PredicateBuilder::new().partition_key(partition_key).build(),
-            CatalogChunk::summary,
-        )
+        let partition_key = Some(partition_key);
+        let table_name = None;
+        self.catalog
+            .state()
+            .filtered_chunks(partition_key, table_name, CatalogChunk::summary)
     }
 
     /// Return Summary information for all columns in all chunks in the
@@ -1116,9 +1116,11 @@ impl Database for Db {
     /// Note there could/should be an error here (if the partition
     /// doesn't exist... but the trait doesn't have an error)
     fn chunks(&self, predicate: &Predicate) -> Vec<Arc<Self::Chunk>> {
+        let partition_key = predicate.partition_key.as_ref().map(|s| s.as_str());
+        let table_names = predicate.table_names.as_ref();
         self.catalog
             .state()
-            .filtered_chunks(predicate, DbChunk::snapshot)
+            .filtered_chunks(partition_key, table_names, DbChunk::snapshot)
     }
 
     fn partition_keys(&self) -> Result<Vec<String>, Self::Error> {

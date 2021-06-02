@@ -1,5 +1,5 @@
 //! This module contains the implementation of the InfluxDB IOx Metadata catalog
-use std::any::Any;
+use std::{any::Any, collections::BTreeSet};
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     sync::Arc,
@@ -21,7 +21,6 @@ use internal_types::selection::Selection;
 use partition::Partition;
 use query::{
     exec::stringset::StringSet,
-    predicate::Predicate,
     provider::{self, ProviderBuilder},
     PartitionChunk,
 };
@@ -233,11 +232,15 @@ impl Catalog {
     }
 
     pub fn chunk_summaries(&self) -> Vec<ChunkSummary> {
-        self.filtered_chunks(&Predicate::default(), Chunk::summary)
+        let partition_key = None;
+        let table_name = None;
+        self.filtered_chunks(partition_key, table_name, Chunk::summary)
     }
 
     pub fn detailed_chunk_summaries(&self) -> Vec<DetailedChunkSummary> {
-        self.filtered_chunks(&Predicate::default(), Chunk::detailed_summary)
+        let partition_key = None;
+        let table_name = None;
+        self.filtered_chunks(partition_key, table_name, Chunk::detailed_summary)
     }
 
     /// Returns all chunks within the catalog in an arbitrary order
@@ -272,16 +275,26 @@ impl Catalog {
         chunks
     }
 
-    /// Calls `map` with every chunk matching `predicate` and returns a
-    /// collection of the results
-    pub fn filtered_chunks<F, C>(&self, predicate: &Predicate, map: F) -> Vec<C>
+    /// Calls `map` with every chunk and returns a collection of the results
+    ///
+    /// If `partition_key` is Some(partition_key) only returns chunks
+    /// from the specified partiton.
+    ///
+    /// If `table_names` is Some(table_names) only returns chunks that store
+    /// data for a table in that list. Otherwise returns all chunks
+    pub fn filtered_chunks<F, C>(
+        &self,
+        partition_key: Option<&str>,
+        table_names: Option<&BTreeSet<String>>,
+        map: F,
+    ) -> Vec<C>
     where
         F: Fn(&Chunk) -> C + Copy,
     {
         let mut chunks = Vec::new();
         let partitions = self.partitions.read();
 
-        let partitions = match &predicate.partition_key {
+        let partitions = match partition_key {
             None => itertools::Either::Left(partitions.values()),
             Some(partition_key) => {
                 itertools::Either::Right(partitions.get(partition_key).into_iter())
@@ -290,9 +303,8 @@ impl Catalog {
 
         for partition in partitions {
             let partition = partition.read();
-            chunks.extend(partition.filtered_chunks(predicate).map(|chunk| {
+            chunks.extend(partition.filtered_chunks(table_names).map(|chunk| {
                 let chunk = chunk.read();
-                // TODO: Filter chunks
                 map(&chunk)
             }))
         }
@@ -360,7 +372,6 @@ mod tests {
     use super::*;
     use data_types::server_id::ServerId;
     use entry::{test_helpers::lp_to_entry, ClockValue};
-    use query::predicate::PredicateBuilder;
     use std::convert::TryFrom;
 
     fn create_open_chunk(partition: &Arc<RwLock<Partition>>, table: &str) {
@@ -610,23 +621,21 @@ mod tests {
         create_open_chunk(&p1, "table2");
         create_open_chunk(&p2, "table2");
 
-        let a = catalog.filtered_chunks(&Predicate::default(), |_| ());
+        let a = catalog.filtered_chunks(None, None, |_| ());
 
-        let b = catalog.filtered_chunks(&PredicateBuilder::new().table("table1").build(), |_| ());
+        let b = catalog.filtered_chunks(None, make_set("table1").as_ref(), |_| ());
 
-        let c = catalog.filtered_chunks(&PredicateBuilder::new().table("table2").build(), |_| ());
+        let c = catalog.filtered_chunks(None, make_set("table2").as_ref(), |_| ());
 
-        let d = catalog.filtered_chunks(
-            &PredicateBuilder::new()
-                .table("table2")
-                .partition_key("p2")
-                .build(),
-            |_| (),
-        );
+        let d = catalog.filtered_chunks(Some("p2"), make_set("table2").as_ref(), |_| ());
 
         assert_eq!(a.len(), 3);
         assert_eq!(b.len(), 1);
         assert_eq!(c.len(), 2);
         assert_eq!(d.len(), 1);
+    }
+
+    fn make_set(s: impl Into<String>) -> Option<BTreeSet<String>> {
+        Some(std::iter::once(s.into()).collect::<BTreeSet<_>>())
     }
 }
