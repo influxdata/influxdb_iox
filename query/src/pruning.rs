@@ -126,7 +126,7 @@ fn min_to_scalar(stats: &Statistics) -> Option<ScalarValue> {
         Statistics::U64(v) => v.min.map(ScalarValue::from),
         Statistics::F64(v) => v.min.map(ScalarValue::from),
         Statistics::Bool(v) => v.min.map(ScalarValue::from),
-        Statistics::String(v) => v.min.as_ref().map(|s| s.as_str()).map(ScalarValue::from),
+        Statistics::String(v) => v.min.as_deref().map(ScalarValue::from),
     }
 }
 
@@ -137,7 +137,7 @@ fn max_to_scalar(stats: &Statistics) -> Option<ScalarValue> {
         Statistics::U64(v) => v.max.map(ScalarValue::from),
         Statistics::F64(v) => v.max.map(ScalarValue::from),
         Statistics::Bool(v) => v.max.map(ScalarValue::from),
-        Statistics::String(v) => v.max.as_ref().map(|s| s.as_str()).map(ScalarValue::from),
+        Statistics::String(v) => v.max.as_deref().map(ScalarValue::from),
     }
 }
 
@@ -660,7 +660,7 @@ mod test {
         assert_eq!(names(&pruned), vec!["chunk1", "chunk2"]);
     }
 
-    fn names(pruned: &Vec<Arc<TestPrunable>>) -> Vec<&str> {
+    fn names(pruned: &[Arc<TestPrunable>]) -> Vec<&str> {
         pruned.iter().map(|p| p.name.as_str()).collect()
     }
 
