@@ -1016,8 +1016,8 @@ impl Db {
 
                             mb_chunk
                                 .write_table_batch(
-                                    sequenced_entry.sequencer_id(),
-                                    sequenced_entry.sequence_number(),
+                                    sequenced_entry.sequence().id,
+                                    sequenced_entry.sequence().number,
                                     table_batch,
                                 )
                                 .context(WriteEntry {
@@ -1042,8 +1042,8 @@ impl Db {
 
                             mb_chunk
                                 .write_table_batch(
-                                    sequenced_entry.sequencer_id(),
-                                    sequenced_entry.sequence_number(),
+                                    sequenced_entry.sequence().id,
+                                    sequenced_entry.sequence().number,
                                     table_batch,
                                 )
                                 .context(WriteEntryInitial { partition_key })?;
