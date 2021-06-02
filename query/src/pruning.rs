@@ -199,8 +199,6 @@ mod test {
         let c1 =
             Arc::new(TestPrunable::new("chunk1").with_f64_column("column1", Some(0.0), Some(10.0)));
 
-        // column1 > 100 where
-        //   c1: [0, 10] --> pruned
         let predicate = PredicateBuilder::new()
             .add_expr(col("column1").gt(lit(100.0)))
             .build();
@@ -516,7 +514,7 @@ mod test {
         //   c1: column1 [0, 1000], column2 [0, 4] --> not pruned (both in range)
         //   c2: column1 [0, 10], column2 [0, 4] --> pruned (column1 and column2 out of range)
         //   c3: column1 [0, 10], column2 [5, 10] --> pruned (column1 out of range, column2 in of range)
-        //   c4: column1 [1000, 2000], column2 [0, 4] --> pruned (column1 out of range, column2 in range)
+        //   c4: column1 [1000, 2000], column2 [0, 4] --> not pruned (column1 in range, column2 in range)
         //   c5: column1 [0, 10], column2 Null --> not pruned (column1 out of range, but column2 has no stats)
         //   c6: column1 Null, column2 [0, 4] --> not pruned (column1 has no stats, column2 out of range)
 
