@@ -1,6 +1,8 @@
 //! This module contains the main IOx Database object which has the
 //! instances of the mutable buffer, read buffer, and object store
 
+use self::catalog::TableNameFilter;
+
 use super::{
     buffer::{self, Buffer},
     JobRegistry,
@@ -880,10 +882,10 @@ impl Db {
     /// partition across all storage systems
     pub fn partition_chunk_summaries(&self, partition_key: &str) -> Vec<ChunkSummary> {
         let partition_key = Some(partition_key);
-        let table_name = None;
+        let table_names = TableNameFilter::AllTables;
         self.catalog
             .state()
-            .filtered_chunks(partition_key, table_name, CatalogChunk::summary)
+            .filtered_chunks(partition_key, table_names, CatalogChunk::summary)
     }
 
     /// Return Summary information for all columns in all chunks in the
@@ -1117,7 +1119,7 @@ impl Database for Db {
     /// doesn't exist... but the trait doesn't have an error)
     fn chunks(&self, predicate: &Predicate) -> Vec<Arc<Self::Chunk>> {
         let partition_key = predicate.partition_key.as_deref();
-        let table_names = predicate.table_names.as_ref();
+        let table_names: TableNameFilter<'_> = predicate.table_names.as_ref().into();
         self.catalog
             .state()
             .filtered_chunks(partition_key, table_names, DbChunk::snapshot)

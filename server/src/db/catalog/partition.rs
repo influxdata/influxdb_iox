@@ -1,9 +1,6 @@
 //! The catalog representation of a Partition
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use snafu::OptionExt;
@@ -18,7 +15,7 @@ use crate::db::catalog::metrics::PartitionMetrics;
 
 use super::{
     chunk::{Chunk, ChunkStage},
-    Error, Result, UnknownChunk, UnknownTable,
+    Error, Result, TableNameFilter, UnknownChunk, UnknownTable,
 };
 
 /// IOx Catalog Partition
@@ -235,27 +232,25 @@ impl Partition {
 
     /// Return an iterator over chunks in this partition
     ///
-    /// If `table_names` is Some(table_names) only returns chunks that store
-    /// data for a table in that list. Otherwise returns all chunks
+    /// `table_names` specifies which tables to include
     pub fn filtered_chunks<'a>(
         &'a self,
-        table_names: Option<&'a BTreeSet<String>>,
+        table_names: TableNameFilter<'a>,
     ) -> impl Iterator<Item = &Arc<RwLock<Chunk>>> + 'a {
         self.tables
             .iter()
-            .filter_map(move |(partition_table_name, partition_table)| {
-                match table_names {
-                    Some(table_names) => {
+            .filter_map(
+                move |(partition_table_name, partition_table)| match table_names {
+                    TableNameFilter::AllTables => Some(partition_table.chunks.values()),
+                    TableNameFilter::NamedTables(table_names) => {
                         if table_names.contains(partition_table_name) {
                             Some(partition_table.chunks.values())
                         } else {
                             None
                         }
                     }
-                    // No tablename provided
-                    None => Some(partition_table.chunks.values()),
-                }
-            })
+                },
+            )
             .flatten()
     }
 

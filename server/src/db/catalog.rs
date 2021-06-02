@@ -122,6 +122,24 @@ pub enum Error {
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// A way to specify which tables are to be matched when filtering catalog chunks
+#[derive(Debug, Clone, Copy)]
+pub enum TableNameFilter<'a> {
+    /// Include all tables
+    AllTables,
+    /// Only include tables that appear in the named set
+    NamedTables(&'a BTreeSet<String>),
+}
+
+impl<'a> From<Option<&'a BTreeSet<String>>> for TableNameFilter<'a> {
+    fn from(v: Option<&'a BTreeSet<String>>) -> Self {
+        match v {
+            Some(names) => Self::NamedTables(names),
+            None => Self::AllTables,
+        }
+    }
+}
+
 /// InfluxDB IOx Metadata Catalog
 ///
 /// The Catalog stores information such as which chunks exist, what
@@ -233,14 +251,14 @@ impl Catalog {
 
     pub fn chunk_summaries(&self) -> Vec<ChunkSummary> {
         let partition_key = None;
-        let table_name = None;
-        self.filtered_chunks(partition_key, table_name, Chunk::summary)
+        let table_names = TableNameFilter::AllTables;
+        self.filtered_chunks(partition_key, table_names, Chunk::summary)
     }
 
     pub fn detailed_chunk_summaries(&self) -> Vec<DetailedChunkSummary> {
         let partition_key = None;
-        let table_name = None;
-        self.filtered_chunks(partition_key, table_name, Chunk::detailed_summary)
+        let table_names = TableNameFilter::AllTables;
+        self.filtered_chunks(partition_key, table_names, Chunk::detailed_summary)
     }
 
     /// Returns all chunks within the catalog in an arbitrary order
@@ -280,12 +298,11 @@ impl Catalog {
     /// If `partition_key` is Some(partition_key) only returns chunks
     /// from the specified partiton.
     ///
-    /// If `table_names` is Some(table_names) only returns chunks that store
-    /// data for a table in that list. Otherwise returns all chunks
+    /// `table_names` specifies which tables to include
     pub fn filtered_chunks<F, C>(
         &self,
         partition_key: Option<&str>,
-        table_names: Option<&BTreeSet<String>>,
+        table_names: TableNameFilter<'_>,
         map: F,
     ) -> Vec<C>
     where
@@ -613,6 +630,7 @@ mod tests {
 
     #[test]
     fn filtered_chunks() {
+        use TableNameFilter::*;
         let catalog = Catalog::test();
 
         let p1 = catalog.get_or_create_partition("p1");
@@ -621,13 +639,13 @@ mod tests {
         create_open_chunk(&p1, "table2");
         create_open_chunk(&p2, "table2");
 
-        let a = catalog.filtered_chunks(None, None, |_| ());
+        let a = catalog.filtered_chunks(None, AllTables, |_| ());
 
-        let b = catalog.filtered_chunks(None, Some(&make_set("table1")), |_| ());
+        let b = catalog.filtered_chunks(None, NamedTables(&make_set("table1")), |_| ());
 
-        let c = catalog.filtered_chunks(None, Some(&make_set("table2")), |_| ());
+        let c = catalog.filtered_chunks(None, NamedTables(&make_set("table2")), |_| ());
 
-        let d = catalog.filtered_chunks(Some("p2"), Some(&make_set("table2")), |_| ());
+        let d = catalog.filtered_chunks(Some("p2"), NamedTables(&make_set("table2")), |_| ());
 
         assert_eq!(a.len(), 3);
         assert_eq!(b.len(), 1);
