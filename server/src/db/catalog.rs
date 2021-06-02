@@ -636,6 +636,6 @@ mod tests {
     }
 
     fn make_set(s: impl Into<String>) -> BTreeSet<String> {
-        std::iter::once(s.into()).collect::<BTreeSet<_>>()
+        std::iter::once(s.into()).collect()
     }
 }
