@@ -623,11 +623,11 @@ mod tests {
 
         let a = catalog.filtered_chunks(None, None, |_| ());
 
-        let b = catalog.filtered_chunks(None, make_set("table1").as_ref(), |_| ());
+        let b = catalog.filtered_chunks(None, Some(&make_set("table1")), |_| ());
 
-        let c = catalog.filtered_chunks(None, make_set("table2").as_ref(), |_| ());
+        let c = catalog.filtered_chunks(None, Some(&make_set("table2")), |_| ());
 
-        let d = catalog.filtered_chunks(Some("p2"), make_set("table2").as_ref(), |_| ());
+        let d = catalog.filtered_chunks(Some("p2"), Some(&make_set("table2")), |_| ());
 
         assert_eq!(a.len(), 3);
         assert_eq!(b.len(), 1);
@@ -635,7 +635,7 @@ mod tests {
         assert_eq!(d.len(), 1);
     }
 
-    fn make_set(s: impl Into<String>) -> Option<BTreeSet<String>> {
-        Some(std::iter::once(s.into()).collect::<BTreeSet<_>>())
+    fn make_set(s: impl Into<String>) -> BTreeSet<String> {
+        std::iter::once(s.into()).collect::<BTreeSet<_>>()
     }
 }

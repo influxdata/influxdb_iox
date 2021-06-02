@@ -1116,7 +1116,7 @@ impl Database for Db {
     /// Note there could/should be an error here (if the partition
     /// doesn't exist... but the trait doesn't have an error)
     fn chunks(&self, predicate: &Predicate) -> Vec<Arc<Self::Chunk>> {
-        let partition_key = predicate.partition_key.as_ref().map(|s| s.as_str());
+        let partition_key = predicate.partition_key.as_deref();
         let table_names = predicate.table_names.as_ref();
         self.catalog
             .state()
