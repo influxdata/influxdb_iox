@@ -6,7 +6,7 @@ use arrow::{
     datatypes::{DataType, Int32Type},
     record_batch::RecordBatch,
 };
-use snafu::{ensure, ResultExt, Snafu};
+use snafu::{ResultExt, Snafu};
 
 use data_types::partition_metadata::TableSummary;
 use data_types::timestamp::TimestampRange;
@@ -35,7 +35,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// A queryable snapshot of a mutable buffer chunk
 #[derive(Debug)]
 pub struct ChunkSnapshot {
-    schema: Schema,
+    schema: Arc<Schema>,
     batch: RecordBatch,
     table_name: Arc<str>,
     stats: Vec<ColumnSummary>,
@@ -57,7 +57,7 @@ impl ChunkSnapshot {
             .unwrap();
 
         let mut s = Self {
-            schema,
+            schema: Arc::new(schema),
             batch,
             table_name: Arc::clone(&chunk.table_name),
             stats: table.stats(),
@@ -72,21 +72,10 @@ impl ChunkSnapshot {
         self.batch.num_rows() == 0
     }
 
-    /// Return true if this snapshot has the specified table name
-    pub fn has_table(&self, table_name: &str) -> bool {
-        self.table_name.as_ref() == table_name
-    }
-
     /// Return Schema for the specified table / columns
-    pub fn table_schema(&self, table_name: &str, selection: Selection<'_>) -> Result<Schema> {
-        // Temporary #1295
-        ensure!(
-            self.table_name.as_ref() == table_name,
-            TableNotFound { table_name }
-        );
-
+    pub fn table_schema(&self, selection: Selection<'_>) -> Result<Schema> {
         Ok(match selection {
-            Selection::All => self.schema.clone(),
+            Selection::All => self.schema.as_ref().clone(),
             Selection::Some(columns) => {
                 let columns = self.schema.select(columns).context(SelectColumns)?;
                 self.schema.project(&columns)
@@ -94,23 +83,22 @@ impl ChunkSnapshot {
         })
     }
 
+    /// Return Schema for all columns in this snapshot
+    pub fn full_schema(&self) -> Arc<Schema> {
+        Arc::clone(&self.schema)
+    }
+
     /// Returns a list of tables with writes matching the given timestamp_range
     pub fn table_names(&self, timestamp_range: Option<TimestampRange>) -> BTreeSet<String> {
         let mut ret = BTreeSet::new();
-        if self.matches_predicate(&timestamp_range) {
+        if self.has_timerange(&timestamp_range) {
             ret.insert(self.table_name.to_string());
         }
         ret
     }
 
     /// Returns a RecordBatch with the given selection
-    pub fn read_filter(&self, table_name: &str, selection: Selection<'_>) -> Result<RecordBatch> {
-        // Temporary #1295
-        ensure!(
-            self.table_name.as_ref() == table_name,
-            TableNotFound { table_name }
-        );
-
+    pub fn read_filter(&self, selection: Selection<'_>) -> Result<RecordBatch> {
         Ok(match selection {
             Selection::All => self.batch.clone(),
             Selection::Some(columns) => {
@@ -127,16 +115,7 @@ impl ChunkSnapshot {
     }
 
     /// Returns a given selection of column names from a table
-    pub fn column_names(
-        &self,
-        table_name: &str,
-        selection: Selection<'_>,
-    ) -> Option<BTreeSet<String>> {
-        // Temporary #1295
-        if self.table_name.as_ref() != table_name {
-            return None;
-        }
-
+    pub fn column_names(&self, selection: Selection<'_>) -> Option<BTreeSet<String>> {
         let fields = self.schema.inner().fields().iter();
 
         Some(match selection {
@@ -217,7 +196,7 @@ impl ChunkSnapshot {
         self.batch.num_rows()
     }
 
-    fn matches_predicate(&self, timestamp_range: &Option<TimestampRange>) -> bool {
+    pub fn has_timerange(&self, timestamp_range: &Option<TimestampRange>) -> bool {
         let timestamp_range = match timestamp_range {
             Some(t) => t,
             None => return true,

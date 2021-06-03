@@ -111,32 +111,27 @@ impl Chunk {
         self.table.name()
     }
 
-    /// Return true if this chunk includes the given table
-    pub fn has_table(&self, table_name: &str) -> bool {
-        self.table_name() == table_name
-    }
-
     /// Return the approximate memory size of the chunk, in bytes including the
     /// dictionary, tables, and their rows.
     pub fn size(&self) -> usize {
         self.table.size() + self.partition_key.len() + mem::size_of::<Self>()
     }
 
-    /// Return Schema for the table in this chunk
+    /// Return possibly restricted Schema for the table in this chunk
     pub fn table_schema(&self, selection: Selection<'_>) -> Result<Schema> {
         self.table.schema(selection).context(NamedTableError {
             table_name: self.table_name(),
         })
     }
 
-    // Return all tables of this chunk whose timestamp overlaps with the give one
-    pub fn table_names(
-        &self,
-        timestamp_range: Option<TimestampRange>,
-    ) -> impl Iterator<Item = String> + '_ {
-        std::iter::once(&self.table)
-            .filter(move |table| table.matches_predicate(&timestamp_range))
-            .map(|table| table.name().to_string())
+    /// Infallably return the full schema (for all columns) for this chunk
+    pub fn full_schema(&self) -> Arc<Schema> {
+        self.table.full_schema()
+    }
+
+    // Return true if the table in this chunk contains values within the time range
+    pub fn has_timerange(&self, timestamp_range: Option<&TimestampRange>) -> bool {
+        self.table.matches_predicate(timestamp_range)
     }
 
     // Return the columns names that belong to the given column
@@ -148,13 +143,14 @@ impl Chunk {
     /// Return stream of data read from parquet file of the given table
     pub fn read_filter(
         &self,
-        table_name: &str,
         predicate: &Predicate,
         selection: Selection<'_>,
     ) -> Result<SendableRecordBatchStream> {
         self.table
             .read_filter(predicate, selection)
-            .context(ReadParquet { table_name })
+            .context(ReadParquet {
+                table_name: self.table_name(),
+            })
     }
 
     /// The total number of rows in all row groups in all tables in this chunk.

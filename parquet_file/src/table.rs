@@ -42,7 +42,7 @@ pub struct Table {
     object_store: Arc<ObjectStore>,
 
     /// Schema that goes with this table's parquet file
-    table_schema: Schema,
+    table_schema: Arc<Schema>,
 
     /// Timestamp range of this table's parquet file
     /// (extracted from TableSummary)
@@ -62,7 +62,7 @@ impl Table {
             table_summary: Arc::new(table_summary),
             object_store_path: path,
             object_store: store,
-            table_schema: schema,
+            table_schema: Arc::new(schema),
             timestamp_range,
         }
     }
@@ -80,7 +80,7 @@ impl Table {
         mem::size_of::<Self>()
             + self.table_summary.size()
             + mem::size_of_val(&self.object_store_path)
-            + mem::size_of_val(&self.table_schema)
+            + mem::size_of_val(&self.table_schema.as_ref())
     }
 
     /// Return name of this table
@@ -96,7 +96,7 @@ impl Table {
     /// Return schema of this table for specified selection columns
     pub fn schema(&self, selection: Selection<'_>) -> Result<Schema> {
         Ok(match selection {
-            Selection::All => self.table_schema.clone(),
+            Selection::All => self.table_schema.as_ref().clone(),
             Selection::Some(columns) => {
                 let columns = self.table_schema.select(columns).context(SelectColumns)?;
                 self.table_schema.project(&columns)
@@ -104,8 +104,13 @@ impl Table {
         })
     }
 
+    /// Infallably return the full schema (for all columns) for this chunk
+    pub fn full_schema(&self) -> Arc<Schema> {
+        Arc::clone(&self.table_schema)
+    }
+
     // Check if 2 time ranges overlap
-    pub fn matches_predicate(&self, timestamp_range: &Option<TimestampRange>) -> bool {
+    pub fn matches_predicate(&self, timestamp_range: Option<&TimestampRange>) -> bool {
         match (self.timestamp_range, timestamp_range) {
             (Some(a), Some(b)) => !a.disjoint(b),
             (None, Some(_)) => false, /* If this chunk doesn't have a time column it can't match */
