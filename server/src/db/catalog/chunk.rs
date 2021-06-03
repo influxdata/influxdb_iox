@@ -766,7 +766,7 @@ impl Chunk {
     pub fn clear_lifecycle_action(&mut self) -> Result<()> {
         if let Some(tracker) = &self.lifecycle_action {
             if !tracker.is_complete() {
-                return Err(Error::AbortInProgress {
+                return Err(Error::IncompleteLifecycleAction {
                     partition_key: self.partition_key.to_string(),
                     chunk_id: self.id,
                     action: tracker.metadata().name().to_string(),

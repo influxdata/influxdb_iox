@@ -97,12 +97,12 @@ pub enum Error {
     },
 
     #[snafu(display(
-        "Cannot abort an in-progress lifecycle action '{}' for chunk {}:{}",
+        "Cannot clear a lifecycle action '{}' for chunk {}:{} that is still running",
         action,
         partition_key,
         chunk_id
     ))]
-    AbortInProgress {
+    IncompleteLifecycleAction {
         partition_key: String,
         chunk_id: u32,
         action: String,
