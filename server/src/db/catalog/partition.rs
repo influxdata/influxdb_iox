@@ -242,13 +242,9 @@ impl Partition {
             .filter_map(
                 move |(partition_table_name, partition_table)| match table_names {
                     TableNameFilter::AllTables => Some(partition_table.chunks.values()),
-                    TableNameFilter::NamedTables(table_names) => {
-                        if table_names.contains(partition_table_name) {
-                            Some(partition_table.chunks.values())
-                        } else {
-                            None
-                        }
-                    }
+                    TableNameFilter::NamedTables(table_names) => table_names
+                        .contains(partition_table_name)
+                        .then(|| partition_table.chunks.values()),
                 },
             )
             .flatten()
