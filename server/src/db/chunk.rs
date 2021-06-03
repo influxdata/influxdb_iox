@@ -296,13 +296,11 @@ impl PartitionChunk for DbChunk {
         // Predicate is not required to be applied for correctness. We only pushed it down
         // when possible for performance gain
 
-        debug!("Input Predicate to read_filter: {:#?}", predicate);
+        debug!(?predicate, "Input Predicate to read_filter");
 
         match &self.state {
             State::MutableBuffer { chunk, .. } => {
-                let batch = chunk
-                    .read_filter(table_name, selection)
-                    .context(MutableBufferChunk)?;
+                let batch = chunk.read_filter(selection).context(MutableBufferChunk)?;
 
                 Ok(Box::pin(MemoryStream::new(vec![batch])))
             }
@@ -313,6 +311,8 @@ impl PartitionChunk for DbChunk {
                         Ok(predicate) => predicate,
                         Err(_) => read_buffer::Predicate::default(),
                     };
+
+                debug!(?rb_predicate, "Predicate pushed down to RUB");
 
                 let read_results = chunk
                     .read_filter(table_name, rb_predicate, selection)
@@ -331,11 +331,13 @@ impl PartitionChunk for DbChunk {
                     schema.into(),
                 )))
             }
-            State::ParquetFile { chunk, .. } => chunk
-                .read_filter(table_name, predicate, selection)
-                .context(ParquetFileChunkError {
-                    chunk_id: self.id(),
-                }),
+            State::ParquetFile { chunk, .. } => {
+                chunk
+                    .read_filter(predicate, selection)
+                    .context(ParquetFileChunkError {
+                        chunk_id: self.id(),
+                    })
+            }
         }
     }
 
@@ -351,7 +353,7 @@ impl PartitionChunk for DbChunk {
                     // TODO: Support predicates
                     return Ok(None);
                 }
-                Ok(chunk.column_names(table_name, columns))
+                Ok(chunk.column_names(columns))
             }
             State::ReadBuffer { chunk, .. } => {
                 let rb_predicate = match to_read_buffer_predicate(&predicate) {
