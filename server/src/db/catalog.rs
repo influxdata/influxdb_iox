@@ -122,7 +122,8 @@ pub enum Error {
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// A way to specify which tables are to be matched when filtering catalog chunks
+/// Specify which tables are to be matched when filtering
+/// catalog chunks
 #[derive(Debug, Clone, Copy)]
 pub enum TableNameFilter<'a> {
     /// Include all tables
@@ -132,6 +133,15 @@ pub enum TableNameFilter<'a> {
 }
 
 impl<'a> From<Option<&'a BTreeSet<String>>> for TableNameFilter<'a> {
+    /// Creates a [`TableNameFilter`] from an [`Option`].
+    ///
+    /// If the Option is `None`, all table names will be included in
+    /// the results.
+    ///
+    /// If the Option is `Some(set)`, only table names which apear in
+    /// `set` will be included in the results.
+    ///
+    /// Note `Some(empty set)` will not match anything
     fn from(v: Option<&'a BTreeSet<String>>) -> Self {
         match v {
             Some(names) => Self::NamedTables(names),
