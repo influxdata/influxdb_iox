@@ -1,6 +1,8 @@
 //! This module contains the main IOx Database object which has the
 //! instances of the mutable buffer, read buffer, and object store
 
+use self::catalog::TableNameFilter;
+
 use super::{
     buffer::{self, Buffer},
     JobRegistry,
@@ -39,8 +41,8 @@ use parquet_file::{
     },
     storage::Storage,
 };
-use query::predicate::{Predicate, PredicateBuilder};
-use query::{exec::Executor, Database, DEFAULT_SCHEMA};
+use query::{exec::Executor, predicate::Predicate, Database, DEFAULT_SCHEMA};
+use rand_distr::{Distribution, Poisson};
 use read_buffer::{Chunk as ReadBufferChunk, ChunkMetrics as ReadBufferChunkMetrics};
 use snafu::{ResultExt, Snafu};
 use std::{
@@ -879,10 +881,11 @@ impl Db {
     /// Return chunk summary information for all chunks in the specified
     /// partition across all storage systems
     pub fn partition_chunk_summaries(&self, partition_key: &str) -> Vec<ChunkSummary> {
-        self.catalog.state().filtered_chunks(
-            &PredicateBuilder::new().partition_key(partition_key).build(),
-            CatalogChunk::summary,
-        )
+        let partition_key = Some(partition_key);
+        let table_names = TableNameFilter::AllTables;
+        self.catalog
+            .state()
+            .filtered_chunks(partition_key, table_names, CatalogChunk::summary)
     }
 
     /// Return Summary information for all columns in all chunks in the
@@ -953,10 +956,18 @@ impl Db {
                         .fetch_add(1, Ordering::Relaxed);
                     tokio::select! {
                         _ = async {
+                            // Sleep for a duration drawn from a poisson distribution to de-correlate workers.
+                            // Perform this sleep BEFORE the actual clean-up so that we don't immediately run a clean-up
+                            // on startup.
+                            let avg_sleep_secs = self.rules.read().worker_cleanup_avg_sleep.as_secs_f32().max(1.0);
+                            let dist = Poisson::new(avg_sleep_secs).expect("parameter should be positive and finite");
+                            let duration = Duration::from_secs_f32(dist.sample(&mut rand::thread_rng()));
+                            debug!(?duration, "cleanup worker sleeps");
+                            tokio::time::sleep(duration).await;
+
                             if let Err(e) = cleanup_unreferenced_parquet_files(&self.catalog).await {
-                                error!("error in background cleanup task: {:?}", e);
+                                error!(%e, "error in background cleanup task");
                             }
-                            tokio::time::sleep(Duration::from_secs(500)).await;
                         } => {},
                         _ = shutdown.cancelled() => break,
                     }
@@ -1107,9 +1118,11 @@ impl Database for Db {
     /// Note there could/should be an error here (if the partition
     /// doesn't exist... but the trait doesn't have an error)
     fn chunks(&self, predicate: &Predicate) -> Vec<Arc<Self::Chunk>> {
+        let partition_key = predicate.partition_key.as_deref();
+        let table_names: TableNameFilter<'_> = predicate.table_names.as_ref().into();
         self.catalog
             .state()
-            .filtered_chunks(predicate, DbChunk::snapshot)
+            .filtered_chunks(partition_key, table_names, DbChunk::snapshot)
     }
 
     fn partition_keys(&self) -> Result<Vec<String>, Self::Error> {
@@ -1460,7 +1473,7 @@ mod tests {
 
         // verify chunk size updated (chunk moved from closing to moving to moved)
         catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "mutable_buffer", 0).unwrap();
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "read_buffer", 1630).unwrap();
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "read_buffer", 1616).unwrap();
 
         db.write_chunk_to_object_store("1970-01-01T00", "cpu", 0, &Default::default())
             .await
@@ -1480,7 +1493,7 @@ mod tests {
             .unwrap();
 
         let expected_parquet_size = 759;
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "read_buffer", 1630).unwrap();
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "read_buffer", 1616).unwrap();
         // now also in OS
         catalog_chunk_size_bytes_metric_eq(
             &test_db.metric_registry,
@@ -1650,7 +1663,7 @@ mod tests {
             .unwrap();
 
         // verify chunk size updated (chunk moved from moved to writing to written)
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "read_buffer", 1630).unwrap();
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "read_buffer", 1616).unwrap();
 
         // drop, the chunk from the read buffer
         db.drop_chunk(partition_key, "cpu", mb_chunk.id()).unwrap();
@@ -1660,7 +1673,7 @@ mod tests {
         );
 
         // verify size is reported until chunk dropped
-        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "read_buffer", 1630).unwrap();
+        catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "read_buffer", 1616).unwrap();
         std::mem::drop(rb_chunk);
 
         // verify chunk size updated (chunk dropped from moved state)
@@ -1733,7 +1746,7 @@ mod tests {
                 ("svr_id", "1"),
             ])
             .histogram()
-            .sample_sum_eq(3231.0)
+            .sample_sum_eq(3189.0)
             .unwrap();
 
         let rb = collect_read_filter(&rb_chunk).await;
@@ -1835,7 +1848,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(2389.0)
+            .sample_sum_eq(2375.0)
             .unwrap();
 
         // it should be the same chunk!
@@ -1943,7 +1956,7 @@ mod tests {
                 ("svr_id", "10"),
             ])
             .histogram()
-            .sample_sum_eq(2389.0)
+            .sample_sum_eq(2375.0)
             .unwrap();
 
         // Unload RB chunk but keep it in OS
@@ -2343,7 +2356,7 @@ mod tests {
                 Arc::from("cpu"),
                 0,
                 ChunkStorage::ReadBufferAndObjectStore,
-                2380, // size of RB and OS chunks
+                2373, // size of RB and OS chunks
                 1,
             ),
             ChunkSummary::new_without_timestamps(
@@ -2394,7 +2407,7 @@ mod tests {
                 .memory()
                 .read_buffer()
                 .get_total(),
-            1621
+            1614
         );
         assert_eq!(
             db.catalog.state().metrics().memory().parquet().get_total(),
@@ -2668,6 +2681,8 @@ mod tests {
             .server_id(server_id)
             .object_store(Arc::clone(&object_store))
             .db_name(db_name)
+            // "dispable" clean-up by setting it to a very long time to avoid interference with this test
+            .worker_cleanup_avg_sleep(Duration::from_secs(1_000))
             .build()
             .await;
 
@@ -2750,7 +2765,7 @@ mod tests {
             let _ = chunk_a.read();
         });
 
-        // Hold lock for 100 seconds blocking background task
+        // Hold lock for 100 milliseconds blocking background task
         std::thread::sleep(std::time::Duration::from_millis(100));
 
         std::mem::drop(chunk_b);
