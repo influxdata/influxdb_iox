@@ -515,7 +515,7 @@ mod test {
         //   c2: column1 [0, 10], column2 [0, 4] --> pruned (column1 and column2 out of range)
         //   c3: column1 [0, 10], column2 [5, 10] --> pruned (column1 out of range, column2 in of range)
         //   c4: column1 [1000, 2000], column2 [0, 4] --> not pruned (column1 in range, column2 in range)
-        //   c5: column1 [0, 10], column2 Null --> not pruned (column1 out of range, but column2 has no stats)
+        //   c5: column1 [0, 10], column2 Null --> pruned (column1 out of range, but column2 has no stats)
         //   c6: column1 Null, column2 [0, 4] --> not pruned (column1 has no stats, column2 out of range)
 
         let observer = TestObserver::new();
@@ -561,8 +561,6 @@ mod test {
 
         let pruned = prune_chunks(&observer, vec![c1, c2, c3, c4, c5, c6], &predicate);
 
-        // DF BUG: c4 should be pruned (as column1 > 100 can not be true, even though column2 < 5 can be)
-        // DF BUG: c5 should not be pruned (column1 > 100 can not be true, but column2 might have values that could rule it out)
         assert_eq!(
             observer.events(),
             vec!["chunk2: Pruned", "chunk3: Pruned", "chunk5: Pruned"]
