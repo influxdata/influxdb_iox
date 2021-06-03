@@ -847,15 +847,15 @@ mod tests {
         let registration = TaskRegistration::new();
 
         // no action to begin with
-        assert_eq!(chunk.lifecycle_action(), None);
+        assert!(chunk.lifecycle_action().is_none());
 
         // set some action
         chunk
             .set_lifecycle_action(ChunkLifecycleAction::Moving, &registration)
             .unwrap();
         assert_eq!(
-            chunk.lifecycle_action(),
-            Some(&ChunkLifecycleAction::Moving)
+            *chunk.lifecycle_action().unwrap().metadata(),
+            ChunkLifecycleAction::Moving
         );
 
         // setting an action while there is one running fails
@@ -877,8 +877,8 @@ mod tests {
             .set_lifecycle_action(ChunkLifecycleAction::Compacting, &registration)
             .unwrap();
         assert_eq!(
-            chunk.lifecycle_action(),
-            Some(&ChunkLifecycleAction::Compacting)
+            *chunk.lifecycle_action().unwrap().metadata(),
+            ChunkLifecycleAction::Compacting
         );
     }
 

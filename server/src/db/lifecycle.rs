@@ -935,7 +935,7 @@ mod tests {
         let mut mover = DummyMover::new(rules, chunks);
 
         let chunk = Arc::clone(&mover.chunks[0]);
-        chunk.write().set_closed().unwrap();
+        chunk.write().freeze().unwrap();
 
         let r0 = TaskRegistration::default();
         let tracker = {
