@@ -249,8 +249,9 @@ mod test {
     }
 
     #[test]
-    // Ignore tests as the pruning predicate can't be created --
-    // (maybe boolean predicates not supported in DF?)
+    // Ignore tests as the pruning predicate can't be created. DF
+    // doesn't support boolean predicates:
+    // https://github.com/apache/arrow-datafusion/issues/490
     #[ignore]
     fn test_pruned_bool() {
         test_helpers::maybe_start_logging();
@@ -354,8 +355,9 @@ mod test {
     }
 
     #[test]
-    // Ignore tests as the pruning predicate can't be created --
-    // (maybe boolean predicates not supported in DF?)
+    // Ignore tests as the pruning predicate can't be created. DF
+    // doesn't support boolean predicates:
+    // https://github.com/apache/arrow-datafusion/issues/490
     #[ignore]
     fn test_not_pruned_bool() {
         test_helpers::maybe_start_logging();
@@ -406,8 +408,8 @@ mod test {
         // column1 > 100 where
         //   c1: [Null, 10] --> pruned
         //   c2: [0, Null] --> not pruned
-        //   c3: [Null, Null] --> pruned (only nulls in chunk 3)
-        //   c4: Null --> not pruned (no stastics at all)
+        //   c3: [Null, Null] --> not pruned (min/max are not known in chunk 3)
+        //   c4: Null --> not pruned (no statistics at all)
 
         let observer = TestObserver::new();
         let c1 = Arc::new(TestPrunable::new("chunk1").with_i64_column("column1", None, Some(10)));
@@ -424,7 +426,6 @@ mod test {
 
         let pruned = prune_chunks(&observer, vec![c1, c2, c3, c4], &predicate);
 
-        // DF Bug: c3 sould be pruned (as min=max=NULL means it has only NULL values in it)
         assert_eq!(observer.events(), vec!["chunk1: Pruned"]);
         assert_eq!(names(&pruned), vec!["chunk2", "chunk3", "chunk4"]);
     }
