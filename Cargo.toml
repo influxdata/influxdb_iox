@@ -32,6 +32,7 @@ members = [
     "query_tests",
     "read_buffer",
     "server",
+    "server_benchmarks",
     "test_helpers",
     "tracker",
     "write_buffer",

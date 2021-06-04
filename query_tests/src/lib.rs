@@ -12,8 +12,9 @@ pub mod influxrpc;
 #[cfg(test)]
 pub mod pruning;
 #[cfg(test)]
-pub mod scenarios;
-#[cfg(test)]
 pub mod sql;
 #[cfg(test)]
 pub mod table_schema;
+
+// Used by benchmarks
+pub mod scenarios;
