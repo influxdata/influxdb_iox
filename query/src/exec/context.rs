@@ -154,12 +154,9 @@ impl IOxExecutionContext {
     pub fn prepare_plan(&self, plan: &LogicalPlan) -> Result<Arc<dyn ExecutionPlan>> {
         debug!(text=%plan.display_indent_schema(), "initial plan");
 
-        let plan = self.inner.optimize(&plan)?;
-        debug!(text=%plan.display_indent_schema(), graphviz=%plan.display_graphviz(), "optimized plan");
-
         let physical_plan = self.inner.create_physical_plan(&plan)?;
-
         debug!(text=%displayable(physical_plan.as_ref()).indent(), "optimized physical plan");
+
         Ok(physical_plan)
     }
 

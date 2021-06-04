@@ -117,6 +117,7 @@ async fn sql_select_from_cpu_pred() {
 
 #[tokio::test]
 async fn sql_select_from_cpu_with_projection_and_pred() {
+    test_helpers::maybe_start_logging();
     // expect that to get a subset of the columns and in the order specified
     let expected = vec![
         "+------+--------+",
