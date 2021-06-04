@@ -56,6 +56,19 @@ RUN curl ${CURL_FLAGS} https://repos.influxdata.com/influxdb2.key | gpg --import
     && sudo cp influxdb2-${INFLUXDB2_VERSION}-linux-amd64/influxd /usr/local/bin/ \
     && rm -rf influxdb2-${INFLUXDB2_VERSION}-linux-amd64 influxdb2-${INFLUXDB2_VERSION}-linux-amd64.tar.gz.asc
 
+# Install Docker Compose to enable integration tests that use Kafka as the write buffer
+# Note: Docker does not provide signed releases at the time of this writing, see:
+# https://github.com/docker/compose/issues/3480
+ENV DOCKER_COMPOSE_VERSION=1.29.2
+ENV DOCKER_COMPOSE_DOWNLOAD_BASE="https://github.com/docker/compose/releases/download"
+RUN curl ${CURL_FLAGS} -L -O ${DOCKER_COMPOSE_DOWNLOAD_BASE}/${DOCKER_COMPOSE_VERSION}/docker-compose-Linux-x86_64 \
+    && curl ${CURL_FLAGS} -L -O ${DOCKER_COMPOSE_DOWNLOAD_BASE}/${DOCKER_COMPOSE_VERSION}/docker-compose-Linux-x86_64.sha256 \
+		&& sha256sum -c docker-compose-Linux-x86_64.sha256 \
+		&& sudo cp docker-compose-Linux-x86_64 /usr/local/bin/docker-compose \
+		&& sudo chmod +x /usr/local/bin/docker-compose \
+		&& rm -rf docker-compose.sha256 \
+		&& docker-compose --version
+
 # Set timezone to UTC by default
 RUN ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime
 # Use unicode
