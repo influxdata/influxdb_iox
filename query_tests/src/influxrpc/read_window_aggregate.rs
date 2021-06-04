@@ -1,8 +1,6 @@
 //! Tests for the Influx gRPC queries
-use crate::{
-    db::test_helpers::write_lp,
-    query_tests::{scenarios::*, utils::make_db},
-};
+use crate::{scenarios::*, utils::make_db};
+use server::db::test_helpers::write_lp;
 
 use arrow::util::pretty::pretty_format_batches;
 use async_trait::async_trait;

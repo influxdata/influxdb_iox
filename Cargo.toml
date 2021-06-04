@@ -29,6 +29,7 @@ members = [
     "packers",
     "panic_logging",
     "query",
+    "query_tests",
     "read_buffer",
     "server",
     "test_helpers",

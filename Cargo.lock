@@ -3020,6 +3020,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "query_tests"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arrow_util",
+ "async-trait",
+ "data_types",
+ "datafusion 0.1.0",
+ "internal_types",
+ "metrics",
+ "object_store",
+ "query",
+ "server",
+ "test_helpers",
+ "tokio",
+]
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

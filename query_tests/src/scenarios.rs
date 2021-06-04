@@ -5,7 +5,7 @@ use query::PartitionChunk;
 
 use async_trait::async_trait;
 
-use crate::{db::test_helpers::write_lp, Db};
+use server::{db::test_helpers::write_lp, Db};
 
 use super::utils::{
     count_mutable_buffer_chunks, count_object_store_chunks, count_read_buffer_chunks, make_db,

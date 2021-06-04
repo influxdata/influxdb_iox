@@ -7,7 +7,7 @@ use data_types::{
 use object_store::{memory::InMemory, ObjectStore};
 use query::{exec::Executor, Database};
 
-use crate::{
+use server::{
     buffer::Buffer,
     db::{load_or_create_preserved_catalog, Db},
     JobRegistry,
