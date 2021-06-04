@@ -13,3 +13,4 @@ pub mod storage_api;
 mod system_tables;
 pub mod write_api;
 pub mod write_cli;
+mod kafka;
