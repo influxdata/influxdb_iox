@@ -217,7 +217,8 @@ LIMIT 20;
 
 ### Time range stored per table
 
-This query provides an estimate, by table, of how long of a time range it holds in IOx
+This query provides an estimate, by table, of how long of a time range 
+and the  estimated number of rows per second it holds in IOx
 (the `1,000,000,000` is the conversion from nanoseconds)
 
 ```sql
