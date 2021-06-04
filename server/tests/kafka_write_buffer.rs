@@ -112,6 +112,7 @@ async fn can_connect_to_kafka() {
                 break;
             }
         }
+        assert_eq!(counter, 0);
         eprintln!("Exiting Consumer");
     });
 
