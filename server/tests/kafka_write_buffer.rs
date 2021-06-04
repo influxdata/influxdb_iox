@@ -9,10 +9,11 @@ use rdkafka::{
 use std::{
     array,
     convert::TryInto,
-    fs::File,
-    process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+pub mod common;
+use common::kafka_fixture::KafkaFixture;
 
 #[tokio::test]
 async fn writes_go_to_kafka() {
@@ -34,26 +35,7 @@ const NUM_MSGS: usize = 10; // TODO: this should go away
 
 #[tokio::test]
 async fn can_connect_to_kafka() {
-    // TODO: should use a macro to check for TEST_INTEGRATION and make a shared ServerFixture
-    // start up kafka
-    Command::new("docker")
-        .arg("compose")
-        .arg("-f")
-        .arg("../docker/ci-kafka-docker-compose.yml")
-        .arg("up")
-        // .arg("-d") // TODO: this needs to be uncommented
-        .spawn()
-        .expect("starting of docker kafka/zookeeper process");
-
-    let mut cmd = Command::new("docker")
-        .arg("compose")
-        .arg("-f")
-        .arg("../docker/ci-kafka-docker-compose.yml")
-        .arg("logs")
-        // TODO: this needs to go to temp files like in influxdb2_client/tests/common/server_fixture.rs
-        .spawn()
-        .expect("starting of docker logs process");
-
+    let kafka = maybe_skip_integration!(KafkaFixture::create_shared()).await;
 
     // TODO instead of producing to Kafka directly, this test should use the management api to
     // configure a write buffer pointing at 127.0.0.1:9093, should use the /write endpoint to
@@ -62,7 +44,7 @@ async fn can_connect_to_kafka() {
     // connect to kafka, produce, and consume
     let x = || {
         let mut cfg = ClientConfig::new();
-        cfg.set("bootstrap.servers", "127.0.0.1:9093");
+        cfg.set("bootstrap.servers", kafka.connection());
         cfg
     };
 
@@ -94,7 +76,9 @@ async fn can_connect_to_kafka() {
 
     let mut topics = TopicPartitionList::new();
     topics.add_partition(TOPIC, 0);
-    topics.set_partition_offset(TOPIC, 0, Offset::Beginning).unwrap();
+    topics
+        .set_partition_offset(TOPIC, 0, Offset::Beginning)
+        .unwrap();
     consumer.assign(&topics).unwrap();
 
     eprintln!("Created");
@@ -143,22 +127,6 @@ async fn can_connect_to_kafka() {
     while let Some(t) = tasks.next().await {
         t.unwrap();
     }
-
-    // TODO the rest of this test needs to go in the server fixture drop impl
-
-    // stop logging
-    cmd
-        .kill()
-        .expect("Should have been able to kill the test server");
-
-    // stop kafka
-    Command::new("docker")
-        .arg("compose")
-        .arg("-f")
-        .arg("../docker/ci-kafka-docker-compose.yml")
-        .arg("down")
-        .output()
-        .expect("stopping of docker kafka/zookeeper process");
 }
 
 fn now() -> i64 {
