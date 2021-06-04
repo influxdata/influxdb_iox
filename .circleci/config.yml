@@ -122,6 +122,9 @@ jobs:
       - run:
           name: Cargo test
           command: cargo test --workspace
+      - run:
+          name: Kafka Write Buffer integration tests
+          command: TEST_INTEGRATION=1 cargo test -p server
       - cache_save
 
   # Integration tests for the influxdb2_client crate against InfluxDB 2.0 OSS.
