@@ -110,6 +110,9 @@ pub mod buffer;
 mod config;
 pub mod db;
 
+/// Utility modules used by benchmarks and tests
+pub mod utils;
+
 type DatabaseError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[derive(Debug, Snafu)]

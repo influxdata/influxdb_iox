@@ -17,6 +17,3 @@ pub mod scenarios;
 pub mod sql;
 #[cfg(test)]
 pub mod table_schema;
-
-/// Utility modules used by benchmarks (always compiled)
-pub mod utils;

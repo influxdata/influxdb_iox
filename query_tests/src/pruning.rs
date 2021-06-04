@@ -10,8 +10,8 @@ use query::{
     PartitionChunk,
 };
 
-use crate::utils::{make_db, TestDb};
 use server::db::test_helpers::write_lp;
+use server::utils::{make_db, TestDb};
 
 async fn setup() -> TestDb {
     // Test that partition pruning is connected up
