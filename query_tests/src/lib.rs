@@ -16,5 +16,5 @@ pub mod sql;
 #[cfg(test)]
 pub mod table_schema;
 
-// Used by benchmarks
+// Used by the `server_benchmark` crate in addition to tests in this crate
 pub mod scenarios;
