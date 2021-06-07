@@ -63,6 +63,8 @@ pub fn init_logs_and_tracing(
         match traces_layer_otel {
             Some(_) => (None, None, None, None, None),
             None => {
+                // Note: Use LineWriter to ensure each log line is
+                // written as a unit and avoid interleaving
                 let log_writer = match config.log_destination {
                     LogDestination::Stdout => fmt::writer::BoxMakeWriter::new(|| {
                         std::io::LineWriter::new(std::io::stdout())
