@@ -37,15 +37,12 @@ pub mod builder;
 /// Database schema creation / validation errors.
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Error validating schema: '{}' is both a field and a tag", column_name,))]
-    BothFieldAndTag { column_name: String },
-
     #[snafu(display("Error: Duplicate column name found in schema: '{}'", column_name,))]
     DuplicateColumnName { column_name: String },
 
     #[snafu(display(
-        "Error: Incompatible metadata type found in schema for column '{}'. Metadata specified {:?} which is incompatible with actual type {:?}",
-        column_name, influxdb_column_type, actual_type
+    "Error: Incompatible metadata type found in schema for column '{}'. Metadata specified {:?} which is incompatible with actual type {:?}",
+    column_name, influxdb_column_type, actual_type
     ))]
     IncompatibleMetadata {
         column_name: String,
@@ -54,18 +51,8 @@ pub enum Error {
     },
 
     #[snafu(display(
-        "Duplicate column name: '{}' was specified to be {:?} as well as timestamp",
-        column_name,
-        existing_type
-    ))]
-    InvalidTimestamp {
-        column_name: String,
-        existing_type: InfluxColumnType,
-    },
-
-    #[snafu(display(
-        "Schema Merge Error: Incompatible measurement names. Existing measurement name '{}', new measurement name '{}'",
-        existing_measurement, new_measurement
+    "Schema Merge Error: Incompatible measurement names. Existing measurement name '{}', new measurement name '{}'",
+    existing_measurement, new_measurement
     ))]
     TryMergeDifferentMeasurementNames {
         existing_measurement: String,
