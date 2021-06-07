@@ -65,6 +65,7 @@ pub fn init_logs_and_tracing(
             None => {
                 // Note: Use LineWriter to ensure each log line is
                 // written as a unit and avoid interleaving
+                // see https://github.com/influxdata/influxdb_iox/issues/1615
                 let log_writer = match config.log_destination {
                     LogDestination::Stdout => fmt::writer::BoxMakeWriter::new(|| {
                         std::io::LineWriter::new(std::io::stdout())
