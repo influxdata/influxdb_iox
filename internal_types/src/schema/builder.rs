@@ -1,13 +1,11 @@
-use snafu::{ResultExt, Snafu};
-use std::{
-    collections::{HashMap, HashSet},
-    convert::TryInto,
-};
+use std::convert::TryInto;
 
 use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField};
+use snafu::{ResultExt, Snafu};
+
+use crate::schema::COLUMN_METADATA_KEY;
 
 use super::{InfluxColumnType, InfluxFieldType, Schema, TIME_COLUMN_NAME};
-use crate::schema::COLUMN_METADATA_KEY;
 
 /// Database schema creation / validation errors.
 #[derive(Debug, Snafu)]
@@ -222,11 +220,12 @@ impl SchemaMerger {
 
 #[cfg(test)]
 mod test {
+    use InfluxColumnType::*;
+    use InfluxFieldType::*;
+
     use crate::assert_column_eq;
 
     use super::*;
-    use InfluxColumnType::*;
-    use InfluxFieldType::*;
 
     #[test]
     fn test_builder_basic() {
