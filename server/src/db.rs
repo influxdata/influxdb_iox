@@ -3,11 +3,7 @@
 
 use self::access::QueryCatalogAccess;
 use self::catalog::TableNameFilter;
-
-use super::{
-    buffer::{self, Buffer},
-    JobRegistry,
-};
+use super::JobRegistry;
 use arrow::datatypes::SchemaRef as ArrowSchemaRef;
 use async_trait::async_trait;
 use catalog::{chunk::Chunk as CatalogChunk, Catalog};
@@ -23,7 +19,7 @@ use datafusion::{
     catalog::{catalog::CatalogProvider, schema::SchemaProvider},
     physical_plan::SendableRecordBatchStream,
 };
-use entry::{Entry, OwnedSequencedEntry, SequencedEntry};
+use entry::{Entry, SequencedEntry};
 use internal_types::{arrow::sort::sort_record_batch, selection::Selection};
 use lifecycle::LifecycleManager;
 use metrics::{KeyValue, MetricRegistry};
@@ -32,7 +28,7 @@ use mutable_buffer::chunk::{
 };
 use object_store::{path::parsed::DirsAndFileName, ObjectStore};
 use observability_deps::tracing::{debug, error, info};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use parquet_file::{
     catalog::{CatalogParquetInfo, CatalogState, PreservedCatalog},
     chunk::{Chunk as ParquetChunk, ChunkMetrics as ParquetChunkMetrics},
@@ -196,10 +192,7 @@ pub enum Error {
     },
 
     #[snafu(display("Error building sequenced entry: {}", source))]
-    SequencedEntryError { source: entry::Error },
-
-    #[snafu(display("Error sending Sequenced Entry to Write Buffer: {}", source))]
-    WriteBufferError { source: buffer::Error },
+    SequencedEntryError { source: entry::SequencedEntryError },
 
     #[snafu(display("Error while handling transaction on preserved catalog: {}", source))]
     TransactionError {
@@ -285,11 +278,6 @@ pub struct Db {
     ///    compressed form for small footprint and fast query execution; and
     ///  - The Parquet Buffer where chunks are backed by Parquet file data.
     preserved_catalog: PreservedCatalog<Catalog>,
-
-    /// The Write Buffer holds sequenced entries in an append in-memory
-    /// buffer. This buffer is used for sending data to subscribers
-    /// and to persist segments in object storage for recovery.
-    pub write_buffer: Option<Mutex<Buffer>>,
 
     /// A handle to the global jobs registry for long running tasks
     jobs: Arc<JobRegistry>,
@@ -403,7 +391,6 @@ impl Db {
         server_id: ServerId,
         object_store: Arc<ObjectStore>,
         exec: Arc<Executor>,
-        write_buffer: Option<Buffer>,
         jobs: Arc<JobRegistry>,
         preserved_catalog: PreservedCatalog<Catalog>,
     ) -> Self {
@@ -412,7 +399,6 @@ impl Db {
         let rules = RwLock::new(rules);
         let server_id = server_id;
         let store = Arc::clone(&object_store);
-        let write_buffer = write_buffer.map(Mutex::new);
         let metrics_registry = Arc::clone(&preserved_catalog.state().metrics_registry);
         let metric_labels = preserved_catalog.state().metric_labels.clone();
 
@@ -433,7 +419,6 @@ impl Db {
             store,
             exec,
             preserved_catalog,
-            write_buffer,
             jobs,
             metrics_registry,
             catalog_access,
@@ -986,54 +971,54 @@ impl Db {
         info!("finished background worker");
     }
 
-    /// Stores an entry based on the configuration. The Entry will first be
-    /// converted into a `SequencedEntry` with the logical clock assigned
-    /// from the database, and then the `SequencedEntry` will be passed to
-    /// `store_sequenced_entry`.
+    /// Stores an entry based on the configuration.
     pub fn store_entry(&self, entry: Entry) -> Result<()> {
-        let sequenced_entry = Arc::new(
-            OwnedSequencedEntry::new_from_entry_bytes(
-                self.process_clock.next(),
-                self.server_id,
-                entry.data(),
-            )
-            .context(SequencedEntryError)?,
-        );
+        let immutable = {
+            let rules = self.rules.read();
+            rules.lifecycle_rules.immutable
+        };
 
-        self.store_sequenced_entry(sequenced_entry)
+        // If the database is immutable, we don't even need to build a `SequencedEntry`.
+        // There will be additional cases when we add the write buffer as the `SequencedEntry`
+        // will potentially need to be constructed from other values, like the Kafka partition
+        // and offset, instead of the process clock.
+        if immutable {
+            DatabaseNotWriteable {}.fail()
+        } else {
+            let sequenced_entry = Arc::new(
+                SequencedEntry::new_from_process_clock(
+                    self.process_clock.next(),
+                    self.server_id,
+                    entry.data(),
+                )
+                .context(SequencedEntryError)?,
+            );
+
+            self.store_sequenced_entry(sequenced_entry)
+        }
     }
 
-    /// Given a `SequencedEntry`:
-    ///
-    /// - If the write buffer is configured, write the `SequencedEntry` into the buffer, which
-    ///   will replicate the `SequencedEntry` based on the configured rules.
-    /// - If the mutable buffer is configured, the `SequencedEntry` is then written into the
-    ///   mutable buffer.
-    ///
-    /// Note that if the write buffer is configured but there is an error storing the
-    /// `SequencedEntry` in the write buffer, the `SequencedEntry` will *not* reach the mutable
-    /// buffer.
-    pub fn store_sequenced_entry(&self, sequenced_entry: Arc<dyn SequencedEntry>) -> Result<()> {
-        // Send to the write buffer, if configured
-        if let Some(wb) = &self.write_buffer {
-            wb.lock()
-                .append(Arc::clone(&sequenced_entry))
-                .context(WriteBufferError)?;
-        }
-
-        // Send to the mutable buffer
-
+    /// Given a `SequencedEntry`, if the mutable buffer is configured, the `SequencedEntry` is then
+    /// written into the mutable buffer.
+    pub fn store_sequenced_entry(&self, sequenced_entry: Arc<SequencedEntry>) -> Result<()> {
+        // Get all needed database rule values, then release the lock
         let rules = self.rules.read();
         let mutable_size_threshold = rules.lifecycle_rules.mutable_size_threshold;
-        if rules.lifecycle_rules.immutable {
+        let immutable = rules.lifecycle_rules.immutable;
+        let buffer_size_hard = rules.lifecycle_rules.buffer_size_hard;
+        std::mem::drop(rules);
+
+        // We may have gotten here through `store_entry`, in which case this is checking the
+        // configuration again unnecessarily, but we may have come here by consuming records from
+        // Kafka, so this check is necessary in that case.
+        if immutable {
             return DatabaseNotWriteable {}.fail();
         }
-        if let Some(hard_limit) = rules.lifecycle_rules.buffer_size_hard {
+        if let Some(hard_limit) = buffer_size_hard {
             if self.preserved_catalog.state().metrics().memory().total() > hard_limit.get() {
                 return HardLimitReached {}.fail();
             }
         }
-        std::mem::drop(rules);
 
         // TODO: Direct writes to closing chunks
 
@@ -1059,8 +1044,8 @@ impl Db {
 
                             mb_chunk
                                 .write_table_batch(
-                                    sequenced_entry.clock_value(),
-                                    sequenced_entry.server_id(),
+                                    sequenced_entry.sequence().id,
+                                    sequenced_entry.sequence().number,
                                     table_batch,
                                 )
                                 .context(WriteEntry {
@@ -1089,8 +1074,8 @@ impl Db {
 
                             mb_chunk
                                 .write_table_batch(
-                                    sequenced_entry.clock_value(),
-                                    sequenced_entry.server_id(),
+                                    sequenced_entry.sequence().id,
+                                    sequenced_entry.sequence().number,
                                     table_batch,
                                 )
                                 .context(WriteEntryInitial { partition_key })?;
@@ -2685,15 +2670,6 @@ mod tests {
             try_write_lp(db.as_ref(), "cpu bar=2 20"),
             Err(super::Error::HardLimitReached {})
         ));
-    }
-
-    #[tokio::test]
-    async fn write_goes_to_write_buffer_if_configured() {
-        let db = Arc::new(TestDb::builder().write_buffer(true).build().await.db);
-
-        assert_eq!(db.write_buffer.as_ref().unwrap().lock().size(), 0);
-        write_lp(db.as_ref(), "cpu bar=1 10");
-        assert_ne!(db.write_buffer.as_ref().unwrap().lock().size(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
