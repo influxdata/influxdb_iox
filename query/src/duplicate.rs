@@ -32,9 +32,14 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Groups [`Prunable`] objects into disjoint sets using values of
-/// min/max statistics. The groups are formed such that each group may
-/// contain InfluxDB data model primary key duplicates with others
-/// in that set.
+/// min/max statistics. The groups are formed such that each group
+/// *may* contain InfluxDB data model primary key duplicates with
+/// others in that set.
+///
+/// The *may* overlap calculation is conservative -- that is it may
+/// flag two chunks as having overlapping data when in reality they do
+/// not. If chunks are split into different groups, then they are
+/// guaranteed not to contain any rows with the same primary key.
 ///
 /// Note 1: since this algorithm is based on statistics, it may have
 /// false positives (flag that two objects may have overlap when in
