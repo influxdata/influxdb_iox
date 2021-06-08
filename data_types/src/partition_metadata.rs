@@ -673,6 +673,23 @@ mod tests {
     }
 
     #[test]
+    fn statistics_overlaps_mixed_none() {
+        let stat1 = StatValues {
+            min: Some(10),
+            max: None,
+            ..Default::default()
+        };
+
+        let stat2 = StatValues {
+            min: None,
+            max: Some(5),
+            ..Default::default()
+        };
+        assert_eq!(stat1.overlaps(&stat2), StatOverlap::Unknown);
+        assert_eq!(stat2.overlaps(&stat1), StatOverlap::Unknown);
+    }
+
+    #[test]
     fn update_string() {
         let mut stat = StatValues::new_with_value("bbb".to_string());
         assert_eq!(stat.min, Some("bbb".to_string()));
