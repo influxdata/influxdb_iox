@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField};
 use snafu::{ResultExt, Snafu};
 
-use crate::schema::COLUMN_METADATA_KEY;
+use crate::schema::set_field_metadata;
 
 use super::{InfluxColumnType, InfluxFieldType, Schema, TIME_COLUMN_NAME};
 
@@ -118,10 +118,8 @@ impl SchemaBuilder {
         self
     }
 
-    /// Creates an Arrow schema with embedded metadata, resetting the
-    /// builder back to `default`. All schema validation happens at
-    /// this time.
-    ///
+    /// Creates an Arrow schema with embedded metadata All
+    /// schema validation happens at this time.
     /// ```
     /// use internal_types::schema::{builder::SchemaBuilder, InfluxColumnType, InfluxFieldType};
     ///
@@ -161,19 +159,9 @@ impl SchemaBuilder {
         arrow_type: ArrowDataType,
     ) -> &mut Self {
         let mut field = ArrowField::new(column_name, arrow_type, nullable);
-        set_field_metadata(&mut field, influxdb_column_type);
+        set_field_metadata(&mut field, influxdb_column_type, None);
         self.fields.push(field);
         self
-    }
-}
-
-pub(super) fn set_field_metadata(field: &mut ArrowField, column_type: Option<InfluxColumnType>) {
-    if let Some(column_type) = column_type {
-        field.set_metadata(Some(
-            vec![(COLUMN_METADATA_KEY.to_string(), column_type.to_string())]
-                .into_iter()
-                .collect(),
-        ))
     }
 }
 

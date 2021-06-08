@@ -1,11 +1,15 @@
-use super::{InfluxColumnType, Schema};
-use crate::schema::builder::set_field_metadata;
-use crate::schema::MEASUREMENT_METADATA_KEY;
+use std::sync::Arc;
+
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema as ArrowSchema};
 use hashbrown::hash_map::RawEntryMut;
 use hashbrown::HashMap;
 use snafu::Snafu;
-use std::sync::Arc;
+
+use crate::schema::set_field_metadata;
+use crate::schema::sort::SortKey;
+use crate::schema::MEASUREMENT_METADATA_KEY;
+
+use super::{InfluxColumnType, Schema};
 
 /// Database schema creation / validation errors.
 #[derive(Debug, Snafu)]
@@ -169,8 +173,15 @@ impl SchemaMerger {
         Ok(self)
     }
 
-    /// Returns the schema that was built the columns are always sorted in lexicographic order
+    /// Returns the schema that was built, the columns are always sorted in lexicographic order
     pub fn build(&mut self) -> Schema {
+        self.build_with_sort_key(&Default::default())
+    }
+
+    /// Returns the schema that was built, the columns are always sorted in lexicographic order
+    ///
+    /// Additionally specifies a sort key for the data
+    pub fn build_with_sort_key(&mut self, sort_key: &SortKey<'_>) -> Schema {
         assert!(!self.finished, "build called multiple times");
         self.finished = true;
 
@@ -183,7 +194,8 @@ impl SchemaMerger {
             .fields
             .drain()
             .map(|(_, (mut field, column_type))| {
-                set_field_metadata(&mut field, column_type);
+                let sort = sort_key.get(field.name());
+                set_field_metadata(&mut field, column_type, sort);
                 field
             })
             .collect();
@@ -199,9 +211,10 @@ impl SchemaMerger {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::schema::builder::SchemaBuilder;
     use crate::schema::InfluxFieldType::Integer;
+
+    use super::*;
 
     #[test]
     fn test_merge_same_schema() {
