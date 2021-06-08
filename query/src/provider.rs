@@ -12,7 +12,7 @@ use datafusion::{
     logical_plan::Expr,
     physical_plan::ExecutionPlan,
 };
-use internal_types::schema::{builder::SchemaMerger, Schema};
+use internal_types::schema::{merge::SchemaMerger, Schema};
 use observability_deps::tracing::debug;
 
 use crate::{
@@ -32,17 +32,7 @@ pub enum Error {
     #[snafu(display("Chunk schema not compatible for table '{}': {}", table_name, source))]
     ChunkSchemaNotCompatible {
         table_name: String,
-        source: internal_types::schema::builder::Error,
-    },
-
-    #[snafu(display(
-        "Internal error: no chunks found in builder for table '{}': {}",
-        table_name,
-        source,
-    ))]
-    InternalNoChunks {
-        table_name: String,
-        source: internal_types::schema::builder::Error,
+        source: internal_types::schema::merge::Error,
     },
 
     #[snafu(display(
@@ -89,34 +79,21 @@ impl<C: PartitionChunk> ProviderBuilder<C> {
     }
 
     /// Add a new chunk to this provider
-    pub fn add_chunk(self, chunk: Arc<C>, chunk_table_schema: Schema) -> Result<Self> {
-        let Self {
-            table_name,
-            schema_merger,
-            chunk_pruner,
-            mut chunks,
-        } = self;
+    pub fn add_chunk(&mut self, chunk: Arc<C>, chunk_table_schema: Schema) -> Result<&mut Self> {
+        self.schema_merger
+            .merge(&chunk_table_schema)
+            .context(ChunkSchemaNotCompatible {
+                table_name: self.table_name.as_ref(),
+            })?;
 
-        let schema_merger =
-            schema_merger
-                .merge(chunk_table_schema)
-                .context(ChunkSchemaNotCompatible {
-                    table_name: table_name.as_ref(),
-                })?;
+        self.chunks.push(chunk);
 
-        chunks.push(chunk);
-
-        Ok(Self {
-            table_name,
-            schema_merger,
-            chunk_pruner,
-            chunks,
-        })
+        Ok(self)
     }
 
     /// Specify a `ChunkPruner` for the provider that will apply
     /// additional chunk level pruning based on pushed down predicates
-    pub fn add_pruner(mut self, chunk_pruner: Arc<dyn ChunkPruner<C>>) -> Self {
+    pub fn add_pruner(&mut self, chunk_pruner: Arc<dyn ChunkPruner<C>>) -> &mut Self {
         assert!(
             self.chunk_pruner.is_none(),
             "Chunk pruner already specified"
@@ -131,51 +108,38 @@ impl<C: PartitionChunk> ProviderBuilder<C> {
     /// Some planners, such as InfluxRPC which apply all predicates
     /// when they get the initial list of chunks, do not need an
     /// additional pass.
-    pub fn add_no_op_pruner(self) -> Self {
+    pub fn add_no_op_pruner(&mut self) -> &mut Self {
         let chunk_pruner = Arc::new(NoOpPruner {});
         self.add_pruner(chunk_pruner)
     }
 
     /// Create the Provider
-    pub fn build(self) -> Result<ChunkTableProvider<C>> {
-        let Self {
-            table_name,
-            schema_merger,
-            chunk_pruner,
-            chunks,
-        } = self;
-
-        let iox_schema = schema_merger
-            .build()
-            .context(InternalNoChunks {
-                table_name: table_name.as_ref(),
-            })?
-            // sort so the columns are always in a consistent order
-            .sort_fields_by_name();
+    pub fn build(&mut self) -> Result<ChunkTableProvider<C>> {
+        let iox_schema = self.schema_merger.build();
 
         // if the table was reported to exist, it should not be empty
-        if chunks.is_empty() {
+        if self.chunks.is_empty() {
             return InternalNoRowsInTable {
-                table_name: table_name.as_ref(),
+                table_name: self.table_name.as_ref(),
             }
             .fail();
         }
 
-        let chunk_pruner = match chunk_pruner {
+        let chunk_pruner = match self.chunk_pruner.take() {
             Some(chunk_pruner) => chunk_pruner,
             None => {
                 return InternalNoChunkPruner {
-                    table_name: table_name.as_ref(),
+                    table_name: self.table_name.as_ref(),
                 }
                 .fail()
             }
         };
 
         Ok(ChunkTableProvider {
-            table_name,
             iox_schema,
             chunk_pruner,
-            chunks,
+            table_name: Arc::clone(&self.table_name),
+            chunks: std::mem::take(&mut self.chunks),
         })
     }
 }
