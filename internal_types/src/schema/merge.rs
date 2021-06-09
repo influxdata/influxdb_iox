@@ -81,8 +81,12 @@ fn nullable_to_str(nullability: bool) -> &'static str {
 ///    `None`, or they can both be `Some(name`)
 #[derive(Debug, Default)]
 pub struct SchemaMerger {
+    /// Maps column names to their definition
     fields: HashMap<String, (Field, Option<InfluxColumnType>)>,
+    /// The measurement name if any
     measurement: Option<String>,
+    /// If the builder has been consumed
+    finished: bool,
 }
 
 impl SchemaMerger {
@@ -92,8 +96,6 @@ impl SchemaMerger {
 
     /// Appends the schema to the merged schema being built,
     /// validating that no columns are added.
-    ///
-    /// O(n) in the number of fields (columns)
     pub fn merge(&mut self, other: &Schema) -> Result<&mut Self> {
         // Verify measurement name is compatible
         match (self.measurement.as_ref(), other.measurement()) {
@@ -126,7 +128,9 @@ impl SchemaMerger {
         let field_name = field.name();
         match self.fields.raw_entry_mut().from_key(field_name) {
             RawEntryMut::Vacant(vacant) => {
-                // Purposefully don't propagate metadata
+                // Purposefully don't propagate metadata to avoid blindly propagating
+                // information such as sort key, etc... that SchemaMerger cannot guarantee
+                // to preserve the semantics of
                 let field = Field::new(field_name, field.data_type().clone(), field.is_nullable());
                 vacant.insert(field_name.clone(), (field, column_type));
             }
@@ -167,6 +171,9 @@ impl SchemaMerger {
 
     /// Returns the schema that was built the columns are always sorted in lexicographic order
     pub fn build(&mut self) -> Schema {
+        assert!(!self.finished, "build called multiple times");
+        self.finished = true;
+
         let mut metadata: std::collections::HashMap<_, _> = Default::default();
         if let Some(measurement) = self.measurement.take() {
             metadata.insert(MEASUREMENT_METADATA_KEY.to_string(), measurement);

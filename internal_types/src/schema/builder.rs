@@ -24,6 +24,9 @@ pub struct SchemaBuilder {
 
     /// The fields, in order
     fields: Vec<ArrowField>,
+
+    /// If the builder has been consumed
+    finished: bool,
 }
 
 impl SchemaBuilder {
@@ -142,6 +145,9 @@ impl SchemaBuilder {
     /// assert_eq!(influxdb_column_type, Some(InfluxColumnType::Timestamp));
     /// ```
     pub fn build(&mut self) -> Result<Schema> {
+        assert!(!self.finished, "build called multiple times");
+        self.finished = true;
+
         Schema::new_from_parts(self.measurement.take(), std::mem::take(&mut self.fields))
             .context(ValidatingSchema)
     }

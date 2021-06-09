@@ -84,6 +84,9 @@ pub struct ProviderBuilder<C: PartitionChunk + 'static> {
     schema_merger: SchemaMerger,
     chunk_pruner: Option<Arc<dyn ChunkPruner<C>>>,
     chunks: Vec<Arc<C>>,
+
+    /// If the builder has been consumed
+    finished: bool,
 }
 
 impl<C: PartitionChunk> ProviderBuilder<C> {
@@ -93,6 +96,7 @@ impl<C: PartitionChunk> ProviderBuilder<C> {
             schema_merger: SchemaMerger::new(),
             chunk_pruner: None,
             chunks: Vec::new(),
+            finished: false,
         }
     }
 
@@ -133,6 +137,9 @@ impl<C: PartitionChunk> ProviderBuilder<C> {
 
     /// Create the Provider
     pub fn build(&mut self) -> Result<ChunkTableProvider<C>> {
+        assert!(!self.finished, "build called multiple times");
+        self.finished = true;
+
         let iox_schema = self.schema_merger.build();
 
         // if the table was reported to exist, it should not be empty
