@@ -1,0 +1,12 @@
+###
+# Dockerfile for integration tests that connect to Kafka
+# It expects to be run with `docker compose`
+##
+
+FROM quay.io/influxdb/rust:ci
+
+ADD . /home/rust/iox
+RUN sudo chown -R rust:rust /home/rust/iox
+WORKDIR /home/rust/iox
+
+CMD ["sh", "-c", "ls && cargo test -p influxdb_iox --test end-to-end write_buffer -- --nocapture"]
