@@ -33,7 +33,7 @@ const NUM_MSGS: usize = 10; // TODO: this should go away
 
 #[tokio::test]
 async fn can_connect_to_kafka() {
-    let kafka_connection = "127.0.0.1:9093";
+    let kafka_connection = "kafka:9093";
 
     // TODO instead of producing to Kafka directly, this test should use the management api to
     // configure a write buffer pointing at 127.0.0.1:9093, should use the /write endpoint to
