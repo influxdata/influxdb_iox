@@ -282,6 +282,7 @@ workflows:
       - build
       - check-flatbuffers
       - doc
+      - ci_image
 
   # Internal pipeline for perf builds.
   #
