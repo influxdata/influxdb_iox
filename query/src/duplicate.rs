@@ -141,6 +141,11 @@ where
     /// Returns true if the chunk has a potential primary key overlap
     /// with the other chunk.
     ///
+    /// This this algorithm is O(2^N) in the worst case. However, the
+    /// pathological case is where two chunks each have a large
+    /// numbers of tags that have no overlap, which seems unlikely in
+    /// the real world.
+    ///
     /// Note this algoritm is quite conservative (in that it will
     /// assume that any column can contain nulls) and thus can match
     /// with chunks that do not have that column.   for example
