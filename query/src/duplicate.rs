@@ -183,34 +183,42 @@ where
     // other.columns[..other_idx] if they are compatible
     fn potential_overlap_impl(
         &self,
-        self_idx: usize,
+        mut self_idx: usize,
         other: &Self,
-        other_idx: usize,
+        mut other_idx: usize,
     ) -> Result<bool> {
-        let s1 = self.key_summaries.get(self_idx);
-        let s2 = other.key_summaries.get(other_idx);
+        loop {
+            let s1 = self.key_summaries.get(self_idx);
+            let s2 = other.key_summaries.get(other_idx);
 
-        if let (Some(s1), Some(s2)) = (s1, s2) {
-            if s1.name == s2.name {
-                // pk matched in this position, so check values. If we
-                // find no overlap, know this is false, otherwise need to keep checking
-                if Self::columns_might_overlap(s1, s2)? {
-                    self.potential_overlap_impl(self_idx + 1, other, other_idx + 1)
+            if let (Some(s1), Some(s2)) = (s1, s2) {
+                if s1.name == s2.name {
+                    // pk matched in this position, so check values. If we
+                    // find no overlap, know this is false, otherwise need to keep checking
+                    if Self::columns_might_overlap(s1, s2)? {
+                        self_idx += 1;
+                        other_idx += 1;
+                    } else {
+                        return Ok(false);
+                    }
                 } else {
-                    Ok(false)
+                    // name didn't match, so try and find the next
+                    // place it does.  Since there may be missing keys
+                    // in each side, need to check each in turn
+                    //
+                    // Note this will result in O(num_tags) stack
+                    // frames in the worst case, but we expect the
+                    // number of tags to be relatively small (~20 at
+                    // the time of this writing)
+                    return Ok(self.potential_overlap_impl(self_idx + 1, other, other_idx)?
+                        || self.potential_overlap_impl(self_idx, other, other_idx + 1)?);
                 }
             } else {
-                // name didn't match, so try and find the next
-                // place it does.  Since there may be missing keys
-                // in each side, need to check each in turn
-                Ok(self.potential_overlap_impl(self_idx + 1, other, other_idx)?
-                    || self.potential_overlap_impl(self_idx, other, other_idx + 1)?)
+                // ran out of columns to check on one side, assume the
+                // other could have nulls all the way down (due to null
+                // assumption)
+                return Ok(true);
             }
-        } else {
-            // ran out of columns to check on one side, assume the
-            // other could have nulls all the way down (due to null
-            // assumption)
-            Ok(true)
         }
     }
 
