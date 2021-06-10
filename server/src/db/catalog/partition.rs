@@ -3,6 +3,7 @@
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use chrono::{DateTime, Utc};
@@ -192,5 +193,119 @@ impl Partition {
 
     pub fn metrics(&self) -> &PartitionMetrics {
         &self.metrics
+    }
+}
+
+const CLOSED_WINDOW_SECONDS: u8 = 10;
+const SECONDS_IN_MINUTE: u8 = 60;
+
+#[derive(Debug, Clone)]
+pub struct PersistenceWindows {
+    persistable: Option<Window>,
+    closed: Vec<Window>,
+    open: Option<Window>,
+    late_arrival_period: Duration,
+}
+
+impl PersistenceWindows {
+    pub fn new(late_arrival_minutes: u8) -> Self {
+        let late_arrival_seconds = late_arrival_minutes * SECONDS_IN_MINUTE;
+        let closed_window_count = late_arrival_seconds  / CLOSED_WINDOW_SECONDS;
+
+        Self{
+            persistable: None,
+            closed: Vec::with_capacity(closed_window_count as usize),
+            open: None,
+            late_arrival_period: Duration::new(late_arrival_seconds as u64, 0),
+        }
+    }
+
+    /// Updates the windows with the information from a batch of rows to the same partition. If a
+    pub fn add_row(&mut self, sequencer_id: u32, sequence_number: u64, row_time: DateTime<Utc>, received_at: Instant) {
+        match &mut self.open {
+            Some(w) => {
+                w.update(sequencer_id, sequence_number, row_time);
+            },
+            None => {
+                    let mut sequencer_maximums = BTreeMap::new();
+                    sequencer_maximums.insert(sequencer_id, sequence_number);
+                    let mut sequencer_minimums = BTreeMap::new();
+                    sequencer_minimums.insert(sequencer_id, sequence_number);
+
+                    self.open = Some(Window{
+                        created_at: received_at,
+                        row_count: 1,
+                        min_time: row_time.clone(),
+                        max_time: row_time,
+                        sequencer_maximums,
+                        sequencer_minimums,
+                    })
+            }
+        }
+    }
+
+    pub fn persistable_row_count(&self) -> usize {
+        self.persistable.as_ref().map(|w| w.row_count).unwrap_or(0)
+    }
+
+    pub fn persistable_age(&self) -> Option<Instant> {
+        self.persistable.as_ref().map(|w| w.created_at)
+    }
+
+    pub fn t_flush(&self) -> Option<DateTime<Utc>> {
+        self.persistable.as_ref().map(|w| w.max_time)
+    }
+
+    pub fn flush_persistable(&mut self) {
+        self.persistable = None;
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Window {
+    created_at: Instant,
+    row_count: usize,
+    min_time: DateTime<Utc>,
+    max_time: DateTime<Utc>,
+    sequencer_minimums: BTreeMap<u32, u64>,
+    sequencer_maximums: BTreeMap<u32, u64>,
+}
+
+impl Window {
+    // Updates the window the the passed in row information. This function assumes that sequence numbers
+    // are always increasing.
+    fn update(&mut self, sequencer_id: u32, sequence_number: u64, row_time: DateTime<Utc>) {
+        self.row_count += 1;
+        if self.min_time > row_time {
+            self.min_time = row_time;
+        }
+        if self.max_time < row_time {
+            self.max_time = row_time;
+        }
+        self.sequencer_minimums.entry(sequencer_id).or_insert(sequence_number);
+        self.sequencer_maximums.insert(sequencer_id, sequence_number);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn starts_open_window() {
+        let mut w = PersistenceWindows::new(1);
+        assert_eq!(w.closed.capacity(), 6);
+
+        let i = Instant::now();
+        let start_time = Utc::now();
+        let last_time = Utc::now();
+
+        w.add_row(1, 2, start_time, i);
+        w.add_row(1, 4, Utc::now(), Instant::now());
+        w.add_row(1, 10, last_time, Instant::now());
+
+        assert!(w.closed.is_empty());
+        assert!(w.persistable.is_none());
+        assert_eq!(w.open.unwrap().row_count, 3);
     }
 }
