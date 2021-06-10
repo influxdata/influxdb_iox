@@ -3,7 +3,8 @@
     missing_debug_implementations,
     clippy::explicit_iter_loop,
     clippy::use_self,
-    clippy::clone_on_ref_ptr
+    clippy::clone_on_ref_ptr,
+    clippy::future_not_send
 )]
 
 use async_trait::async_trait;
@@ -122,6 +123,9 @@ pub trait PartitionChunk: Prunable + Debug + Send + Sync {
         predicate: &Predicate,
         selection: Selection<'_>,
     ) -> Result<SendableRecordBatchStream, Self::Error>;
+
+    /// Returns true if data of this chunk is sorted
+    fn is_sorted_on_pk(&self) -> bool;
 }
 
 #[async_trait]
