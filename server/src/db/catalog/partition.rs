@@ -1,6 +1,9 @@
 //! The catalog representation of a Partition
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{btree_map::Entry, BTreeMap},
+    sync::Arc,
+};
 
 use chrono::{DateTime, Utc};
 
@@ -129,7 +132,7 @@ impl Partition {
         &mut self,
         chunk_id: u32,
         chunk: Arc<parquet_file::chunk::Chunk>,
-    ) -> Option<Arc<RwLock<Chunk>>> {
+    ) -> Arc<RwLock<Chunk>> {
         assert_eq!(chunk.table_name(), self.table_name.as_ref());
 
         let chunk = Arc::new(self.metrics.new_chunk_lock(Chunk::new_object_store_only(
@@ -140,7 +143,10 @@ impl Partition {
         )));
 
         self.next_chunk_id = self.next_chunk_id.max(chunk_id + 1);
-        self.chunks.insert(chunk_id, Arc::clone(&chunk))
+        match self.chunks.entry(chunk_id) {
+            Entry::Vacant(vacant) => Arc::clone(vacant.insert(chunk)),
+            Entry::Occupied(_) => panic!("chunk with id {} already exists", chunk_id),
+        }
     }
 
     /// Drop the specified chunk

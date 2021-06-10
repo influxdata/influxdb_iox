@@ -1166,9 +1166,7 @@ impl CatalogState for Catalog {
                 // table chunk, but table already known => that's ok, create chunk in "object store only" stage
                 drop(partition_guard);
                 let mut partition_guard = partition.write();
-                let previous_chunk =
-                    partition_guard.insert_object_store_only_chunk(chunk_id, parquet_chunk);
-                assert!(previous_chunk.is_none());
+                partition_guard.insert_object_store_only_chunk(chunk_id, parquet_chunk);
                 debug!(%table_name, %partition_key, %chunk_id, "recovered chunk from persisted catalog");
             }
         }
