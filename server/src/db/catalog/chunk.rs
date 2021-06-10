@@ -864,7 +864,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "chunk must not be empty")]
     fn test_new_open_empty() {
         // fails with empty MBChunk
         let mb_chunk = MBChunk::new("t1", MBChunkMetrics::new_unregistered());
