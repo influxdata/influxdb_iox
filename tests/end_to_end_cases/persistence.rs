@@ -1,13 +1,13 @@
 use arrow_util::assert_batches_eq;
 use data_types::chunk_metadata::{ChunkStorage, ChunkSummary};
 //use generated_types::influxdata::iox::management::v1::*;
-use influxdb_iox_client::operations;
+use influxdb_iox_client::{management::generated_types::LifecycleRules, operations};
 
 use super::scenario::{
     collect_query, create_quickly_persisting_database, create_readable_database, rand_name,
 };
 use crate::common::server_fixture::ServerFixture;
-use std::convert::TryInto;
+use std::{collections::HashMap, convert::TryInto};
 
 #[tokio::test]
 async fn test_chunk_is_persisted_automatically() {
@@ -28,7 +28,7 @@ async fn test_chunk_is_persisted_automatically() {
         .expect("successful write");
     assert_eq!(num_lines_written, 1000);
 
-    wait_for_chunk(
+    wait_for_chunk_storage(
         &fixture,
         &db_name,
         ChunkStorage::ReadBufferAndObjectStore,
@@ -62,7 +62,7 @@ async fn test_chunk_are_removed_from_memory_when_soft_limit_is_hit() {
     }
 
     // make sure that at least one is in object store
-    wait_for_chunk(
+    wait_for_chunk_storage(
         &fixture,
         &db_name,
         ChunkStorage::ObjectStoreOnly,
@@ -80,6 +80,98 @@ async fn test_chunk_are_removed_from_memory_when_soft_limit_is_hit() {
         chunks.len(),
         chunks
     );
+}
+
+#[tokio::test]
+async fn test_chunks_are_removed_only_until_soft_limit() {
+    // Ensure that when chunks are evicted, only enough are evicted to get under the limit
+    let fixture = ServerFixture::create_shared().await;
+    let mut management_client = fixture.management_client();
+    let mut write_client = fixture.write_client();
+
+    let db_name = rand_name();
+    create_quickly_persisting_database(&db_name, fixture.grpc_channel()).await;
+
+    // setup soft limit to 1M (so we can write in all chunks without hitting that)
+    let mut lifecycle_rules = LifecycleRules {
+        mutable_linger_seconds: 1,
+        mutable_size_threshold: 100,
+        buffer_size_soft: 1024 * 1024, // 1MB
+        buffer_size_hard: 1024 * 1024, // 1MB
+        persist: true,
+        ..Default::default()
+    };
+
+    let mut rules = management_client.get_database(&db_name).await.unwrap();
+    rules.lifecycle_rules = Some(lifecycle_rules.clone());
+    management_client
+        .update_database(rules.clone())
+        .await
+        .unwrap();
+
+    // write in 10 chunks, and expect that some are persisted
+    // (as of time of writing, 10 chunks took up ~800K)
+    let num_chunks: usize = 10;
+    for _ in 0..num_chunks {
+        let lp_lines: Vec<_> = (0..1_000)
+            .map(|i| format!("data,tag1=val{} x={} {}", i, i * 10, i))
+            .collect();
+        let num_lines_written = write_client
+            .write(&db_name, lp_lines.join("\n"))
+            .await
+            .expect("successful write");
+        assert_eq!(num_lines_written, 1000);
+    }
+
+    // Ensure ensure that 10 chunks have been persisted
+    let expected: HashMap<ChunkStorage, usize> = vec![(ChunkStorage::ReadBufferAndObjectStore, 10)]
+        .into_iter()
+        .collect();
+    wait_for_counts(&fixture, &db_name, expected).await;
+
+    // Now, crank down the lifecycle rules so that some (but not all) must be evicted
+    lifecycle_rules.buffer_size_soft = 512 * 1024; // 512K
+    rules.lifecycle_rules = Some(lifecycle_rules);
+    management_client.update_database(rules).await.unwrap();
+
+    // Ensure ensure that only the chunks needed to hit the soft limit
+    // were unloaded -- there should still be some in the read buffer.
+    let expected: HashMap<ChunkStorage, usize> = vec![
+        (ChunkStorage::ObjectStoreOnly, 4),
+        (ChunkStorage::ReadBufferAndObjectStore, 6),
+    ]
+    .into_iter()
+    .collect();
+
+    wait_for_counts(&fixture, &db_name, expected).await;
+}
+
+async fn wait_for_counts(
+    fixture: &ServerFixture,
+    db_name: &str,
+    expected_counts: HashMap<ChunkStorage, usize>,
+) {
+    // make sure that at least one is in object store
+    wait_for_chunks(
+        &fixture,
+        &db_name,
+        std::time::Duration::from_secs(5),
+        |chunks| {
+            let counts = chunks_to_counts(chunks);
+            println!("Looking for\n{:#?}\nactual\n{:#?}", expected_counts, counts);
+            counts == expected_counts
+        },
+    )
+    .await
+}
+
+/// return a map from storage --> number of chunks in that state
+fn chunks_to_counts(chunks: &[ChunkSummary]) -> HashMap<ChunkStorage, usize> {
+    chunks.iter().fold(HashMap::new(), |mut counts, c| {
+        let count = counts.entry(c.storage).or_default();
+        *count += 1;
+        counts
+    })
 }
 
 #[tokio::test]
@@ -217,36 +309,47 @@ async fn wait_for_persisted_chunk(
 }
 
 // Wait for at least one chunk to be in the specified storage state
-async fn wait_for_chunk(
+async fn wait_for_chunk_storage(
     fixture: &ServerFixture,
     db_name: &str,
     desired_storage: ChunkStorage,
     wait_time: std::time::Duration,
 ) {
+    wait_for_chunks(fixture, db_name, wait_time, |chunks| {
+        // Log the current status of the chunks
+        for chunk in chunks {
+            println!(
+                "chunk {} partition {} storage:{:?}",
+                chunk.id, chunk.partition_key, chunk.storage
+            );
+        }
+
+        chunks.iter().any(|chunk| chunk.storage == desired_storage)
+    })
+    .await
+}
+
+// Wait until pred returns true or the wait time is exceeded
+async fn wait_for_chunks<P>(
+    fixture: &ServerFixture,
+    db_name: &str,
+    wait_time: std::time::Duration,
+    pred: P,
+) where
+    P: Fn(&[ChunkSummary]) -> bool,
+{
     let t_start = std::time::Instant::now();
 
     loop {
         let chunks = list_chunks(fixture, db_name).await;
 
-        if chunks.iter().any(|chunk| chunk.storage == desired_storage) {
+        if pred(&chunks) {
             return;
-        }
-
-        // Log the current status of the chunks
-        for chunk in &chunks {
-            println!(
-                "{:?}: chunk {} partition {} storage:{:?}",
-                (t_start.elapsed()),
-                chunk.id,
-                chunk.partition_key,
-                chunk.storage
-            );
         }
 
         assert!(
             t_start.elapsed() < wait_time,
-            "Could not find chunk in desired state {:?} within {:?}. Chunks were: {:#?}",
-            desired_storage,
+            "Could not find chunk that mated predicate within {:?}. Chunks: {:#?}",
             wait_time,
             chunks
         );

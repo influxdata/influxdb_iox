@@ -202,7 +202,7 @@ trait ChunkMover {
         // Loop 2: Determine which chunks to clear from memory when
         // the overall database buffer size is exceeded
         if let Some(soft_limit) = rules.buffer_size_soft {
-            let mut chunks = chunks.iter();
+            let mut chunks = chunks.into_iter();
 
             loop {
                 let buffer_size = self.buffer_size();
@@ -210,7 +210,6 @@ trait ChunkMover {
                     debug!(buffer_size, %soft_limit, "memory use under soft limit");
                     break;
                 }
-                debug!(buffer_size, %soft_limit, "memory use over soft limit");
 
                 // Dropping chunks that are currently in use by
                 // queries frees no memory until the query completes
@@ -242,6 +241,11 @@ trait ChunkMover {
                                     Action::Unload
                                 } else {
                                     // can't free any memory
+                                    debug!(table_name=%chunk_guard.table_name(),
+                                           partition_key=%chunk_guard.key(),
+                                           chunk_id=%chunk_guard.id(),
+                                           buffer_size, %soft_limit,
+                                           "memory use over soft limit, but chunk is already unloaded");
                                     continue;
                                 }
                             }
