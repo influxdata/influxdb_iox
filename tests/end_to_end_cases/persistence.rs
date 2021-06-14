@@ -123,7 +123,7 @@ async fn test_chunks_are_removed_only_until_soft_limit() {
         assert_eq!(num_lines_written, 1000);
     }
 
-    // Ensure ensure that 10 chunks have been persisted
+    // Ensure that 10 chunks have been persisted
     let expected: HashMap<ChunkStorage, usize> = vec![(ChunkStorage::ReadBufferAndObjectStore, 10)]
         .into_iter()
         .collect();
@@ -134,7 +134,7 @@ async fn test_chunks_are_removed_only_until_soft_limit() {
     rules.lifecycle_rules = Some(lifecycle_rules);
     management_client.update_database(rules).await.unwrap();
 
-    // Ensure ensure that only the chunks needed to hit the soft limit
+    // Ensure that only the chunks needed to hit the soft limit
     // were unloaded -- there should still be some in the read buffer.
     let expected: HashMap<ChunkStorage, usize> = vec![
         (ChunkStorage::ObjectStoreOnly, 4),
@@ -151,7 +151,6 @@ async fn wait_for_counts(
     db_name: &str,
     expected_counts: HashMap<ChunkStorage, usize>,
 ) {
-    // make sure that at least one is in object store
     wait_for_chunks(
         &fixture,
         &db_name,
