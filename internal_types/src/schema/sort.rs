@@ -4,8 +4,6 @@ use indexmap::{map::Iter, IndexMap};
 use itertools::Itertools;
 use snafu::Snafu;
 
-use crate::schema::TIME_COLUMN_NAME;
-
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("invalid column sort: {}", value))]
@@ -98,56 +96,6 @@ impl<'a> SortKey<'a> {
         }
     }
 
-    /// Creates a new sort key based on the provided tag key cardinalities
-    /// starting from lowest to highest cardinality, followed by the time column
-    pub fn new_from_cardinalities(mut cardinalities: Vec<(&str, usize)>) -> SortKey<'_> {
-        cardinalities.sort_by_key(|x| x.1);
-
-        let mut sort_key = SortKey::with_capacity(cardinalities.len() + 1);
-        for (col_name, _) in cardinalities {
-            sort_key.push(col_name, Default::default());
-        }
-
-        sort_key.push(TIME_COLUMN_NAME, Default::default());
-        sort_key
-    }
-
-    /// Merge any new columns in `other` into this sort key
-    ///
-    /// For each column in `other` not present in `self`, find the first
-    /// column that comes after it in `other` that is also present in `self`
-    /// and insert it into `self` before that column
-    pub fn merge(&mut self, other: &SortKey<'a>) {
-        let mut insert_idx = self.columns.len();
-        let mut to_insert = Vec::new();
-
-        for (col, options) in other.columns.iter().rev() {
-            match self.get(col) {
-                Some(sort) => insert_idx = sort.sort_ordinal,
-                None => to_insert.push((insert_idx, (*col, *options))),
-            }
-        }
-
-        if to_insert.is_empty() {
-            return;
-        }
-
-        // Ensure new columns are in the order they appeared in `other`
-        to_insert.reverse();
-
-        // Add the existing columns after those added from `other`
-        to_insert.extend(self.columns.drain(..).enumerate());
-
-        // Stable sort based on insert index
-        //
-        // Where new columns have the same insert index, it will preserve
-        // the order in `other` and follow these by the column from `self`
-        to_insert.sort_by_key(|x| x.0);
-
-        // Reconstruct the indexmap
-        self.columns = to_insert.drain(..).map(|x| x.1).collect();
-    }
-
     /// Adds a new column to the end of this sort key
     pub fn push(&mut self, column: &'a str, options: SortOptions) {
         self.columns.insert(column, options);
@@ -160,6 +108,13 @@ impl<'a> SortKey<'a> {
             sort_ordinal,
             options: *options,
         })
+    }
+
+    /// Gets the column for a given index
+    pub fn get_index(&self, idx: usize) -> Option<(&'a str, SortOptions)> {
+        self.columns
+            .get_index(idx)
+            .map(|(col, options)| (*col, *options))
     }
 
     /// Returns an iterator over the columns in this key
@@ -248,48 +203,5 @@ mod tests {
                 options: Default::default()
             })
         );
-    }
-
-    #[test]
-    fn test_merge() {
-        let mut k1 = SortKey::with_capacity(20);
-        k1.push("a", Default::default());
-        k1.push("b", Default::default());
-        k1.push("c", Default::default());
-
-        let mut k2 = SortKey::with_capacity(20);
-        k2.push("c", Default::default());
-        k2.push("apples", Default::default());
-        k2.push("a", Default::default());
-        k2.push("bananas", Default::default());
-        k2.push("cupcakes", Default::default());
-        k2.push("b", Default::default());
-        k2.push("f", Default::default());
-
-        k1.merge(&k2);
-
-        let k1_columns: Vec<_> = k1.columns.iter().map(|x| *x.0).collect();
-
-        assert_eq!(
-            k1_columns,
-            vec!["apples", "a", "bananas", "cupcakes", "b", "c", "f"]
-        )
-    }
-
-    #[test]
-    fn test_from_cardinalities() {
-        let k1 = SortKey::new_from_cardinalities(vec![
-            ("apples", 20),
-            ("bananas", 100),
-            ("coconut", 2),
-            ("damson", 50),
-        ]);
-
-        let k1_columns: Vec<_> = k1.columns.iter().map(|x| *x.0).collect();
-
-        assert_eq!(
-            k1_columns,
-            vec!["coconut", "apples", "damson", "bananas", "time"]
-        )
     }
 }
