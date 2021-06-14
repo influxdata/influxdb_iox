@@ -21,7 +21,7 @@ use query::{
     pruning::Prunable,
     PartitionChunk,
 };
-use read_buffer::Chunk as ReadBufferChunk;
+use read_buffer::RBChunk;
 
 use super::{
     catalog::chunk::ChunkMetadata, pred::to_read_buffer_predicate, streams::ReadFilterResultsStream,
@@ -94,7 +94,7 @@ enum State {
         chunk: Arc<ChunkSnapshot>,
     },
     ReadBuffer {
-        chunk: Arc<ReadBufferChunk>,
+        chunk: Arc<RBChunk>,
         partition_key: Arc<str>,
     },
     ParquetFile {
@@ -195,7 +195,7 @@ impl DbChunk {
     /// persisted, if any
     pub fn object_store_path(&self) -> Option<Path> {
         match &self.state {
-            State::ParquetFile { chunk } => Some(chunk.table_path()),
+            State::ParquetFile { chunk } => Some(chunk.path()),
             _ => None,
         }
     }
@@ -447,6 +447,15 @@ impl PartitionChunk for DbChunk {
                 // manually implementing this vs just letting DataFusion do its thing
                 Ok(None)
             }
+        }
+    }
+
+    // TODOs: return the right value. For now the chunk is assumed to be not sorted
+    fn is_sorted_on_pk(&self) -> bool {
+        match &self.state {
+            State::MutableBuffer { .. } => false,
+            State::ReadBuffer { .. } => false,
+            State::ParquetFile { .. } => false,
         }
     }
 }
