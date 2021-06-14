@@ -26,6 +26,8 @@ use arrow::{
     record_batch::RecordBatch,
 };
 use datafusion::physical_plan::SendableRecordBatchStream;
+
+use observability_deps::tracing::debug;
 use snafu::{ResultExt, Snafu};
 use std::sync::Arc;
 use tokio::sync::mpsc::error::SendError;
@@ -271,10 +273,31 @@ impl SeriesSetConverter {
                     None
                 };
 
+                let col_values = col.values();
+                let values = col_values
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .expect("Casting values column failed");
+
                 let mut current_val = get_key(0);
                 for row in 1..num_rows {
                     let next_val = get_key(row);
                     if next_val != current_val {
+                        //
+                        // N.B, concatenating two Arrow dictionary arrays can
+                        // result in duplicate values with differing keys.
+                        // Therefore, when keys differ we should verify they are
+                        // encoding different values. See:
+                        // https://github.com/apache/arrow-rs/pull/15
+                        //
+                        if let (Some(curr), Some(next)) = (current_val, next_val) {
+                            if values.value(curr as usize) == values.value(next as usize) {
+                                // these logical values are the same even though
+                                // they have different encoded keys.
+                                continue;
+                            }
+                        }
+
                         bitmap.add(row as u32);
                         current_val = next_val;
                     }
@@ -290,6 +313,11 @@ impl SeriesSetConverter {
         // for now, always treat the last row as ending a series
         bitmap.add(num_rows as u32);
 
+        debug!(
+            rows = ?bitmap.to_vec(),
+            ?col_idx,
+            "row transitions for results"
+        );
         bitmap
     }
 
