@@ -21,7 +21,7 @@ use query::{
     pruning::Prunable,
     PartitionChunk,
 };
-use read_buffer::Chunk as ReadBufferChunk;
+use read_buffer::RBChunk;
 
 use super::{
     catalog::chunk::ChunkMetadata, pred::to_read_buffer_predicate, streams::ReadFilterResultsStream,
@@ -94,7 +94,7 @@ enum State {
         chunk: Arc<ChunkSnapshot>,
     },
     ReadBuffer {
-        chunk: Arc<ReadBufferChunk>,
+        chunk: Arc<RBChunk>,
         partition_key: Arc<str>,
     },
     ParquetFile {
@@ -104,7 +104,7 @@ enum State {
 
 impl DbChunk {
     /// Create a DBChunk snapshot of the catalog chunk
-    pub fn snapshot(chunk: &super::catalog::chunk::Chunk) -> Arc<Self> {
+    pub fn snapshot(chunk: &super::catalog::chunk::CatalogChunk) -> Arc<Self> {
         let partition_key = Arc::from(chunk.key());
 
         use super::catalog::chunk::{ChunkStage, ChunkStageFrozenRepr};
@@ -170,7 +170,7 @@ impl DbChunk {
     /// is ParquetFile type whose state is  WrittenToObjectStore. The
     /// reason we have this function is because the above snapshot
     /// function always returns the read buffer one for the same state
-    pub fn parquet_file_snapshot(chunk: &super::catalog::chunk::Chunk) -> Arc<Self> {
+    pub fn parquet_file_snapshot(chunk: &super::catalog::chunk::CatalogChunk) -> Arc<Self> {
         use super::catalog::chunk::ChunkStage;
 
         let (state, meta) = match chunk.stage() {

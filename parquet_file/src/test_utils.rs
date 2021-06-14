@@ -23,16 +23,13 @@ use internal_types::{
 use object_store::{memory::InMemory, path::Path, ObjectStore, ObjectStoreApi};
 use parquet::{
     arrow::{ArrowReader, ParquetFileArrowReader},
-    file::{
-        metadata::ParquetMetaData,
-        serialized_reader::{SerializedFileReader, SliceableCursor},
-    },
+    file::serialized_reader::{SerializedFileReader, SliceableCursor},
 };
 use uuid::Uuid;
 
 use crate::{
     chunk::ChunkMetrics,
-    metadata::{read_parquet_metadata_from_file, IoxMetadata},
+    metadata::{IoxMetadata, IoxParquetMetaData},
 };
 use crate::{
     chunk::{self, Chunk},
@@ -146,7 +143,7 @@ pub async fn make_chunk_given_record_batch(
         transaction_revision_counter: 0,
         transaction_uuid: Uuid::nil(),
     };
-    let (path, _metadata) = storage
+    let (path, parquet_metadata) = storage
         .write_to_object_store(
             part_key.to_string(),
             chunk_id,
@@ -157,12 +154,13 @@ pub async fn make_chunk_given_record_batch(
         .await
         .unwrap();
 
-    Chunk::new(
+    Chunk::new_from_parts(
         part_key,
-        table_summary,
+        Arc::new(table_summary),
+        Arc::new(schema),
         path,
         Arc::clone(&store),
-        schema,
+        Arc::new(parquet_metadata),
         ChunkMetrics::new_unregistered(),
     )
 }
@@ -578,13 +576,13 @@ pub async fn make_metadata(
     object_store: &Arc<ObjectStore>,
     column_prefix: &str,
     chunk_id: u32,
-) -> (Path, ParquetMetaData) {
+) -> (Path, IoxParquetMetaData) {
     let chunk = make_chunk(Arc::clone(object_store), column_prefix, chunk_id).await;
     let (_, parquet_data) = load_parquet_from_store(&chunk, Arc::clone(object_store))
         .await
         .unwrap();
     (
         chunk.path(),
-        read_parquet_metadata_from_file(parquet_data).unwrap(),
+        IoxParquetMetaData::from_file_bytes(parquet_data).unwrap(),
     )
 }

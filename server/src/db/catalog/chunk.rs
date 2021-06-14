@@ -11,7 +11,7 @@ use internal_types::schema::Schema;
 use metrics::{Counter, Histogram, KeyValue};
 use mutable_buffer::chunk::{snapshot::ChunkSnapshot as MBChunkSnapshot, Chunk as MBChunk};
 use parquet_file::chunk::Chunk as ParquetChunk;
-use read_buffer::Chunk as ReadBufferChunk;
+use read_buffer::RBChunk;
 use tracker::{TaskRegistration, TaskTracker};
 
 #[derive(Debug, Snafu)]
@@ -121,7 +121,7 @@ pub enum ChunkStageFrozenRepr {
     MutableBufferSnapshot(Arc<MBChunkSnapshot>),
 
     /// Read Buffer that is optimized for in-memory data processing.
-    ReadBuffer(Arc<ReadBufferChunk>),
+    ReadBuffer(Arc<RBChunk>),
 }
 
 /// Represents the current lifecycle stage a chunk is in.
@@ -187,7 +187,7 @@ pub enum ChunkStage {
         parquet: Arc<ParquetChunk>,
 
         /// In-memory version of the parquet data.
-        read_buffer: Option<Arc<ReadBufferChunk>>,
+        read_buffer: Option<Arc<RBChunk>>,
     },
 }
 
@@ -211,7 +211,7 @@ impl ChunkStage {
 /// these stages there are multiple ways to represent or cache data. This fact is captured by the _stage_-specific chunk
 /// _representation_ (e.g. a persisted chunk may have data cached in-memory).
 #[derive(Debug)]
-pub struct Chunk {
+pub struct CatalogChunk {
     /// What partition does the chunk belong to?
     partition_key: Arc<str>,
 
@@ -281,7 +281,7 @@ impl ChunkMetrics {
     }
 }
 
-impl Chunk {
+impl CatalogChunk {
     /// Creates a new open chunk from the provided MUB chunk.
     ///
     /// Returns an error if the provided chunk is empty, otherwise creates a new open chunk and records a write at the
@@ -612,7 +612,7 @@ impl Chunk {
     /// Set the chunk in the Moved state, setting the underlying
     /// storage handle to db, and discarding the underlying mutable buffer
     /// storage.
-    pub fn set_moved(&mut self, chunk: Arc<ReadBufferChunk>) -> Result<()> {
+    pub fn set_moved(&mut self, chunk: Arc<RBChunk>) -> Result<()> {
         match &mut self.stage {
             ChunkStage::Frozen { representation, .. } => match &representation {
                 ChunkStageFrozenRepr::MutableBufferSnapshot(_) => {
@@ -649,7 +649,7 @@ impl Chunk {
     pub fn set_writing_to_object_store(
         &mut self,
         registration: &TaskRegistration,
-    ) -> Result<Arc<ReadBufferChunk>> {
+    ) -> Result<Arc<RBChunk>> {
         match &self.stage {
             ChunkStage::Frozen { representation, .. } => {
                 match &representation {
@@ -737,7 +737,7 @@ impl Chunk {
         }
     }
 
-    pub fn set_unload_from_read_buffer(&mut self) -> Result<Arc<ReadBufferChunk>> {
+    pub fn set_unload_from_read_buffer(&mut self) -> Result<Arc<RBChunk>> {
         match &mut self.stage {
             ChunkStage::Persisted {
                 parquet,
@@ -854,7 +854,7 @@ mod tests {
 
         // works with non-empty MBChunk
         let mb_chunk = make_mb_chunk(table_name, sequencer_id);
-        let chunk = Chunk::new_open(
+        let chunk = CatalogChunk::new_open(
             chunk_id,
             partition_key,
             mb_chunk,
@@ -868,7 +868,7 @@ mod tests {
     fn test_new_open_empty() {
         // fails with empty MBChunk
         let mb_chunk = MBChunk::new("t1", MBChunkMetrics::new_unregistered());
-        Chunk::new_open(0, "p1", mb_chunk, ChunkMetrics::new_unregistered());
+        CatalogChunk::new_open(0, "p1", mb_chunk, ChunkMetrics::new_unregistered());
     }
 
     #[tokio::test]
@@ -943,7 +943,7 @@ mod tests {
         make_parquet_chunk_with_store(object_store, "foo", chunk_id).await
     }
 
-    fn make_open_chunk() -> Chunk {
+    fn make_open_chunk() -> CatalogChunk {
         let sequencer_id = 1;
         let table_name = "table1";
         let partition_key = "part1";
@@ -952,7 +952,7 @@ mod tests {
         // assemble MBChunk
         let mb_chunk = make_mb_chunk(table_name, sequencer_id);
 
-        Chunk::new_open(
+        CatalogChunk::new_open(
             chunk_id,
             partition_key,
             mb_chunk,
@@ -960,14 +960,14 @@ mod tests {
         )
     }
 
-    async fn make_persisted_chunk() -> Chunk {
+    async fn make_persisted_chunk() -> CatalogChunk {
         let partition_key = "part1";
         let chunk_id = 0;
 
         // assemble ParquetChunk
         let parquet_chunk = make_parquet_chunk(chunk_id).await;
 
-        Chunk::new_object_store_only(
+        CatalogChunk::new_object_store_only(
             chunk_id,
             partition_key,
             Arc::new(parquet_chunk),
