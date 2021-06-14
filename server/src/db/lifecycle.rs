@@ -97,7 +97,10 @@ trait ChunkMover {
     /// Drops a chunk from the database
     fn drop_chunk(&mut self, table_name: String, partition_key: String, chunk_id: u32);
 
-    /// Clears the chunk from the read buffer
+    /// Remove read buffer attached to the given chunk.
+    ///
+    /// Note that this can only be called for persisted chunks. Otherwise, [`drop_chunk`](Self::drop_chunk)
+    /// must be used.
     fn unload_read_buffer(&mut self, table_name: String, partition_key: String, chunk_id: u32);
 
     /// The core policy logic
