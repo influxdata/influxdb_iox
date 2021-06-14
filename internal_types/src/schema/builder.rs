@@ -118,8 +118,8 @@ impl SchemaBuilder {
         self
     }
 
-    /// Creates an Arrow schema with embedded metadata All
-    /// schema validation happens at this time.
+    /// Creates an Arrow schema with embedded metadata.
+    /// All schema validation happens at this time.
     /// ```
     /// use internal_types::schema::{builder::SchemaBuilder, InfluxColumnType, InfluxFieldType};
     ///
