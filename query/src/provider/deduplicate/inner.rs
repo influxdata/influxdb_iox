@@ -24,7 +24,7 @@ pub(crate) struct RecordBatchDeduplicator {
 
 #[derive(Debug)]
 struct DuplicateRanges {
-    ///  is_sort_key[col_idx] = true if the the input column at
+    ///  `is_sort_key[col_idx] = true` if the the input column at
     ///  `col_idx` is present in sort keys
     is_sort_key: Vec<bool>,
 
@@ -86,9 +86,7 @@ impl RecordBatchDeduplicator {
             .transpose()
     }
 
-    /// Returns: (is_sort_key, ranges) where:
-    ///  is_sort_key[col_idx] = true if it is present in sort keys
-    ///  ranges: ranges of row indicies where the sort key have the same values
+    /// Computes the ranges where the sort key has the same values
     fn compute_ranges(&self, batch: &RecordBatch) -> ArrowResult<DuplicateRanges> {
         let schema = batch.schema();
         // is_sort_key[col_idx] = true if it is present in sort keys
@@ -100,8 +98,6 @@ impl RecordBatchDeduplicator {
             .iter()
             .map(|skey| {
                 // figure out what input column this is for
-
-                // TODO pass in column of names instead of physical exprs
                 let name = get_col_name(skey.expr.as_ref());
                 let index = schema.index_of(name).unwrap();
 
