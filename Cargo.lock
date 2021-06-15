@@ -2991,7 +2991,6 @@ dependencies = [
  "datafusion 0.1.0",
  "datafusion_util",
  "futures",
- "influxdb_line_protocol",
  "internal_types",
  "libc",
  "metrics",
