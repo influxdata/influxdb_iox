@@ -21,6 +21,7 @@ members = [
     "influxdb_tsm",
     "internal_types",
     "logfmt",
+    "lifecycle",
     "mem_qe",
     "mutable_buffer",
     "object_store",
@@ -34,6 +35,7 @@ members = [
     "server_benchmarks",
     "test_helpers",
     "tracker",
+    "trogging"
 ]
 
 [profile.release]
@@ -61,6 +63,7 @@ query = { path = "query" }
 read_buffer = { path = "read_buffer" }
 server = { path = "server" }
 tracker = { path = "tracker" }
+trogging = { path = "trogging" }
 
 # Crates.io dependencies, in alphabetical order
 arrow = { version = "4.0", features = ["prettyprint"] }

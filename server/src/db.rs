@@ -22,7 +22,6 @@ use datafusion::{
 };
 use entry::{Entry, SequencedEntry};
 use internal_types::{arrow::sort::sort_record_batch, selection::Selection};
-use lifecycle::LifecycleManager;
 use metrics::{KeyValue, MetricRegistry};
 use mutable_buffer::chunk::{ChunkMetrics as MutableBufferChunkMetrics, MBChunk};
 use object_store::{path::parsed::DirsAndFileName, ObjectStore};
@@ -31,7 +30,7 @@ use parking_lot::RwLock;
 use parquet_file::metadata::IoxParquetMetaData;
 use parquet_file::{
     catalog::{CatalogParquetInfo, CatalogState, ChunkCreationFailed, PreservedCatalog},
-    chunk::{Chunk as ParquetChunk, ChunkMetrics as ParquetChunkMetrics},
+    chunk::{ChunkMetrics as ParquetChunkMetrics, ParquetChunk},
     cleanup::cleanup_unreferenced_parquet_files,
     metadata::IoxMetadata,
     storage::Storage,
@@ -848,15 +847,17 @@ impl Db {
         info!("started background worker");
 
         tokio::join!(
-            // lifecycle manager loop
+            // lifecycle policy loop
             async {
-                let mut lifecycle_manager = LifecycleManager::new(Arc::clone(&self));
+                // TODO: Remove this newtype hack
+                let arc_db = lifecycle::ArcDb(Arc::clone(&self));
+                let mut policy = ::lifecycle::LifecyclePolicy::new(Arc::new(arc_db));
 
                 while !shutdown.is_cancelled() {
                     self.worker_iterations_lifecycle
                         .fetch_add(1, Ordering::Relaxed);
                     tokio::select! {
-                        _ = lifecycle_manager.check_for_work() => {},
+                        _ = policy.check_for_work(chrono::Utc::now(), std::time::Instant::now()) => {},
                         _ = shutdown.cancelled() => break,
                     }
                 }

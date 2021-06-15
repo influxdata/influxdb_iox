@@ -8,9 +8,10 @@ use data_types::{
     partition_metadata::TableSummary,
 };
 use internal_types::schema::Schema;
+use lifecycle::ChunkLifecycleAction;
 use metrics::{Counter, Histogram, KeyValue};
 use mutable_buffer::chunk::{snapshot::ChunkSnapshot as MBChunkSnapshot, MBChunk};
-use parquet_file::chunk::Chunk as ParquetChunk;
+use parquet_file::chunk::ParquetChunk;
 use read_buffer::RBChunk;
 use tracker::{TaskRegistration, TaskTracker};
 
@@ -77,29 +78,6 @@ pub enum Error {
     },
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-
-/// Any lifecycle action currently in progress for this chunk
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum ChunkLifecycleAction {
-    /// Chunk is in the process of being moved to the read buffer
-    Moving,
-
-    /// Chunk is in the process of being written to object storage
-    Persisting,
-
-    /// Chunk is in the process of being compacted
-    Compacting,
-}
-
-impl ChunkLifecycleAction {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Moving => "Moving to the Read Buffer",
-            Self::Persisting => "Persisting to Object Storage",
-            Self::Compacting => "Compacting",
-        }
-    }
-}
 
 // Closed chunks have cached information about their schema and statistics
 #[derive(Debug, Clone)]
@@ -324,7 +302,7 @@ impl CatalogChunk {
     pub(crate) fn new_object_store_only(
         chunk_id: u32,
         partition_key: impl AsRef<str>,
-        chunk: Arc<parquet_file::chunk::Chunk>,
+        chunk: Arc<parquet_file::chunk::ParquetChunk>,
         metrics: ChunkMetrics,
     ) -> Self {
         let table_name = Arc::from(chunk.table_name());
@@ -352,17 +330,6 @@ impl CatalogChunk {
             time_of_last_write: None,
             time_closed: None,
         }
-    }
-
-    /// Used for testing
-    #[cfg(test)]
-    pub(crate) fn set_timestamps(
-        &mut self,
-        time_of_first_write: Option<DateTime<Utc>>,
-        time_of_last_write: Option<DateTime<Utc>>,
-    ) {
-        self.time_of_first_write = time_of_first_write;
-        self.time_of_last_write = time_of_last_write;
     }
 
     pub fn id(&self) -> u32 {
@@ -406,9 +373,9 @@ impl CatalogChunk {
         self.time_of_last_write = Some(now);
     }
 
-    /// Return ChunkSummary metadata for this chunk
-    pub fn summary(&self) -> ChunkSummary {
-        let (row_count, storage) = match &self.stage {
+    /// Returns the storage and the number of rows
+    pub fn storage(&self) -> (usize, ChunkStorage) {
+        match &self.stage {
             ChunkStage::Open { mb_chunk, .. } => (mb_chunk.rows(), ChunkStorage::OpenMutableBuffer),
             ChunkStage::Frozen { representation, .. } => match &representation {
                 ChunkStageFrozenRepr::MutableBufferSnapshot(repr) => {
@@ -431,7 +398,12 @@ impl CatalogChunk {
                 };
                 (rows, storage)
             }
-        };
+        }
+    }
+
+    /// Return ChunkSummary metadata for this chunk
+    pub fn summary(&self) -> ChunkSummary {
+        let (row_count, storage) = self.storage();
 
         ChunkSummary {
             partition_key: Arc::clone(&self.partition_key),
@@ -839,7 +811,7 @@ mod tests {
     use entry::test_helpers::lp_to_entry;
     use mutable_buffer::chunk::{ChunkMetrics as MBChunkMetrics, MBChunk};
     use parquet_file::{
-        chunk::Chunk as ParquetChunk,
+        chunk::ParquetChunk,
         test_utils::{make_chunk as make_parquet_chunk_with_store, make_object_store},
     };
 
