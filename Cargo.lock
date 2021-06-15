@@ -904,7 +904,7 @@ dependencies = [
 [[package]]
 name = "datafusion"
 version = "4.0.0-SNAPSHOT"
-source = "git+https://github.com/apache/arrow-datafusion.git?rev=d5bca0e350d94a1e1063bed8a0da0cb09c6e3e1c#d5bca0e350d94a1e1063bed8a0da0cb09c6e3e1c"
+source = "git+https://github.com/apache/arrow-datafusion.git?rev=e3e7e293c4482af1475406bf4e922d5c99e7a792#e3e7e293c4482af1475406bf4e922d5c99e7a792"
 dependencies = [
  "ahash 0.7.4",
  "arrow",
@@ -1898,6 +1898,19 @@ name = "libm"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7d73b3f436185384286bd8098d17ec07c9a7d2388a6599f824d8502b529702a"
+
+[[package]]
+name = "lifecycle"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "data_types",
+ "futures",
+ "hashbrown 0.11.2",
+ "observability_deps",
+ "tokio",
+ "tracker",
+]
 
 [[package]]
 name = "lock_api"
@@ -3715,6 +3728,7 @@ dependencies = [
  "influxdb_line_protocol",
  "internal_types",
  "itertools 0.9.0",
+ "lifecycle",
  "metrics",
  "mutable_buffer",
  "num_cpus",
