@@ -183,6 +183,7 @@ pub trait LifecycleDb {
     fn unload_read_buffer(&self, table_name: String, partition_key: String, chunk_id: u32);
 }
 
+/// The lifecycle operates on chunks implementing this trait
 pub trait LifecycleChunk {
     fn lifecycle_action(&self) -> Option<&TaskTracker<ChunkLifecycleAction>>;
 
@@ -205,6 +206,10 @@ pub const DEFAULT_LIFECYCLE_BACKOFF: Duration = Duration::from_secs(1);
 /// Number of seconds to wait before retying a failed lifecycle action
 pub const LIFECYCLE_ACTION_BACKOFF: Duration = Duration::from_secs(10);
 
+/// A `LifecyclePolicy` is created with a `LifecycleDb`
+///
+/// `LifecyclePolicy::check_for_work` can then be used to drive progress
+/// of the `LifecycleChunk` contained within this `LifecycleDb`
 pub struct LifecyclePolicy<M: LifecycleDb> {
     db: Arc<M>,
     // TODO: Remove these and use values from chunks within partition
