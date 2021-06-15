@@ -803,7 +803,8 @@ mod test {
         TestResults { output, exec }
     }
 
-    /// A PhysicalPlan that sends a specific set of Result<RecordBatch>
+    /// A PhysicalPlan that sends a specific set of
+    /// Result<RecordBatch> for testing.
     #[derive(Debug)]
     struct DummyExec {
         schema: SchemaRef,
