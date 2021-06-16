@@ -9,7 +9,9 @@ use arrow::{
     record_batch::RecordBatch,
 };
 
-use datafusion::physical_plan::{expressions::PhysicalSortExpr, PhysicalExpr, SQLMetric};
+use datafusion::physical_plan::{
+    coalesce_batches::concat_batches, expressions::PhysicalSortExpr, PhysicalExpr, SQLMetric,
+};
 use observability_deps::tracing::debug;
 
 // Handles the deduplication across potentially multiple
@@ -51,7 +53,9 @@ impl RecordBatchDeduplicator {
         // Potential optimization would be to check if the sort key is actually the same
         // for the first row in the new batch and skip this concat if that is the case
         let batch = if let Some(last_batch) = self.last_batch.take() {
-            Self::concat_record_batches(&[last_batch, batch])?
+            let schema = last_batch.schema();
+            let row_count = last_batch.num_rows() + batch.num_rows();
+            concat_batches(&schema, &[last_batch, batch], row_count)?
         } else {
             batch
         };
@@ -214,31 +218,9 @@ impl RecordBatchDeduplicator {
             .collect()
     }
 
-    /// Concatenate one record batch to another
-    ///
-    /// TODO: file a ticket to add this to arrow upstream
-    fn concat_record_batches(batches: &[RecordBatch]) -> ArrowResult<RecordBatch> {
-        assert!(!batches.is_empty());
-
-        // concatenate them column by column
-        let schema = batches[0].schema();
-        let num_columns = batches[0].columns().len();
-        let new_columns = (0..num_columns)
-            .map(|column_index| {
-                let old_columns: Vec<_> = batches
-                    .iter()
-                    .map(|batch| batch.column(column_index).as_ref())
-                    .collect();
-                arrow::compute::concat(&old_columns)
-            })
-            .collect::<ArrowResult<Vec<_>>>()?;
-
-        RecordBatch::try_new(schema, new_columns)
-    }
-
     /// Create a new record batch from offset --> len
     ///
-    /// TODO: file a ticket to add this to arrow upstream
+    /// https://github.com/apache/arrow-rs/issues/460 for adding this upstream
     fn slice_record_batch(
         batch: &RecordBatch,
         offset: usize,
