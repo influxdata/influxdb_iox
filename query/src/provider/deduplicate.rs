@@ -24,7 +24,7 @@ use observability_deps::tracing::debug;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-/// DeduplicateExec
+/// # DeduplicateExec
 ///
 /// This operator takes an input stream of RecordBatches that is
 /// alread sorted on "sort_key" and applies IOx specific deduplication
@@ -38,6 +38,7 @@ use tokio_stream::wrappers::ReceiverStream;
 /// rows with the same primary key is inserted a second time to update
 /// existing values.
 ///
+/// # Example
 /// For example, given a sort key of (t1, t2) and the following input
 /// (already sorted on t1 and t2):
 ///
@@ -67,6 +68,41 @@ use tokio_stream::wrappers::ReceiverStream;
 /// | c  | y  | 1  | 1  |
 /// +----+----+----+----+
 /// ```
+///
+/// # Field Resolution (why the last non null value?)
+///
+/// The choice of latest non-null value instead of the latest value is
+/// subtle and thus we try to document the rationale here. It is a
+/// consequence of the LineProtocol update model
+///
+/// Some observations about line protocol are:
+///
+/// 1. Lines are treated as "UPSERT"s (aka updating any existing
+///    values, possibly adding new fields)
+///
+/// 2. Fields can not be removed or set to NULL via a line (So if a
+///    field has a NULL value it means the user didn't provide a value
+///    for that field)
+///
+/// For example, this data (with a NULL for `f2`):
+///
+/// ```text
+/// t1 | f1 | f2
+/// ---+----+----
+///  a | 1  | 3
+//   a | 2  |
+/// ```
+///
+/// Would have come from line protocol like
+/// ```text
+/// m,t1=a f1=1,f2=3
+/// m,t1=a f1=3
+/// ```
+/// (note there was no value for f2 provided in the second line, it can
+/// be read as "upsert value of f1=3, the value of f2 is not modified).
+///
+/// Thus it would not be correct to take the latest value from f2
+/// (NULL) as in the source input the field's value was not provided.
 #[derive(Debug)]
 pub struct DeduplicateExec {
     input: Arc<dyn ExecutionPlan>,
