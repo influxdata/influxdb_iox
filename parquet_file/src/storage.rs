@@ -316,6 +316,14 @@ impl Storage {
             .tempfile()
             .context(OpenTempFile)?;
 
+        let path_display = path.display();
+
+        if path_display == "1/placeholder/data/1970-01-01T00/0/o2.parquet" {
+            debug!(%path_display, "AAL sleeping for 100ms");
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            debug!(%path_display, "Done sleeping");
+        }
+
         debug!(?path, ?temp_file, "Beginning to read parquet to temp file");
         let mut read_stream = store.get(&path).await.context(ReadingObjectStore)?;
 
