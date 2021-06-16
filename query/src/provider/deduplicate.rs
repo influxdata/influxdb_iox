@@ -1,5 +1,5 @@
 //! Implemention of DeduplicateExec operator (resolves primary key conflicts) plumbing and tests
-mod inner;
+mod algo;
 
 use std::{fmt, sync::Arc};
 
@@ -10,7 +10,7 @@ use arrow::{
 };
 use async_trait::async_trait;
 
-use self::inner::RecordBatchDeduplicator;
+use self::algo::RecordBatchDeduplicator;
 use datafusion::{
     error::{DataFusionError, Result},
     physical_plan::{
