@@ -21,8 +21,8 @@ mod tests {
     async fn test_write_read() {
         ////////////////////
         // Create test data which is also the expected data
-        let path = chunk_addr(1);
-        let table = Arc::clone(&path.table_name);
+        let addr = chunk_addr(1);
+        let table = Arc::clone(&addr.table_name);
         let (record_batches, schema, column_summaries, num_rows) = make_record_batch("foo");
         let mut table_summary = TableSummary::new(table.to_string());
         table_summary.columns = column_summaries.clone();
@@ -40,7 +40,7 @@ mod tests {
             Arc::clone(&store),
             record_batches.clone(),
             schema.clone(),
-            path,
+            addr,
             column_summaries.clone(),
         )
         .await;

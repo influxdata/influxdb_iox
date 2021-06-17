@@ -783,21 +783,21 @@ mod tests {
     #[test]
     fn test_new_open() {
         let sequencer_id = 1;
-        let path = chunk_addr();
+        let addr = chunk_addr();
 
         // works with non-empty MBChunk
-        let mb_chunk = make_mb_chunk(&path.table_name, sequencer_id);
-        let chunk = CatalogChunk::new_open(path, mb_chunk, ChunkMetrics::new_unregistered());
+        let mb_chunk = make_mb_chunk(&addr.table_name, sequencer_id);
+        let chunk = CatalogChunk::new_open(addr, mb_chunk, ChunkMetrics::new_unregistered());
         assert!(matches!(chunk.stage(), &ChunkStage::Open { .. }));
     }
 
     #[test]
     #[should_panic(expected = "chunk must not be empty")]
     fn test_new_open_empty() {
-        let path = chunk_addr();
+        let addr = chunk_addr();
         // fails with empty MBChunk
-        let mb_chunk = MBChunk::new(&path.table_name, MBChunkMetrics::new_unregistered());
-        CatalogChunk::new_open(path, mb_chunk, ChunkMetrics::new_unregistered());
+        let mb_chunk = MBChunk::new(&addr.table_name, MBChunkMetrics::new_unregistered());
+        CatalogChunk::new_open(addr, mb_chunk, ChunkMetrics::new_unregistered());
     }
 
     #[tokio::test]
@@ -892,12 +892,12 @@ mod tests {
     }
 
     async fn make_persisted_chunk() -> CatalogChunk {
-        let path = chunk_addr();
+        let addr = chunk_addr();
         // assemble ParquetChunk
-        let parquet_chunk = make_parquet_chunk(path.clone()).await;
+        let parquet_chunk = make_parquet_chunk(addr.clone()).await;
 
         CatalogChunk::new_object_store_only(
-            path,
+            addr,
             Arc::new(parquet_chunk),
             ChunkMetrics::new_unregistered(),
         )

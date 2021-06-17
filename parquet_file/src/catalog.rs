@@ -2560,9 +2560,9 @@ mod tests {
     async fn test_checkpoint() {
         let object_store = make_object_store();
         let server_id = make_server_id();
-        let path = chunk_addr(1337);
-        let db_name = &path.db_name;
-        let (_, metadata) = make_metadata(&object_store, "foo", path.clone()).await;
+        let addr = chunk_addr(1337);
+        let db_name = &addr.db_name;
+        let (_, metadata) = make_metadata(&object_store, "foo", addr.clone()).await;
 
         // use common test as baseline
         let mut trace = assert_single_catalog_inmem_works(&object_store, server_id, db_name).await;
