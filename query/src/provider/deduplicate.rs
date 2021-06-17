@@ -279,7 +279,7 @@ impl RecordBatchStream for AdapterStream {
 
 #[cfg(test)]
 mod test {
-    pub(crate) use arrow::compute::SortOptions;
+    use arrow::compute::SortOptions;
     use arrow::{
         array::{ArrayRef, Float64Array, StringArray},
         record_batch::RecordBatch,
