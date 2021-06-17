@@ -1284,7 +1284,7 @@ where
 pub mod test_helpers {
     use object_store::parsed_path;
 
-    use crate::test_utils::{chunk_path, make_metadata, make_object_store};
+    use crate::test_utils::{chunk_addr, make_metadata, make_object_store};
 
     use super::*;
     use std::{convert::TryFrom, ops::Deref};
@@ -1424,7 +1424,7 @@ pub mod test_helpers {
 
             for chunk_id in 0..chunk_id_watermark {
                 let path = parsed_path!(format!("chunk_{}", chunk_id).as_ref());
-                let (_, metadata) = make_metadata(&object_store, "ok", chunk_path(chunk_id)).await;
+                let (_, metadata) = make_metadata(&object_store, "ok", chunk_addr(chunk_id)).await;
                 transaction.add_parquet(&path, &metadata).unwrap();
                 expected.insert(path, Arc::new(metadata));
             }
@@ -1451,7 +1451,7 @@ pub mod test_helpers {
 
             let path = parsed_path!(format!("chunk_{}", chunk_id_watermark).as_ref());
             let (_, metadata) =
-                make_metadata(&object_store, "ok", chunk_path(chunk_id_watermark)).await;
+                make_metadata(&object_store, "ok", chunk_addr(chunk_id_watermark)).await;
             transaction.add_parquet(&path, &metadata).unwrap();
             transaction.remove_parquet(&path).unwrap();
             chunk_id_watermark += 1;
@@ -1465,7 +1465,7 @@ pub mod test_helpers {
             let mut transaction = catalog.open_transaction().await;
 
             let path = parsed_path!("chunk_2");
-            let (_, metadata) = make_metadata(&object_store, "ok", chunk_path(2)).await;
+            let (_, metadata) = make_metadata(&object_store, "ok", chunk_addr(2)).await;
             transaction.remove_parquet(&path).unwrap();
             transaction.add_parquet(&path, &metadata).unwrap();
 
@@ -1479,7 +1479,7 @@ pub mod test_helpers {
 
             let path = parsed_path!(format!("chunk_{}", chunk_id_watermark).as_ref());
             let (_, metadata) =
-                make_metadata(&object_store, "ok", chunk_path(chunk_id_watermark)).await;
+                make_metadata(&object_store, "ok", chunk_addr(chunk_id_watermark)).await;
             transaction.add_parquet(&path, &metadata).unwrap();
             transaction.remove_parquet(&path).unwrap();
             transaction.add_parquet(&path, &metadata).unwrap();
@@ -1495,7 +1495,7 @@ pub mod test_helpers {
             let mut transaction = catalog.open_transaction().await;
 
             let path = parsed_path!("chunk_2");
-            let (_, metadata) = make_metadata(&object_store, "ok", chunk_path(2)).await;
+            let (_, metadata) = make_metadata(&object_store, "ok", chunk_addr(2)).await;
             transaction.remove_parquet(&path).unwrap();
             transaction.add_parquet(&path, &metadata).unwrap();
             transaction.remove_parquet(&path).unwrap();
@@ -1511,7 +1511,7 @@ pub mod test_helpers {
 
             // already exists (should also not change the metadata)
             let path = parsed_path!("chunk_0");
-            let (_, metadata) = make_metadata(&object_store, "fail", chunk_path(0)).await;
+            let (_, metadata) = make_metadata(&object_store, "fail", chunk_addr(0)).await;
             let err = transaction.add_parquet(&path, &metadata).unwrap_err();
             assert!(matches!(err, Error::ParquetFileAlreadyExists { .. }));
 
@@ -1531,14 +1531,14 @@ pub mod test_helpers {
 
             // already exists (should also not change the metadata)
             let path = parsed_path!("chunk_0");
-            let (_, metadata) = make_metadata(&object_store, "fail", chunk_path(0)).await;
+            let (_, metadata) = make_metadata(&object_store, "fail", chunk_addr(0)).await;
             let err = transaction.add_parquet(&path, &metadata).unwrap_err();
             assert!(matches!(err, Error::ParquetFileAlreadyExists { .. }));
 
             // this transaction will still work
             let path = parsed_path!(format!("chunk_{}", chunk_id_watermark).as_ref());
             let (_, metadata) =
-                make_metadata(&object_store, "ok", chunk_path(chunk_id_watermark)).await;
+                make_metadata(&object_store, "ok", chunk_addr(chunk_id_watermark)).await;
             transaction.add_parquet(&path, &metadata).unwrap();
             expected.insert(path.clone(), Arc::new(metadata.clone()));
             chunk_id_watermark += 1;
@@ -1573,7 +1573,7 @@ pub mod test_helpers {
             // add
             let path = parsed_path!(format!("chunk_{}", chunk_id_watermark).as_ref());
             let (_, metadata) =
-                make_metadata(&object_store, "ok", chunk_path(chunk_id_watermark)).await;
+                make_metadata(&object_store, "ok", chunk_addr(chunk_id_watermark)).await;
             transaction.add_parquet(&path, &metadata).unwrap();
             chunk_id_watermark += 1;
 
@@ -1584,7 +1584,7 @@ pub mod test_helpers {
             // add and remove
             let path = parsed_path!(format!("chunk_{}", chunk_id_watermark).as_ref());
             let (_, metadata) =
-                make_metadata(&object_store, "ok", chunk_path(chunk_id_watermark)).await;
+                make_metadata(&object_store, "ok", chunk_addr(chunk_id_watermark)).await;
             transaction.add_parquet(&path, &metadata).unwrap();
             transaction.remove_parquet(&path).unwrap();
             chunk_id_watermark += 1;
@@ -1597,7 +1597,7 @@ pub mod test_helpers {
 
             // already exists (should also not change the metadata)
             let path = parsed_path!("chunk_0");
-            let (_, metadata) = make_metadata(&object_store, "fail", chunk_path(0)).await;
+            let (_, metadata) = make_metadata(&object_store, "fail", chunk_addr(0)).await;
             let err = transaction.add_parquet(&path, &metadata).unwrap_err();
             assert!(matches!(err, Error::ParquetFileAlreadyExists { .. }));
 
@@ -1656,7 +1656,7 @@ pub mod test_helpers {
 mod tests {
     use std::{num::NonZeroU32, ops::Deref};
 
-    use crate::test_utils::{chunk_path, make_metadata, make_object_store};
+    use crate::test_utils::{chunk_addr, make_metadata, make_object_store};
     use object_store::parsed_path;
 
     use super::test_helpers::{
@@ -2560,7 +2560,7 @@ mod tests {
     async fn test_checkpoint() {
         let object_store = make_object_store();
         let server_id = make_server_id();
-        let path = chunk_path(1337);
+        let path = chunk_addr(1337);
         let db_name = &path.db_name;
         let (_, metadata) = make_metadata(&object_store, "foo", path.clone()).await;
 
@@ -2753,8 +2753,8 @@ mod tests {
         .unwrap();
 
         // get some test metadata
-        let (_, metadata1) = make_metadata(object_store, "foo", chunk_path(1)).await;
-        let (_, metadata2) = make_metadata(object_store, "bar", chunk_path(1)).await;
+        let (_, metadata1) = make_metadata(object_store, "foo", chunk_addr(1)).await;
+        let (_, metadata2) = make_metadata(object_store, "bar", chunk_addr(1)).await;
 
         // track all the intermediate results
         let mut trace = TestTrace::new();

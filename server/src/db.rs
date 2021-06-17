@@ -1303,7 +1303,7 @@ impl CatalogState for Catalog {
                     return Err(parquet_file::catalog::Error::CatalogStateFailure {
                         source: Box::new(
                             crate::db::catalog::chunk::Error::UnexpectedLifecycleAction {
-                                chunk: chunk.path().clone(),
+                                chunk: chunk.addr().clone(),
                                 expected: "persisting".to_string(),
                                 actual: chunk
                                     .lifecycle_action()

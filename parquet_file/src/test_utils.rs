@@ -35,7 +35,7 @@ use crate::{
     chunk::{self, ParquetChunk},
     storage::Storage,
 };
-use data_types::chunk_metadata::ChunkPath;
+use data_types::chunk_metadata::ChunkAddr;
 use snafu::{ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
@@ -94,8 +94,8 @@ pub fn db_name() -> &'static str {
 }
 
 /// Creates a test chunk path for a given chunk id
-pub fn chunk_path(id: u32) -> ChunkPath {
-    ChunkPath {
+pub fn chunk_addr(id: u32) -> ChunkAddr {
+    ChunkAddr {
         db_name: Arc::from(db_name()),
         table_name: Arc::from("table1"),
         partition_key: Arc::from("part1"),
@@ -107,17 +107,17 @@ pub fn chunk_path(id: u32) -> ChunkPath {
 pub async fn make_chunk(
     store: Arc<ObjectStore>,
     column_prefix: &str,
-    path: ChunkPath,
+    addr: ChunkAddr,
 ) -> ParquetChunk {
     let (record_batches, schema, column_summaries, _num_rows) = make_record_batch(column_prefix);
-    make_chunk_given_record_batch(store, record_batches, schema, path, column_summaries).await
+    make_chunk_given_record_batch(store, record_batches, schema, addr, column_summaries).await
 }
 
 /// Same as [`make_chunk`] but parquet file does not contain any row group.
 pub async fn make_chunk_no_row_group(
     store: Arc<ObjectStore>,
     column_prefix: &str,
-    path: ChunkPath,
+    path: ChunkAddr,
 ) -> ParquetChunk {
     let (_, schema, column_summaries, _num_rows) = make_record_batch(column_prefix);
     make_chunk_given_record_batch(store, vec![], schema, path, column_summaries).await
@@ -130,7 +130,7 @@ pub async fn make_chunk_given_record_batch(
     store: Arc<ObjectStore>,
     record_batches: Vec<RecordBatch>,
     schema: Schema,
-    path: ChunkPath,
+    path: ChunkAddr,
     column_summaries: Vec<ColumnSummary>,
 ) -> ParquetChunk {
     let server_id = ServerId::new(NonZeroU32::new(1).unwrap());
@@ -740,7 +740,7 @@ pub fn read_data_from_parquet_data(schema: SchemaRef, parquet_data: Vec<u8>) -> 
 pub async fn make_metadata(
     object_store: &Arc<ObjectStore>,
     column_prefix: &str,
-    path: ChunkPath,
+    path: ChunkAddr,
 ) -> (Path, IoxParquetMetaData) {
     let chunk = make_chunk(Arc::clone(object_store), column_prefix, path).await;
     let (_, parquet_data) = load_parquet_from_store(&chunk, Arc::clone(object_store))

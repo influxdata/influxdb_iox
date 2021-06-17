@@ -12,7 +12,7 @@ mod tests {
     use crate::{
         metadata::IoxParquetMetaData,
         test_utils::{
-            chunk_path, load_parquet_from_store, make_chunk_given_record_batch, make_object_store,
+            chunk_addr, load_parquet_from_store, make_chunk_given_record_batch, make_object_store,
             make_record_batch, read_data_from_parquet_data,
         },
     };
@@ -21,7 +21,7 @@ mod tests {
     async fn test_write_read() {
         ////////////////////
         // Create test data which is also the expected data
-        let path = chunk_path(1);
+        let path = chunk_addr(1);
         let table = Arc::clone(&path.table_name);
         let (record_batches, schema, column_summaries, num_rows) = make_record_batch("foo");
         let mut table_summary = TableSummary::new(table.to_string());

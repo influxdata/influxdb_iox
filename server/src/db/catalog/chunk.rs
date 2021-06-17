@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use snafu::Snafu;
 
-use data_types::chunk_metadata::ChunkPath;
+use data_types::chunk_metadata::ChunkAddr;
 use data_types::{
     chunk_metadata::{ChunkColumnSummary, ChunkStorage, ChunkSummary, DetailedChunkSummary},
     partition_metadata::TableSummary,
@@ -26,7 +26,7 @@ pub enum Error {
         actual
     ))]
     InternalChunkState {
-        chunk: ChunkPath,
+        chunk: ChunkAddr,
         operation: String,
         expected: String,
         actual: String,
@@ -38,7 +38,7 @@ pub enum Error {
         chunk,
     ))]
     LifecycleActionAlreadyInProgress {
-        chunk: ChunkPath,
+        chunk: ChunkAddr,
         lifecycle_action: String,
     },
 
@@ -49,7 +49,7 @@ pub enum Error {
         actual
     ))]
     UnexpectedLifecycleAction {
-        chunk: ChunkPath,
+        chunk: ChunkAddr,
         expected: String,
         actual: String,
     },
@@ -59,7 +59,7 @@ pub enum Error {
         action,
         chunk
     ))]
-    IncompleteLifecycleAction { chunk: ChunkPath, action: String },
+    IncompleteLifecycleAction { chunk: ChunkAddr, action: String },
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -174,7 +174,7 @@ impl ChunkStage {
 /// _representation_ (e.g. a persisted chunk may have data cached in-memory).
 #[derive(Debug)]
 pub struct CatalogChunk {
-    path: ChunkPath,
+    addr: ChunkAddr,
 
     /// The lifecycle stage this chunk is in.
     stage: ChunkStage,
@@ -206,7 +206,7 @@ pub struct CatalogChunk {
 macro_rules! unexpected_state {
     ($SELF: expr, $OP: expr, $EXPECTED: expr, $STATE: expr) => {
         InternalChunkState {
-            chunk: $SELF.path.clone(),
+            chunk: $SELF.addr.clone(),
             operation: $OP,
             expected: $EXPECTED,
             actual: $STATE.name(),
@@ -242,12 +242,12 @@ impl CatalogChunk {
     ///
     /// Apart from [`new_object_store_only`](Self::new_object_store_only) this is the only way to create new chunks.
     pub(super) fn new_open(
-        path: ChunkPath,
+        addr: ChunkAddr,
         chunk: mutable_buffer::chunk::MBChunk,
         metrics: ChunkMetrics,
     ) -> Self {
         assert!(chunk.rows() > 0, "chunk must not be empty");
-        assert_eq!(chunk.table_name(), &path.table_name);
+        assert_eq!(chunk.table_name(), &addr.table_name);
         let stage = ChunkStage::Open { mb_chunk: chunk };
 
         metrics
@@ -255,7 +255,7 @@ impl CatalogChunk {
             .inc_with_labels(&[KeyValue::new("state", "open")]);
 
         let mut chunk = Self {
-            path,
+            addr,
             stage,
             lifecycle_action: None,
             metrics,
@@ -271,11 +271,11 @@ impl CatalogChunk {
     ///
     /// Apart from [`new_open`](Self::new_open) this is the only way to create new chunks.
     pub(super) fn new_object_store_only(
-        path: ChunkPath,
+        addr: ChunkAddr,
         chunk: Arc<parquet_file::chunk::ParquetChunk>,
         metrics: ChunkMetrics,
     ) -> Self {
-        assert_eq!(chunk.table_name(), path.table_name.as_ref());
+        assert_eq!(chunk.table_name(), addr.table_name.as_ref());
 
         // Cache table summary + schema
         let meta = Arc::new(ChunkMetadata {
@@ -290,7 +290,7 @@ impl CatalogChunk {
         };
 
         Self {
-            path,
+            addr,
             stage,
             lifecycle_action: None,
             metrics,
@@ -300,20 +300,20 @@ impl CatalogChunk {
         }
     }
 
-    pub fn path(&self) -> &ChunkPath {
-        &self.path
+    pub fn addr(&self) -> &ChunkAddr {
+        &self.addr
     }
 
     pub fn id(&self) -> u32 {
-        self.path.chunk_id
+        self.addr.chunk_id
     }
 
     pub fn key(&self) -> &str {
-        self.path.partition_key.as_ref()
+        self.addr.partition_key.as_ref()
     }
 
     pub fn table_name(&self) -> Arc<str> {
-        Arc::clone(&self.path.table_name)
+        Arc::clone(&self.addr.table_name)
     }
 
     pub fn stage(&self) -> &ChunkStage {
@@ -384,9 +384,9 @@ impl CatalogChunk {
         let (row_count, storage) = self.storage();
 
         ChunkSummary {
-            partition_key: Arc::clone(&self.path.partition_key),
-            table_name: Arc::clone(&self.path.table_name),
-            id: self.path.chunk_id,
+            partition_key: Arc::clone(&self.addr.partition_key),
+            table_name: Arc::clone(&self.addr.table_name),
+            id: self.addr.chunk_id,
             storage,
             estimated_bytes: self.size(),
             row_count,
@@ -413,11 +413,11 @@ impl CatalogChunk {
                 ChunkStageFrozenRepr::MutableBufferSnapshot(repr) => {
                     repr.column_sizes().map(to_summary).collect()
                 }
-                ChunkStageFrozenRepr::ReadBuffer(repr) => repr.column_sizes(&self.path.table_name),
+                ChunkStageFrozenRepr::ReadBuffer(repr) => repr.column_sizes(&self.addr.table_name),
             },
             ChunkStage::Persisted { read_buffer, .. } => {
                 if let Some(read_buffer) = &read_buffer {
-                    read_buffer.column_sizes(&self.path.table_name)
+                    read_buffer.column_sizes(&self.addr.table_name)
                 } else {
                     // TODO parquet statistics
                     vec![]
@@ -544,7 +544,7 @@ impl CatalogChunk {
                     Ok(chunk)
                 }
                 ChunkStageFrozenRepr::ReadBuffer(_) => InternalChunkState {
-                    chunk: self.path.clone(),
+                    chunk: self.addr.clone(),
                     operation: "setting moving",
                     expected: "Frozen with MutableBufferSnapshot",
                     actual: "Frozen with ReadBuffer",
@@ -578,7 +578,7 @@ impl CatalogChunk {
                     Ok(())
                 }
                 ChunkStageFrozenRepr::ReadBuffer(_) => InternalChunkState {
-                    chunk: self.path.clone(),
+                    chunk: self.addr.clone(),
                     operation: "setting moved",
                     expected: "Frozen with MutableBufferSnapshot",
                     actual: "Frozen with ReadBuffer",
@@ -602,7 +602,7 @@ impl CatalogChunk {
                     ChunkStageFrozenRepr::MutableBufferSnapshot(_) => {
                         // TODO: ideally we would support all Frozen representations
                         InternalChunkState {
-                            chunk: self.path.clone(),
+                            chunk: self.addr.clone(),
                             operation: "setting object store",
                             expected: "Frozen with ReadBuffer",
                             actual: "Frozen with MutableBufferSnapshot",
@@ -639,7 +639,7 @@ impl CatalogChunk {
                     ChunkStageFrozenRepr::MutableBufferSnapshot(_) => {
                         // TODO: ideally we would support all Frozen representations
                         InternalChunkState {
-                            chunk: self.path.clone(),
+                            chunk: self.addr.clone(),
                             operation: "setting object store",
                             expected: "Frozen with ReadBuffer",
                             actual: "Frozen with MutableBufferSnapshot",
@@ -702,7 +702,7 @@ impl CatalogChunk {
                 } else {
                     // TODO: do we really need to error here or should unloading an unloaded chunk be a no-op?
                     InternalChunkState {
-                        chunk: self.path.clone(),
+                        chunk: self.addr.clone(),
                         operation: "setting unload",
                         expected: "Persisted with ReadBuffer",
                         actual: "Persisted without ReadBuffer",
@@ -724,7 +724,7 @@ impl CatalogChunk {
     ) -> Result<()> {
         if let Some(lifecycle_action) = &self.lifecycle_action {
             return Err(Error::LifecycleActionAlreadyInProgress {
-                chunk: self.path.clone(),
+                chunk: self.addr.clone(),
                 lifecycle_action: lifecycle_action.metadata().name().to_string(),
             });
         }
@@ -738,7 +738,7 @@ impl CatalogChunk {
             Some(actual) if actual.metadata() == &lifecycle_action => {}
             actual => {
                 return Err(Error::UnexpectedLifecycleAction {
-                    chunk: self.path.clone(),
+                    chunk: self.addr.clone(),
                     expected: lifecycle_action.name().to_string(),
                     actual: actual
                         .as_ref()
@@ -759,7 +759,7 @@ impl CatalogChunk {
         if let Some(tracker) = &self.lifecycle_action {
             if !tracker.is_complete() {
                 return Err(Error::IncompleteLifecycleAction {
-                    chunk: self.path.clone(),
+                    chunk: self.addr.clone(),
                     action: tracker.metadata().name().to_string(),
                 });
             }
@@ -783,7 +783,7 @@ mod tests {
     #[test]
     fn test_new_open() {
         let sequencer_id = 1;
-        let path = chunk_path();
+        let path = chunk_addr();
 
         // works with non-empty MBChunk
         let mb_chunk = make_mb_chunk(&path.table_name, sequencer_id);
@@ -794,7 +794,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "chunk must not be empty")]
     fn test_new_open_empty() {
-        let path = chunk_path();
+        let path = chunk_addr();
         // fails with empty MBChunk
         let mb_chunk = MBChunk::new(&path.table_name, MBChunkMetrics::new_unregistered());
         CatalogChunk::new_open(path, mb_chunk, ChunkMetrics::new_unregistered());
@@ -867,13 +867,13 @@ mod tests {
         mb_chunk
     }
 
-    async fn make_parquet_chunk(path: ChunkPath) -> ParquetChunk {
+    async fn make_parquet_chunk(addr: ChunkAddr) -> ParquetChunk {
         let object_store = make_object_store();
-        make_parquet_chunk_with_store(object_store, "foo", path).await
+        make_parquet_chunk_with_store(object_store, "foo", addr).await
     }
 
-    fn chunk_path() -> ChunkPath {
-        ChunkPath {
+    fn chunk_addr() -> ChunkAddr {
+        ChunkAddr {
             db_name: Arc::from("db"),
             table_name: Arc::from("table1"),
             partition_key: Arc::from("part1"),
@@ -883,16 +883,16 @@ mod tests {
 
     fn make_open_chunk() -> CatalogChunk {
         let sequencer_id = 1;
-        let path = chunk_path();
+        let addr = chunk_addr();
 
         // assemble MBChunk
-        let mb_chunk = make_mb_chunk(&path.table_name, sequencer_id);
+        let mb_chunk = make_mb_chunk(&addr.table_name, sequencer_id);
 
-        CatalogChunk::new_open(path, mb_chunk, ChunkMetrics::new_unregistered())
+        CatalogChunk::new_open(addr, mb_chunk, ChunkMetrics::new_unregistered())
     }
 
     async fn make_persisted_chunk() -> CatalogChunk {
-        let path = chunk_path();
+        let path = chunk_addr();
         // assemble ParquetChunk
         let parquet_chunk = make_parquet_chunk(path.clone()).await;
 

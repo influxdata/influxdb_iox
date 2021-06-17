@@ -13,7 +13,7 @@ use tracker::RwLock;
 use crate::db::catalog::metrics::PartitionMetrics;
 
 use super::chunk::{CatalogChunk, ChunkStage};
-use data_types::chunk_metadata::{ChunkPath, ChunkSummary};
+use data_types::chunk_metadata::{ChunkAddr, ChunkSummary};
 
 /// IOx Catalog Partition
 ///
@@ -114,7 +114,7 @@ impl Partition {
 
         self.next_chunk_id += 1;
 
-        let path = ChunkPath {
+        let addr = ChunkAddr {
             db_name: Arc::clone(&self.db_name),
             table_name: Arc::clone(&self.table_name),
             partition_key: Arc::clone(&self.partition_key),
@@ -122,7 +122,7 @@ impl Partition {
         };
 
         let chunk = Arc::new(self.metrics.new_chunk_lock(CatalogChunk::new_open(
-            path,
+            addr,
             chunk,
             self.metrics.new_chunk_metrics(),
         )));
@@ -148,7 +148,7 @@ impl Partition {
     ) -> Arc<RwLock<CatalogChunk>> {
         assert_eq!(chunk.table_name(), self.table_name.as_ref());
 
-        let path = ChunkPath {
+        let addr = ChunkAddr {
             db_name: Arc::clone(&self.db_name),
             table_name: Arc::clone(&self.table_name),
             partition_key: Arc::clone(&self.partition_key),
@@ -158,7 +158,7 @@ impl Partition {
         let chunk = Arc::new(
             self.metrics
                 .new_chunk_lock(CatalogChunk::new_object_store_only(
-                    path,
+                    addr,
                     chunk,
                     self.metrics.new_chunk_metrics(),
                 )),

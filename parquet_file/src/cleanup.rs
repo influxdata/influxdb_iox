@@ -182,7 +182,7 @@ mod tests {
     use super::*;
     use crate::{
         catalog::test_helpers::TestCatalogState,
-        test_utils::{chunk_path, db_name, make_metadata, make_object_store},
+        test_utils::{chunk_addr, db_name, make_metadata, make_object_store},
     };
 
     #[tokio::test]
@@ -228,12 +228,12 @@ mod tests {
             let mut transaction = catalog.open_transaction().await;
 
             // an ordinary tracked parquet file => keep
-            let (path, md) = make_metadata(&object_store, "foo", chunk_path(1)).await;
+            let (path, md) = make_metadata(&object_store, "foo", chunk_addr(1)).await;
             transaction.add_parquet(&path.clone().into(), &md).unwrap();
             paths_keep.push(path.display());
 
             // another ordinary tracked parquet file that was added and removed => keep (for time travel)
-            let (path, md) = make_metadata(&object_store, "foo", chunk_path(2)).await;
+            let (path, md) = make_metadata(&object_store, "foo", chunk_addr(2)).await;
             transaction.add_parquet(&path.clone().into(), &md).unwrap();
             transaction.remove_parquet(&path.clone().into()).unwrap();
             paths_keep.push(path.display());
@@ -246,7 +246,7 @@ mod tests {
             paths_keep.push(path.display());
 
             // an untracked parquet file => delete
-            let (path, _md) = make_metadata(&object_store, "foo", chunk_path(3)).await;
+            let (path, _md) = make_metadata(&object_store, "foo", chunk_addr(3)).await;
             paths_delete.push(path.display());
 
             transaction.commit(false).await.unwrap();
@@ -288,7 +288,7 @@ mod tests {
                 async {
                     let mut transaction = catalog.open_transaction().await;
 
-                    let (path, md) = make_metadata(&object_store, "foo", chunk_path(i)).await;
+                    let (path, md) = make_metadata(&object_store, "foo", chunk_addr(i)).await;
                     transaction.add_parquet(&path.clone().into(), &md).unwrap();
 
                     transaction.commit(false).await.unwrap();
@@ -325,7 +325,7 @@ mod tests {
         // create some files
         let mut to_remove: HashSet<String> = Default::default();
         for chunk_id in 0..3 {
-            let (path, _md) = make_metadata(&object_store, "foo", chunk_path(chunk_id)).await;
+            let (path, _md) = make_metadata(&object_store, "foo", chunk_addr(chunk_id)).await;
             to_remove.insert(path.display());
         }
 

@@ -4,9 +4,9 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Path to the chunk within the catalog
+/// Address of the chunk within the catalog
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ChunkPath {
+pub struct ChunkAddr {
     /// Database name
     pub db_name: Arc<str>,
 
@@ -20,7 +20,7 @@ pub struct ChunkPath {
     pub chunk_id: u32,
 }
 
-impl std::fmt::Display for ChunkPath {
+impl std::fmt::Display for ChunkAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
