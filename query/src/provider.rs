@@ -251,7 +251,6 @@ impl<C: PartitionChunk + 'static> TableProvider for ChunkTableProvider<C> {
             scan_schema,
             chunks,
             predicate,
-            false,
         )?;
 
         Ok(plan)
@@ -351,21 +350,9 @@ impl<C: PartitionChunk + 'static> Deduplicater<C> {
         schema: ArrowSchemaRef,
         chunks: Vec<Arc<C>>,
         predicate: Predicate,
-        for_testing: bool, // TODO: remove this parameter when #1682 and #1683 are done
     ) -> Result<Arc<dyn ExecutionPlan>> {
         // find overlapped chunks and put them into the right group
         self.split_overlapped_chunks(chunks.to_vec())?;
-
-        // TEMP until the rest of this module's code is complete:
-        // merge all plans into the same
-        if !for_testing {
-            self.no_duplicates_chunks
-                .append(&mut self.in_chunk_duplicates_chunks);
-            for mut group in &mut self.overlapped_chunks_set {
-                self.no_duplicates_chunks.append(&mut group);
-            }
-            self.overlapped_chunks_set.clear();
-        }
 
         // Building plans
         let mut plans = vec![];
@@ -935,7 +922,6 @@ mod test {
             schema,
             vec![Arc::clone(&chunk)],
             Predicate::default(),
-            true,
         );
         let batch = collect(plan.unwrap()).await.unwrap();
         // No duplicates so no sort at all. The data will stay in their original order
@@ -974,7 +960,6 @@ mod test {
             schema,
             vec![Arc::clone(&chunk)],
             Predicate::default(),
-            true,
         );
         let batch = collect(plan.unwrap()).await.unwrap();
         // Data must be sorted and duplicates removed
@@ -1022,7 +1007,6 @@ mod test {
             schema,
             vec![Arc::clone(&chunk1), Arc::clone(&chunk2)],
             Predicate::default(),
-            true,
         );
         let batch = collect(plan.unwrap()).await.unwrap();
         // Two overlapped chunks will be sort merged with dupplicates removed
@@ -1096,7 +1080,6 @@ mod test {
                 Arc::clone(&chunk4),
             ],
             Predicate::default(),
-            true,
         );
         let batch = collect(plan.unwrap()).await.unwrap();
         // Final data will be partially sorted and duplicates removed. Detailed:
