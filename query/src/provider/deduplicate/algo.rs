@@ -197,7 +197,7 @@ impl RecordBatchDeduplicator {
     ///
     /// ranges: 0-1, 2-4, 5-6
     /// input array: A, NULL, NULL, C, NULL, NULL
-    /// --> Array[A, C, NULL]
+    /// --> Array[0, 3, 5]
     fn compute_field_indices(
         &self,
         ranges: &[Range<usize>],
