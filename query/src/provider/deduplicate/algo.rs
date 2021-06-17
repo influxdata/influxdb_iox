@@ -30,7 +30,7 @@ struct DuplicateRanges {
     ///  `col_idx` is present in sort keys
     is_sort_key: Vec<bool>,
 
-    /// ranges of row indicies where the sort key columns have the
+    /// ranges of row indices where the sort key columns have the
     /// same values
     ranges: Vec<Range<usize>>,
 }
@@ -147,7 +147,7 @@ impl RecordBatchDeduplicator {
             debug!(num_dupes, num_rows = batch.num_rows(), "dupes");
 
             // Use take kernel
-            let sort_key_indicies = self.compute_sort_key_indicies(&ranges);
+            let sort_key_indices = self.compute_sort_key_indices(&ranges);
 
             let take_options = Some(TakeOptions {
                 check_bounds: false,
@@ -162,16 +162,16 @@ impl RecordBatchDeduplicator {
                     if dupe_ranges.is_sort_key[input_index] {
                         arrow::compute::take(
                             input_array.as_ref(),
-                            &sort_key_indicies,
+                            &sort_key_indices,
                             take_options.clone(),
                         )
                     } else {
                         // pick the last non null value
-                        let field_indicies = self.compute_field_indicies(&ranges, input_array);
+                        let field_indices = self.compute_field_indices(&ranges, input_array);
 
                         arrow::compute::take(
                             input_array.as_ref(),
-                            &field_indicies,
+                            &field_indices,
                             take_options.clone(),
                         )
                     }
@@ -186,7 +186,7 @@ impl RecordBatchDeduplicator {
     /// column in each pk group)
     ///
     /// ranges: 0-1, 2-4, 5-6 --> Array[0, 2, 5]
-    fn compute_sort_key_indicies(&self, ranges: &[Range<usize>]) -> UInt64Array {
+    fn compute_sort_key_indices(&self, ranges: &[Range<usize>]) -> UInt64Array {
         ranges.iter().map(|r| Some(r.start as u64)).collect()
     }
 
@@ -198,7 +198,7 @@ impl RecordBatchDeduplicator {
     /// ranges: 0-1, 2-4, 5-6
     /// input array: A, NULL, NULL, C, NULL, NULL
     /// --> Array[A, C, NULL]
-    fn compute_field_indicies(
+    fn compute_field_indices(
         &self,
         ranges: &[Range<usize>],
         input_array: &ArrayRef,
