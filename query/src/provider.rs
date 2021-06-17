@@ -15,7 +15,7 @@ use datafusion::{
         sort_preserving_merge::SortPreservingMergeExec, union::UnionExec, ExecutionPlan,
     },
 };
-use internal_types::schema::{merge::SchemaMerger, Schema};
+use internal_types::{schema::{merge::SchemaMerger, Schema}, selection::Selection};
 use observability_deps::tracing::debug;
 
 use crate::{
@@ -347,30 +347,46 @@ impl<C: PartitionChunk + 'static> Deduplicater<C> {
     fn build_scan_plan(
         &mut self,
         table_name: Arc<str>,
-        schema: ArrowSchemaRef,
+        // desired output schema
+        output_schema: ArrowSchemaRef,
         chunks: Vec<Arc<C>>,
         predicate: Predicate,
     ) -> Result<Arc<dyn ExecutionPlan>> {
+
+        // // compute the combined input schema of all the chunks
+        // let mut schema_merger = SchemaMerger::new();
+        // for chunk in &chunks {
+        //     // no way to fail getting all the columns (
+        //     let table_schema = chunk.table_schema(Selection::All).unwrap();
+        //     schema_merger
+        //         .merge(&table_schema)
+        //         .context(ChunkSchemaNotCompatible {
+        //             table_name: table_name.as_ref(),
+        //         })?;
+        // }
+        // let schema = schema_merger.build();
+
+
         // find overlapped chunks and put them into the right group
         self.split_overlapped_chunks(chunks.to_vec())?;
 
         // Building plans
-        let mut plans = vec![];
         if self.no_duplicates() {
             // Neither overlaps nor duplicates, no deduplicating needed
             let plan = Self::build_plans_for_non_duplicates_chunk(
                 Arc::clone(&table_name),
-                Arc::clone(&schema),
+                Arc::clone(&output_schema),
                 chunks,
                 predicate,
             );
-            plans.push(plan);
+            Ok(plan)
         } else {
+            let mut plans = vec![];
             // Go over overlapped set, build deduplicate plan for each vector of overlapped chunks
             for overlapped_chunks in self.overlapped_chunks_set.to_vec() {
                 plans.push(Self::build_deduplicate_plan_for_overlapped_chunks(
                     Arc::clone(&table_name),
-                    Arc::clone(&schema),
+                    Arc::clone(&output_schema),
                     overlapped_chunks.to_owned(),
                     predicate.clone(),
                 )?);
@@ -380,7 +396,7 @@ impl<C: PartitionChunk + 'static> Deduplicater<C> {
             for chunk_with_duplicates in self.in_chunk_duplicates_chunks.to_vec() {
                 plans.push(Self::build_deduplicate_plan_for_chunk_with_duplicates(
                     Arc::clone(&table_name),
-                    Arc::clone(&schema),
+                    Arc::clone(&output_schema),
                     chunk_with_duplicates.to_owned(),
                     predicate.clone(),
                 )?);
@@ -390,22 +406,16 @@ impl<C: PartitionChunk + 'static> Deduplicater<C> {
             for no_duplicates_chunk in self.no_duplicates_chunks.to_vec() {
                 plans.push(Self::build_plan_for_non_duplicates_chunk(
                     Arc::clone(&table_name),
-                    Arc::clone(&schema),
+                    Arc::clone(&output_schema),
                     no_duplicates_chunk.to_owned(),
                     predicate.clone(),
                 ));
             }
-        }
 
-        match plans.len() {
             // No plan generated. Something must go wrong
             // Even if the chunks are empty, IOxReadFilterNode is still created
-            0 => panic!("Internal error generating deduplicate plan"),
-            // Only one plan, no need to add union node
-            // Return the plan itself
-            1 => Ok(plans.remove(0)),
-            // Has many plans and need to union them
-            _ => Ok(Arc::new(UnionExec::new(plans))),
+            assert!(!plans.is_empty(), "Internal error generating deduplicate plan"),
+            Arc::new(UnionExec::new(plans))
         }
     }
 
@@ -470,7 +480,7 @@ impl<C: PartitionChunk + 'static> Deduplicater<C> {
     ///```
     fn build_deduplicate_plan_for_overlapped_chunks(
         table_name: Arc<str>,
-        schema: ArrowSchemaRef,
+        output_schema: ArrowSchemaRef,
         chunks: Vec<Arc<C>>, // These chunks are identified overlapped
         predicate: Predicate,
     ) -> Result<Arc<dyn ExecutionPlan>> {
@@ -480,7 +490,7 @@ impl<C: PartitionChunk + 'static> Deduplicater<C> {
             .map(|chunk| {
                 Self::build_sort_plan_for_read_filter(
                     Arc::clone(&table_name),
-                    Arc::clone(&schema),
+                    Arc::clone(&output_schema),
                     Arc::clone(&chunk),
                     predicate.clone(),
                 )
@@ -531,14 +541,14 @@ impl<C: PartitionChunk + 'static> Deduplicater<C> {
     ///```
     fn build_deduplicate_plan_for_chunk_with_duplicates(
         table_name: Arc<str>,
-        schema: ArrowSchemaRef,
+        output_schema: ArrowSchemaRef,
         chunk: Arc<C>, // This chunk is identified having duplicates
         predicate: Predicate,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         // Create the 2 bottom nodes IOxReadFilterNode and SortExec
         let plan = Self::build_sort_plan_for_read_filter(
             table_name,
-            schema,
+            output_schema,
             Arc::clone(&chunk),
             predicate,
         )?;
@@ -620,13 +630,13 @@ impl<C: PartitionChunk + 'static> Deduplicater<C> {
     ///```
     fn build_plan_for_non_duplicates_chunk(
         table_name: Arc<str>,
-        schema: ArrowSchemaRef,
+        output_schema: ArrowSchemaRef,
         chunk: Arc<C>, // This chunk is identified having no duplicates
         predicate: Predicate,
     ) -> Arc<dyn ExecutionPlan> {
         Arc::new(IOxReadFilterNode::new(
             Arc::clone(&table_name),
-            schema,
+            output_schema,
             vec![chunk],
             predicate,
         ))
@@ -641,13 +651,13 @@ impl<C: PartitionChunk + 'static> Deduplicater<C> {
     ///```
     fn build_plans_for_non_duplicates_chunk(
         table_name: Arc<str>,
-        schema: ArrowSchemaRef,
+        output_schema: ArrowSchemaRef,
         chunks: Vec<Arc<C>>, // This chunk is identified having no duplicates
         predicate: Predicate,
     ) -> Arc<dyn ExecutionPlan> {
         Arc::new(IOxReadFilterNode::new(
             Arc::clone(&table_name),
-            schema,
+            output_schema,
             chunks,
             predicate,
         ))
@@ -1078,6 +1088,68 @@ mod test {
                 Arc::clone(&chunk2),
                 Arc::clone(&chunk3),
                 Arc::clone(&chunk4),
+            ],
+            Predicate::default(),
+        );
+        let batch = collect(plan.unwrap()).await.unwrap();
+        // Final data will be partially sorted and duplicates removed. Detailed:
+        //   . chunk1 and chunk2 will be sorted merged and deduplicated (rows 8-32)
+        //   . chunk3 will stay in its original (rows 1-3)
+        //   . chunk4 will be sorted and deduplicated (rows 4-7)
+        let expected = vec![
+            "+-----------+------+-------------------------------+",
+            "| field_int | tag1 | time                          |",
+            "+-----------+------+-------------------------------+",
+            "| 1000      | WA   | 1970-01-01 00:00:00.000008    |",
+            "| 10        | VT   | 1970-01-01 00:00:00.000010    |",
+            "| 70        | UT   | 1970-01-01 00:00:00.000020    |",
+            "| 70        | UT   | 1970-01-01 00:00:00.000020    |",
+            "| 50        | VT   | 1970-01-01 00:00:00.000010    |",
+            "| 1000      | WA   | 1970-01-01 00:00:00.000008    |",
+            "| 100       | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000500 |",
+            "| 30        | MT   | 1970-01-01 00:00:00.000000005 |",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000001    |",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000002    |",
+            "| 5         | MT   | 1970-01-01 00:00:00.000005    |",
+            "| 10        | MT   | 1970-01-01 00:00:00.000007    |",
+            "+-----------+------+-------------------------------+",
+        ];
+        assert_batches_eq!(&expected, &batch);
+    }
+
+    #[tokio::test]
+    async fn scan_plan_with_different_schemas() {
+        // This test covers chunks when they have different schemas
+        let chunk1 = Arc::new(
+            TestChunk::new(1)
+                .with_time_column_with_stats("t", 5, 7000)
+                .with_tag_column_with_stats("t", "tag1", "AL", "MT")
+                .with_int_field_column("t", "field_int")
+                .with_five_rows_of_data("t"),
+        );
+
+        // chunk2 overlaps with chunk 1
+        let chunk2 = Arc::new(
+            TestChunk::new(2)
+                .with_time_column_with_stats("t", 5, 7000)
+                .with_tag_column_with_stats("t", "tag1", "AL", "MT")
+                .with_tag_column_with_stats("t", "tag2", "A", "Z")
+                .with_int_field_column("t", "field_int")
+                .with_five_rows_of_data("t"),
+        );
+
+        // Datafusion schema of the chunk
+        let schema = chunk1.table_schema(Selection::All).unwrap().as_arrow();
+
+        let mut deduplicator = Deduplicater::new();
+        let plan = deduplicator.build_scan_plan(
+            Arc::from("t"),
+            schema,
+            vec![
+                Arc::clone(&chunk1),
+                Arc::clone(&chunk2),
             ],
             Predicate::default(),
         );
