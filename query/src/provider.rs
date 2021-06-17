@@ -1103,10 +1103,6 @@ mod test {
         //   . chunk1 and chunk2 will be sorted merged and deduplicated (rows 8-32)
         //   . chunk3 will stay in its original (rows 1-3)
         //   . chunk4 will be sorted and deduplicated (rows 4-7)
-        // TODO: data is only partially sorted for now. The deduplication will happen when When https://github.com/influxdata/influxdb_iox/issues/1646
-        //   is done
-
-        // TODO: the data isn't sorted  by tag
         let expected = vec![
             "+-----------+------+-------------------------------+",
             "| field_int | tag1 | time                          |",
