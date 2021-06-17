@@ -73,11 +73,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::BytesMut;
-use cached::proc_macro::cached;
 use db::load_or_create_preserved_catalog;
 use init::InitStatus;
 use observability_deps::tracing::{debug, info, warn};
-use parking_lot::Mutex;
+use once_cell::sync::OnceCell;
+use parking_lot::{Mutex, RwLock};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use data_types::{
@@ -95,7 +95,6 @@ use tracker::{TaskId, TaskRegistration, TaskRegistryWithHistory, TaskTracker, Tr
 
 pub use crate::config::RemoteTemplate;
 use crate::config::{object_store_path_for_database_config, Config, GRpcConnectionString};
-use cached::Return;
 use data_types::database_rules::{NodeGroup, RoutingRules, Shard, ShardConfig, ShardId};
 pub use db::Db;
 use generated_types::database_rules::encode_database_rules;
@@ -952,19 +951,48 @@ impl ConnectionManager for ConnectionManagerImpl {
     }
 }
 
-// cannot be an associated function
-// argument need to have static lifetime because they become caching keys
-#[cached(result = true, with_cached_flag = true)]
-async fn cached_remote_server(
-    connect: String,
-) -> Result<Return<Arc<RemoteServerImpl>>, ConnectionManagerError> {
+#[derive(Debug, Clone)]
+struct CachedConnection {
+    value: Arc<RemoteServerImpl>,
+    was_cached: bool,
+}
+
+type CachedConnections = HashMap<String, Arc<RemoteServerImpl>>;
+static CACHED_CONNECTIONS: OnceCell<RwLock<CachedConnections>> = OnceCell::new();
+
+// Get a connection to the remote server, reusing previous results if desired
+async fn cached_remote_server(connect: String) -> Result<CachedConnection, ConnectionManagerError> {
+    let cache = CACHED_CONNECTIONS.get_or_init(|| RwLock::new(CachedConnections::new()));
+
+    // Use scope to force cache guard to be dropped across await
+    {
+        let cache = cache.read();
+        // If we have a previously cached connection, use that
+        if let Some(connection) = cache.get(&connect) {
+            return Ok(CachedConnection {
+                value: Arc::clone(&connection),
+                was_cached: true,
+            });
+        }
+    }
+
+    // otherwise, needs to be put into the cache
     let connection = Builder::default()
         .build(&connect)
         .await
         .map_err(|e| Box::new(e) as _)
         .context(RemoteServerConnectError)?;
     let client = write::Client::new(connection);
-    Ok(Return::new(Arc::new(RemoteServerImpl { client })))
+    let cc = CachedConnection {
+        value: Arc::new(RemoteServerImpl { client }),
+        was_cached: false,
+    };
+
+    // reacquire lock (which might result in thundering herd problems)
+    let cache = CACHED_CONNECTIONS.get_or_init(|| RwLock::new(CachedConnections::new()));
+    let mut cache = cache.write();
+    cache.insert(connect, Arc::clone(&cc.value));
+    Ok(cc)
 }
 
 /// An implementation for communicating with other IOx servers. This should
