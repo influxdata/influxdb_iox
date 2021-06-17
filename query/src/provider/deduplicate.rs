@@ -27,15 +27,15 @@ use tokio_stream::wrappers::ReceiverStream;
 /// # DeduplicateExec
 ///
 /// This operator takes an input stream of RecordBatches that is
-/// alread sorted on "sort_key" and applies IOx specific deduplication
+/// already sorted on "sort_key" and applies IOx specific deduplication
 /// logic.
 ///
 /// The output is dependent on the order of the the input rows which
 /// have the same key.
 ///
-/// Specifically, value chosen for each non sort key columns is the
+/// Specifically, the value chosen for each non-sort_key column is the
 /// "last" non-null value. This is used to model "upserts" when new
-/// rows with the same primary key is inserted a second time to update
+/// rows with the same primary key are inserted a second time to update
 /// existing values.
 ///
 /// # Example
@@ -69,11 +69,11 @@ use tokio_stream::wrappers::ReceiverStream;
 /// +----+----+----+----+
 /// ```
 ///
-/// # Field Resolution (why the last non null value?)
+/// # Field Resolution (why the last non-null value?)
 ///
-/// The choice of latest non-null value instead of the latest value is
+/// The choice of the latest non-null value instead of the latest value is
 /// subtle and thus we try to document the rationale here. It is a
-/// consequence of the LineProtocol update model
+/// consequence of the LineProtocol update model.
 ///
 /// Some observations about line protocol are:
 ///
