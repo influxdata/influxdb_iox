@@ -326,9 +326,9 @@ impl Schema {
         }
     }
 
-    /// Returns the Schema for a table in this chunk, with the
-    /// specified column selection. An error is returned if the
-    /// selection refers to columns that do not exist.
+    /// Returns a Schema that represents selecting some of the columns
+    /// in this schema. An error is returned if the selection refers to
+    /// columns that do not exist.
     pub fn select(&self, selection: Selection<'_>) -> Result<Self> {
         Ok(match selection {
             Selection::All => self.clone(),
