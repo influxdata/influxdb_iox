@@ -243,7 +243,7 @@ impl Catalog {
         for table in tables.values() {
             for partition in table.partitions() {
                 let partition = partition.read();
-                chunks.extend(partition.chunks().cloned())
+                chunks.extend(partition.chunks())
             }
         }
         chunks
@@ -304,7 +304,7 @@ impl Catalog {
         let mut chunks = Vec::with_capacity(partitions.size_hint().1.unwrap_or_default());
         for partition in partitions {
             let partition = partition.read();
-            chunks.extend(partition.chunks().map(|chunk| {
+            chunks.extend(partition.chunks().iter().map(|chunk| {
                 let chunk = chunk.read();
                 map(&chunk)
             }))
@@ -324,26 +324,9 @@ impl Catalog {
 
 #[cfg(test)]
 mod tests {
-    use entry::test_helpers::lp_to_entry;
-
     use super::*;
-
-    fn create_open_chunk(partition: &Arc<RwLock<Partition>>) {
-        let mut partition = partition.write();
-        let table = partition.table_name();
-        let entry = lp_to_entry(&format!("{} bar=1 10", table));
-        let write = entry.partition_writes().unwrap().remove(0);
-        let batch = write.table_batches().remove(0);
-
-        let mut mb_chunk = mutable_buffer::chunk::MBChunk::new(
-            batch.name(),
-            mutable_buffer::chunk::ChunkMetrics::new_unregistered(),
-        );
-
-        mb_chunk.write_table_batch(1, 5, batch).unwrap();
-
-        partition.create_open_chunk(mb_chunk);
-    }
+    use entry::Sequence;
+    use entry::test_helpers::lp_to_entry;
 
     #[test]
     fn partition_get() {
@@ -381,61 +364,6 @@ mod tests {
         assert_eq!(partition_keys, vec!["p1", "p2", "p3"]);
     }
 
-    #[test]
-    fn chunk_create() {
-        let catalog = Catalog::test();
-        let p1 = catalog.get_or_create_partition("t1", "p1");
-        let p2 = catalog.get_or_create_partition("t2", "p2");
-
-        create_open_chunk(&p1);
-        create_open_chunk(&p1);
-        create_open_chunk(&p2);
-
-        let p1 = p1.write();
-        let p2 = p2.write();
-
-        let c1_0 = p1.chunk(0).unwrap();
-        assert_eq!(c1_0.read().table_name().as_ref(), "t1");
-        assert_eq!(c1_0.read().key(), "p1");
-        assert_eq!(c1_0.read().id(), 0);
-
-        let c1_1 = p1.chunk(1).unwrap();
-        assert_eq!(c1_1.read().table_name().as_ref(), "t1");
-        assert_eq!(c1_1.read().key(), "p1");
-        assert_eq!(c1_1.read().id(), 1);
-
-        let c2_0 = p2.chunk(0).unwrap();
-        assert_eq!(c2_0.read().table_name().as_ref(), "t2");
-        assert_eq!(c2_0.read().key(), "p2");
-        assert_eq!(c2_0.read().id(), 0);
-
-        assert!(p1.chunk(100).is_none());
-    }
-
-    #[test]
-    fn chunk_list() {
-        let catalog = Catalog::test();
-
-        let p1 = catalog.get_or_create_partition("table1", "p1");
-        let p2 = catalog.get_or_create_partition("table2", "p1");
-        create_open_chunk(&p1);
-        create_open_chunk(&p1);
-        create_open_chunk(&p2);
-
-        let p3 = catalog.get_or_create_partition("table1", "p2");
-        create_open_chunk(&p3);
-
-        assert_eq!(
-            chunk_strings(&catalog),
-            vec![
-                "Chunk p1:table1:0",
-                "Chunk p1:table1:1",
-                "Chunk p1:table2:0",
-                "Chunk p2:table1:0"
-            ]
-        );
-    }
-
     fn chunk_strings(catalog: &Catalog) -> Vec<String> {
         let mut chunks: Vec<String> = catalog
             .partitions()
@@ -443,6 +371,7 @@ mod tests {
             .flat_map(|p| {
                 let p = p.read();
                 p.chunks()
+                    .iter()
                     .map(|c| {
                         let c = c.read();
                         format!("Chunk {}:{}:{}", c.key(), c.table_name(), c.id())
@@ -457,17 +386,43 @@ mod tests {
     }
 
     #[test]
+    fn chunk_list() {
+        let catalog = Catalog::test();
+
+        let p1 = create_partition_and_write_into_buffer(&catalog, "table1", "p1");
+        {
+            let mut p1 = p1.write();
+            p1.rollover_buffer();
+        }
+        write_into_buffer(&catalog, &p1);
+
+        create_partition_and_write_into_buffer(&catalog, "table2", "p1");
+        create_partition_and_write_into_buffer(&catalog, "table1", "p2");
+
+        assert_eq!(
+            chunk_strings(&catalog),
+            vec![
+                "Chunk p1:table1:0",
+                "Chunk p1:table1:1",
+                "Chunk p1:table2:0",
+                "Chunk p2:table1:0"
+            ]
+        );
+    }
+
+    #[test]
     fn chunk_drop() {
         let catalog = Catalog::test();
 
-        let p1 = catalog.get_or_create_partition("p1", "table1");
-        let p2 = catalog.get_or_create_partition("p1", "table2");
-        create_open_chunk(&p1);
-        create_open_chunk(&p1);
-        create_open_chunk(&p2);
+        let p1 = create_partition_and_write_into_buffer(&catalog, "p1", "table1");
+        {
+            let mut p1 = p1.write();
+            p1.rollover_buffer();
+        }
+        write_into_buffer(&catalog, &p1);
 
-        let p3 = catalog.get_or_create_partition("p2", "table1");
-        create_open_chunk(&p3);
+        let p2 = create_partition_and_write_into_buffer(&catalog, "p1", "table2");
+        create_partition_and_write_into_buffer(&catalog, "p2", "table1");
 
         assert_eq!(chunk_strings(&catalog).len(), 4);
 
@@ -497,7 +452,6 @@ mod tests {
     fn chunk_drop_non_existent_chunk() {
         let catalog = Catalog::test();
         let p3 = catalog.get_or_create_partition("table1", "p3");
-        create_open_chunk(&p3);
 
         let mut p3 = p3.write();
 
@@ -508,9 +462,13 @@ mod tests {
     fn chunk_recreate_dropped() {
         let catalog = Catalog::test();
 
-        let p1 = catalog.get_or_create_partition("table1", "p1");
-        create_open_chunk(&p1);
-        create_open_chunk(&p1);
+        let p1 = create_partition_and_write_into_buffer(&catalog, "table1", "p1");
+        {
+            let mut p1 = p1.write();
+            p1.rollover_buffer();
+        }
+        write_into_buffer(&catalog, &p1);
+
         assert_eq!(
             chunk_strings(&catalog),
             vec!["Chunk p1:table1:0", "Chunk p1:table1:1"]
@@ -522,8 +480,13 @@ mod tests {
         }
         assert_eq!(chunk_strings(&catalog), vec!["Chunk p1:table1:1"]);
 
+        {
+            let mut p1 = p1.write();
+            p1.rollover_buffer();
+        }
+        write_into_buffer(&catalog, &p1);
+
         // should be ok to "re-create", it gets another chunk_id though
-        create_open_chunk(&p1);
         assert_eq!(
             chunk_strings(&catalog),
             vec!["Chunk p1:table1:1", "Chunk p1:table1:2"]
@@ -535,12 +498,9 @@ mod tests {
         use TableNameFilter::*;
         let catalog = Catalog::test();
 
-        let p1 = catalog.get_or_create_partition("table1", "p1");
-        let p2 = catalog.get_or_create_partition("table2", "p1");
-        let p3 = catalog.get_or_create_partition("table2", "p2");
-        create_open_chunk(&p1);
-        create_open_chunk(&p2);
-        create_open_chunk(&p3);
+        create_partition_and_write_into_buffer(&catalog, "table1", "p1");
+        create_partition_and_write_into_buffer(&catalog, "table2", "p1");
+        create_partition_and_write_into_buffer(&catalog, "table2", "p2");
 
         let a = catalog.filtered_chunks(AllTables, None, |_| ());
 
@@ -554,6 +514,27 @@ mod tests {
         assert_eq!(b.len(), 1);
         assert_eq!(c.len(), 2);
         assert_eq!(d.len(), 1);
+    }
+
+    fn create_partition_and_write_into_buffer(catalog: &Catalog, table: &str, partition: &str) -> Arc<RwLock<Partition>> {
+        let p = catalog.get_or_create_partition(table, partition);
+        write_into_buffer(catalog, &p);
+        p
+    }
+
+    fn write_into_buffer(catalog: &Catalog, partition: &Arc<RwLock<Partition>>) {
+        let mut pw = partition.write();
+
+        let entry = lp_to_entry(&format!("{} val=1 12", pw.table_name()));
+        let sequence = Sequence{id: 1, number: 0};
+
+        if let Some(p) = entry.partition_writes() {
+            for w in p {
+                for t in w.table_batches() {
+                    pw.write_table_batch(&sequence, t, &catalog.metric_labels, &catalog.metrics_registry, catalog.metrics.memory()).unwrap();
+                }
+            }
+        }
     }
 
     fn make_set(s: impl Into<String>) -> BTreeSet<String> {

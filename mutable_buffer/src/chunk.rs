@@ -15,6 +15,7 @@ use metrics::GaugeValue;
 
 use crate::column;
 use crate::{chunk::snapshot::ChunkSnapshot, column::Column};
+use chrono::{DateTime, Utc};
 
 pub mod snapshot;
 
@@ -87,17 +88,26 @@ pub struct MBChunk {
     /// Note: This is a mutex to allow mutation within
     /// `Chunk::snapshot()` which only takes an immutable borrow
     snapshot: Mutex<Option<Arc<ChunkSnapshot>>>,
+
+    /// When this MUB was created
+    created_at: DateTime<Utc>,
+
+    /// When this MUB last received a write
+    last_write_at: DateTime<Utc>,
 }
 
 impl MBChunk {
     pub fn new(table_name: impl AsRef<str>, metrics: ChunkMetrics) -> Self {
         let table_name = Arc::from(table_name.as_ref());
+        let now = Utc::now();
 
         let mut chunk = Self {
             table_name,
             columns: Default::default(),
             metrics,
             snapshot: Mutex::new(None),
+            created_at: now,
+            last_write_at: now,
         };
         chunk.metrics.memory_bytes.set(chunk.size());
         chunk
@@ -129,6 +139,8 @@ impl MBChunk {
             .expect("concurrent readers/writers to MBChunk") = None;
 
         self.metrics.memory_bytes.set(self.size());
+
+        self.last_write_at = Utc::now();
 
         Ok(())
     }

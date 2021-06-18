@@ -110,17 +110,6 @@ impl DbChunk {
         use super::catalog::chunk::{ChunkStage, ChunkStageFrozenRepr};
 
         let (state, meta) = match chunk.stage() {
-            ChunkStage::Open { mb_chunk, .. } => {
-                let snapshot = mb_chunk.snapshot();
-                let state = State::MutableBuffer {
-                    chunk: Arc::clone(&snapshot),
-                };
-                let meta = ChunkMetadata {
-                    table_summary: Arc::new(mb_chunk.table_summary()),
-                    schema: snapshot.full_schema(),
-                };
-                (state, Arc::new(meta))
-            }
             ChunkStage::Frozen {
                 representation,
                 meta,

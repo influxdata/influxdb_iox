@@ -10,7 +10,7 @@ use data_types::{
 use internal_types::schema::Schema;
 use lifecycle::ChunkLifecycleAction;
 use metrics::{Counter, Histogram, KeyValue};
-use mutable_buffer::chunk::{snapshot::ChunkSnapshot as MBChunkSnapshot, MBChunk};
+use mutable_buffer::chunk::{snapshot::ChunkSnapshot as MBChunkSnapshot};
 use parquet_file::chunk::ParquetChunk;
 use read_buffer::RBChunk;
 use tracker::{TaskRegistration, TaskTracker};
@@ -134,14 +134,6 @@ pub enum ChunkStageFrozenRepr {
 /// (according to the diagram shown above). The chunk stage is considered unchanged as long as the job is running.
 #[derive(Debug)]
 pub enum ChunkStage {
-    /// A chunk in an _open_ stage.
-    ///
-    /// Chunks in this stage are writable (= can receive new data) and are not preserved.
-    Open {
-        /// Mutable Buffer that receives writes.
-        mb_chunk: MBChunk,
-    },
-
     /// A chunk in an _frozen stage.
     ///
     /// Chunks in this stage cannot be modified but are not yet persisted. They can however be compacted which will take two
@@ -172,7 +164,6 @@ pub enum ChunkStage {
 impl ChunkStage {
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Open { .. } => "Open",
             Self::Frozen { .. } => "Frozen",
             Self::Persisted { .. } => "Persisted",
         }
@@ -260,40 +251,38 @@ impl ChunkMetrics {
 }
 
 impl CatalogChunk {
-    /// Creates a new open chunk from the provided MUB chunk.
-    ///
-    /// Returns an error if the provided chunk is empty, otherwise creates a new open chunk and records a write at the
-    /// current time.
-    ///
-    /// Apart from [`new_object_store_only`](Self::new_object_store_only) this is the only way to create new chunks.
-    pub(crate) fn new_open(
+    pub(crate) fn new_from_snapshot(
+        table_name: Arc<str>,
+        partition_key: Arc<str>,
         chunk_id: u32,
-        partition_key: impl AsRef<str>,
-        chunk: mutable_buffer::chunk::MBChunk,
-        metrics: ChunkMetrics,
+        snapshot: Arc<MBChunkSnapshot>,
     ) -> Self {
-        assert!(chunk.rows() > 0, "chunk must not be empty");
+        let metrics = ChunkMetrics::new_unregistered();
+        metrics.state.inc_with_labels(&[KeyValue::new("state", "closed")]);
+        metrics.immutable_chunk_size.observe_with_labels(
+            snapshot.size() as f64,
+            &[KeyValue::new("state", "closed")],
+        );
 
-        let table_name = Arc::clone(&chunk.table_name());
-        let stage = ChunkStage::Open { mb_chunk: chunk };
+        let meta = Arc::new(ChunkMetadata{
+            table_summary: Arc::new(snapshot.table_summary()),
+            schema: snapshot.full_schema(),
+        });
+        let time_of_first_write = Some(snapshot.first_write_at());
+        let time_of_last_write = Some(snapshot.last_write_at());
+        let frozen = ChunkStageFrozenRepr::MutableBufferSnapshot(snapshot);
 
-        metrics
-            .state
-            .inc_with_labels(&[KeyValue::new("state", "open")]);
-
-        let mut chunk = Self {
-            partition_key: Arc::from(partition_key.as_ref()),
+        Self {
+            partition_key,
             table_name,
             id: chunk_id,
-            stage,
+            stage: ChunkStage::Frozen { meta, representation: frozen},
             lifecycle_action: None,
             metrics,
-            time_of_first_write: None,
-            time_of_last_write: None,
+            time_of_first_write,
+            time_of_last_write,
             time_closed: None,
-        };
-        chunk.record_write();
-        chunk
+        }
     }
 
     /// Creates a new chunk that is only registered via an object store reference (= only exists in parquet).
@@ -376,7 +365,6 @@ impl CatalogChunk {
     /// Returns the storage and the number of rows
     pub fn storage(&self) -> (usize, ChunkStorage) {
         match &self.stage {
-            ChunkStage::Open { mb_chunk, .. } => (mb_chunk.rows(), ChunkStorage::OpenMutableBuffer),
             ChunkStage::Frozen { representation, .. } => match &representation {
                 ChunkStageFrozenRepr::MutableBufferSnapshot(repr) => {
                     (repr.rows(), ChunkStorage::ClosedMutableBuffer)
@@ -430,7 +418,6 @@ impl CatalogChunk {
         }
 
         let columns: Vec<ChunkColumnSummary> = match &self.stage {
-            ChunkStage::Open { mb_chunk, .. } => mb_chunk.column_sizes().map(to_summary).collect(),
             ChunkStage::Frozen { representation, .. } => match &representation {
                 ChunkStageFrozenRepr::MutableBufferSnapshot(repr) => {
                     repr.column_sizes().map(to_summary).collect()
@@ -453,10 +440,6 @@ impl CatalogChunk {
     /// Return the summary information about the table stored in this Chunk
     pub fn table_summary(&self) -> Arc<TableSummary> {
         match &self.stage {
-            ChunkStage::Open { mb_chunk, .. } => {
-                // The stats for open chunks change so can't be cached
-                Arc::new(mb_chunk.table_summary())
-            }
             ChunkStage::Frozen { meta, .. } => Arc::clone(&meta.table_summary),
             ChunkStage::Persisted { meta, .. } => Arc::clone(&meta.table_summary),
         }
@@ -466,7 +449,6 @@ impl CatalogChunk {
     /// chunk
     pub fn size(&self) -> usize {
         match &self.stage {
-            ChunkStage::Open { mb_chunk, .. } => mb_chunk.size(),
             ChunkStage::Frozen { representation, .. } => match &representation {
                 ChunkStageFrozenRepr::MutableBufferSnapshot(repr) => repr.size(),
                 ChunkStageFrozenRepr::ReadBuffer(repr) => repr.size(),
@@ -485,69 +467,9 @@ impl CatalogChunk {
         }
     }
 
-    /// Returns a mutable reference to the mutable buffer storage for
-    /// chunks in the Open state
-    ///
-    /// Must be in open or closed state
-    pub fn mutable_buffer(&mut self) -> Result<&mut MBChunk> {
-        match &mut self.stage {
-            ChunkStage::Open { mb_chunk, .. } => Ok(mb_chunk),
-            stage => unexpected_state!(self, "mutable buffer reference", "Open or Closed", stage),
-        }
-    }
-
-    /// Set chunk to _frozen_ state.
-    ///
-    /// This only works for chunks in the _open_ stage (chunk is converted) and the _frozen_ stage (no-op) and will
-    /// fail for other stages.
-    pub fn freeze(&mut self) -> Result<()> {
-        match &self.stage {
-            ChunkStage::Open { mb_chunk, .. } => {
-                assert!(self.time_closed.is_none());
-                self.time_closed = Some(Utc::now());
-                let s = mb_chunk.snapshot();
-                self.metrics
-                    .state
-                    .inc_with_labels(&[KeyValue::new("state", "closed")]);
-
-                self.metrics.immutable_chunk_size.observe_with_labels(
-                    mb_chunk.size() as f64,
-                    &[KeyValue::new("state", "closed")],
-                );
-
-                // Cache table summary + schema
-                let metadata = ChunkMetadata {
-                    table_summary: Arc::new(mb_chunk.table_summary()),
-                    schema: s.full_schema(),
-                };
-
-                self.stage = ChunkStage::Frozen {
-                    representation: ChunkStageFrozenRepr::MutableBufferSnapshot(Arc::clone(&s)),
-                    meta: Arc::new(metadata),
-                };
-                Ok(())
-            }
-            &ChunkStage::Frozen { .. } => {
-                // already frozen => no-op
-                Ok(())
-            }
-            _ => {
-                unexpected_state!(self, "setting closed", "Open or Frozen", &self.stage)
-            }
-        }
-    }
-
     /// Set the chunk to the Moving state, returning a handle to the underlying
     /// storage
-    ///
-    /// If called on an open chunk will first [`freeze`](Self::freeze) the chunk
     pub fn set_moving(&mut self, registration: &TaskRegistration) -> Result<Arc<MBChunkSnapshot>> {
-        // This ensures the closing logic is consistent but doesn't break code that
-        // assumes a chunk can be moved from open
-        if matches!(self.stage, ChunkStage::Open { .. }) {
-            self.freeze()?;
-        }
-
         match &self.stage {
             ChunkStage::Frozen { representation, .. } => match &representation {
                 ChunkStageFrozenRepr::MutableBufferSnapshot(repr) => {
@@ -808,8 +730,6 @@ impl CatalogChunk {
 
 #[cfg(test)]
 mod tests {
-    use entry::test_helpers::lp_to_entry;
-    use mutable_buffer::chunk::{ChunkMetrics as MBChunkMetrics, MBChunk};
     use parquet_file::{
         chunk::ParquetChunk,
         test_utils::{make_chunk as make_parquet_chunk_with_store, make_object_store},
@@ -817,52 +737,9 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_new_open() {
-        let sequencer_id = 1;
-        let table_name = "table1";
-        let partition_key = "part1";
-        let chunk_id = 0;
-
-        // works with non-empty MBChunk
-        let mb_chunk = make_mb_chunk(table_name, sequencer_id);
-        let chunk = CatalogChunk::new_open(
-            chunk_id,
-            partition_key,
-            mb_chunk,
-            ChunkMetrics::new_unregistered(),
-        );
-        assert!(matches!(chunk.stage(), &ChunkStage::Open { .. }));
-    }
-
-    #[test]
-    #[should_panic(expected = "chunk must not be empty")]
-    fn test_new_open_empty() {
-        // fails with empty MBChunk
-        let mb_chunk = MBChunk::new("t1", MBChunkMetrics::new_unregistered());
-        CatalogChunk::new_open(0, "p1", mb_chunk, ChunkMetrics::new_unregistered());
-    }
-
     #[tokio::test]
-    async fn test_freeze() {
-        let mut chunk = make_open_chunk();
-
-        // close it
-        chunk.freeze().unwrap();
-        assert!(matches!(chunk.stage(), &ChunkStage::Frozen { .. }));
-
-        // closing a second time is a no-op
-        chunk.freeze().unwrap();
-        assert!(matches!(chunk.stage(), &ChunkStage::Frozen { .. }));
-
-        // closing a chunk in persisted state will fail
+    async fn test_lifecycle_action() {
         let mut chunk = make_persisted_chunk().await;
-        assert_eq!(chunk.freeze().unwrap_err().to_string(), "Internal Error: unexpected chunk state for part1:table1:0  during setting closed. Expected Open or Frozen, got Persisted");
-    }
-
-    #[test]
-    fn test_lifecycle_action() {
-        let mut chunk = make_open_chunk();
         let registration = TaskRegistration::new();
 
         // no action to begin with
@@ -901,35 +778,9 @@ mod tests {
         );
     }
 
-    fn make_mb_chunk(table_name: &str, sequencer_id: u32) -> MBChunk {
-        let mut mb_chunk = MBChunk::new(table_name, MBChunkMetrics::new_unregistered());
-        let entry = lp_to_entry(&format!("{} bar=1 10", table_name));
-        let write = entry.partition_writes().unwrap().remove(0);
-        let batch = write.table_batches().remove(0);
-        mb_chunk.write_table_batch(sequencer_id, 1, batch).unwrap();
-        mb_chunk
-    }
-
     async fn make_parquet_chunk(chunk_id: u32) -> ParquetChunk {
         let object_store = make_object_store();
         make_parquet_chunk_with_store(object_store, "foo", chunk_id).await
-    }
-
-    fn make_open_chunk() -> CatalogChunk {
-        let sequencer_id = 1;
-        let table_name = "table1";
-        let partition_key = "part1";
-        let chunk_id = 0;
-
-        // assemble MBChunk
-        let mb_chunk = make_mb_chunk(table_name, sequencer_id);
-
-        CatalogChunk::new_open(
-            chunk_id,
-            partition_key,
-            mb_chunk,
-            ChunkMetrics::new_unregistered(),
-        )
     }
 
     async fn make_persisted_chunk() -> CatalogChunk {

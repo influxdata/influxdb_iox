@@ -10,10 +10,24 @@ use chrono::{DateTime, Utc};
 use data_types::partition_metadata::PartitionSummary;
 use tracker::RwLock;
 
-use crate::db::catalog::metrics::PartitionMetrics;
+use crate::db::catalog::metrics::{PartitionMetrics, MemoryMetrics};
 
-use super::chunk::{CatalogChunk, ChunkStage};
+use super::chunk::CatalogChunk;
 use data_types::chunk_metadata::ChunkSummary;
+use mutable_buffer::chunk::{MBChunk, ChunkMetrics};
+use entry::{TableBatch, Sequence};
+
+use snafu::{ResultExt, Snafu};
+use metrics::{MetricRegistry, KeyValue};
+
+#[derive(Debug, Snafu)]
+pub enum Error {
+    #[snafu(display("write error"))]
+    WriteError{ source: mutable_buffer::chunk::Error },
+}
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
 
 /// IOx Catalog Partition
 ///
@@ -26,15 +40,14 @@ pub struct Partition {
     /// The table name
     table_name: Arc<str>,
 
+    /// The write buffer
+    buffer: Option<MBChunk>,
+
     /// The chunks that make up this partition, indexed by id
     chunks: BTreeMap<u32, Arc<RwLock<CatalogChunk>>>,
 
     /// When this partition was created
     created_at: DateTime<Utc>,
-
-    /// the last time at which write was made to this
-    /// partition. Partition::new initializes this to now.
-    last_write_at: DateTime<Utc>,
 
     /// What the next chunk id is
     next_chunk_id: u32,
@@ -58,9 +71,9 @@ impl Partition {
         Self {
             partition_key,
             table_name,
+            buffer: None,
             chunks: Default::default(),
             created_at: now,
-            last_write_at: now,
             next_chunk_id: 0,
             metrics,
         }
@@ -76,53 +89,26 @@ impl Partition {
         &self.table_name
     }
 
-    /// Update the last write time to now
-    pub fn update_last_write_at(&mut self) {
-        self.last_write_at = Utc::now();
+    // TODO: remove the passing of metric stuff to this. It's an anti-pattern, partition should have what it needs for this
+    pub fn write_table_batch(&mut self, sequence: &Sequence, table_batch: TableBatch<'_>, metric_labels: &Vec<KeyValue>, metrics_registry: &Arc<MetricRegistry>, memory_metrics: &MemoryMetrics) -> Result<()> {
+        let table_name = &self.table_name;
+
+        let buf = self.buffer.get_or_insert_with(|| {
+            let metrics = metrics_registry.register_domain_with_labels(
+                "mutable_buffer",
+                metric_labels.clone(),
+            );
+            let metrics = ChunkMetrics::new(&metrics, memory_metrics.mutable_buffer());
+            MBChunk::new(table_name, metrics)
+        });
+        buf.write_table_batch(sequence.id, sequence.number, table_batch).context(WriteError)?;
+
+        Ok(())
     }
 
     /// Return the time at which this partition was created
     pub fn created_at(&self) -> DateTime<Utc> {
         self.created_at
-    }
-
-    /// Return the time at which the last write was written to this partititon
-    pub fn last_write_at(&self) -> DateTime<Utc> {
-        self.last_write_at
-    }
-
-    /// Create a new Chunk in the open state.
-    ///
-    /// This will add a new chunk to the catalog and increases the chunk ID counter for that table-partition
-    /// combination.
-    ///
-    /// Returns an error if the chunk is empty.
-    pub fn create_open_chunk(
-        &mut self,
-        chunk: mutable_buffer::chunk::MBChunk,
-    ) -> Arc<RwLock<CatalogChunk>> {
-        assert_eq!(chunk.table_name().as_ref(), self.table_name.as_ref());
-
-        let chunk_id = self.next_chunk_id;
-        // Technically this only causes an issue on the next upsert but
-        // the MUB treats u32::MAX as a sentinel value
-        assert_ne!(self.next_chunk_id, u32::MAX, "Chunk ID Overflow");
-
-        self.next_chunk_id += 1;
-
-        let chunk = Arc::new(self.metrics.new_chunk_lock(CatalogChunk::new_open(
-            chunk_id,
-            &self.partition_key,
-            chunk,
-            self.metrics.new_chunk_metrics(),
-        )));
-
-        if self.chunks.insert(chunk_id, Arc::clone(&chunk)).is_some() {
-            // A fundamental invariant has been violated - abort
-            panic!("chunk already existed with id {}", chunk_id)
-        }
-
-        chunk
     }
 
     /// Create new chunk that is only in object store (= parquet file).
@@ -155,20 +141,36 @@ impl Partition {
         }
     }
 
-    /// Drop the specified chunk
-    pub fn drop_chunk(&mut self, chunk_id: u32) -> Option<Arc<RwLock<CatalogChunk>>> {
-        self.chunks.remove(&chunk_id)
+    pub fn buffer_snapshot(&self) -> Option<CatalogChunk> {
+        self.buffer.as_ref().map(|b| {
+            let snap = b.snapshot();
+            CatalogChunk::new_from_snapshot(Arc::clone(&self.table_name), Arc::clone(&self.partition_key), self.next_chunk_id, snap)
+        })
     }
 
-    /// return the first currently open chunk, if any
-    pub fn open_chunk(&self) -> Option<Arc<RwLock<CatalogChunk>>> {
-        self.chunks
-            .values()
-            .find(|chunk| {
-                let chunk = chunk.read();
-                matches!(chunk.stage(), ChunkStage::Open { .. })
-            })
-            .cloned()
+    pub fn rollover_buffer(&mut self) -> Option<Arc<RwLock<CatalogChunk>>> {
+        self.buffer.take().map(|b| {
+            let snap = b.snapshot();
+            let chunk = CatalogChunk::new_from_snapshot(Arc::clone(&self.table_name), Arc::clone(&self.partition_key), self.next_chunk_id, snap);
+            let chunk = Arc::new(RwLock::new(chunk));
+            self.chunks.insert(self.next_chunk_id, chunk.clone());
+            self.next_chunk_id += 1;
+            chunk
+        })
+    }
+
+    /// Drop the specified chunk
+    pub fn drop_chunk(&mut self, chunk_id: u32) -> Option<Arc<RwLock<CatalogChunk>>> {
+        // if the id is the next_chunk_id, they're refering to the buffer. This is a bit
+        // odd, but rollover the chunk so that it takes the id, and whatever is open
+        // next will take the next ID. We'll probably want to revisit this and maybe refactor
+        // in the tests. A buffer shouldn't be a chunk. A snapshot of the buffer can be one, but
+        // it's generated for queries only. Dropping the buffer feels like it should be a separate
+        // and explicit operation, but not sure yet.
+        if self.next_chunk_id == chunk_id {
+            self.rollover_buffer();
+        }
+        self.chunks.remove(&chunk_id)
     }
 
     /// Return an immutable chunk reference by chunk id
@@ -176,9 +178,13 @@ impl Partition {
         self.chunks.get(&chunk_id)
     }
 
-    /// Return a iterator over chunks in this partition
-    pub fn chunks(&self) -> impl Iterator<Item = &Arc<RwLock<CatalogChunk>>> {
-        self.chunks.values()
+    /// Return the chunks in this partition, including the mutable buffer snapshot
+    pub fn chunks(&self) -> Vec<Arc<RwLock<CatalogChunk>>> {
+        let mut chunks: Vec<_> = self.chunks.values().cloned().collect();
+        if let Some(snapshot) = self.buffer_snapshot() {
+            chunks.push(Arc::new(RwLock::new(snapshot)));
+        }
+        chunks
     }
 
     /// Return a PartitionSummary for this partition
@@ -193,7 +199,7 @@ impl Partition {
 
     /// Return chunk summaries for all chunks in this partition
     pub fn chunk_summaries(&self) -> impl Iterator<Item = ChunkSummary> + '_ {
-        self.chunks().map(|x| x.read().summary())
+        self.chunks().into_iter().map(|x| x.read().summary())
     }
 
     pub fn metrics(&self) -> &PartitionMetrics {

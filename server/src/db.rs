@@ -23,7 +23,6 @@ use datafusion::{
 use entry::{Entry, SequencedEntry};
 use internal_types::{arrow::sort::sort_record_batch, selection::Selection};
 use metrics::{KeyValue, MetricRegistry};
-use mutable_buffer::chunk::{ChunkMetrics as MutableBufferChunkMetrics, MBChunk};
 use object_store::{path::parsed::DirsAndFileName, ObjectStore};
 use observability_deps::tracing::{debug, error, info};
 use parking_lot::RwLock;
@@ -42,7 +41,6 @@ use snafu::{ResultExt, Snafu};
 use std::collections::HashMap;
 use std::{
     any::Any,
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -131,11 +129,9 @@ pub enum Error {
     #[snafu(display("Hard buffer size limit reached"))]
     HardLimitReached {},
 
-    #[snafu(display("Can not write entry {}:{} : {}", partition_key, chunk_id, source))]
+    #[snafu(display("Can not write entry: {}", source))]
     WriteEntry {
-        partition_key: String,
-        chunk_id: u32,
-        source: mutable_buffer::chunk::Error,
+        source: catalog::partition::Error,
     },
 
     #[snafu(display("Can not write entry to new MUB chunk {} : {}", partition_key, source))]
@@ -399,23 +395,15 @@ impl Db {
         table_name: &str,
         partition_key: &str,
     ) -> Result<Option<Arc<DbChunk>>> {
-        let chunk = self
-            .partition(table_name, partition_key)?
-            .read()
-            .open_chunk();
+        // TODO: find out who uses this and why they want the DbChunk. Likely they don't need it.
+        let p = self.partition(table_name, partition_key)?;
+        let mut p = p.write();
+        let c = p.rollover_buffer();
 
-        if let Some(chunk) = chunk {
-            let mut chunk = chunk.write();
-            chunk.freeze().context(LifecycleError {
-                partition_key,
-                table_name,
-                chunk_id: chunk.id(),
-            })?;
-
-            Ok(Some(DbChunk::snapshot(&chunk)))
-        } else {
-            Ok(None)
-        }
+        Ok(c.map(|c| {
+            let c = c.read();
+            DbChunk::snapshot(&c)
+        }))
     }
 
     fn partition(
@@ -944,7 +932,6 @@ impl Db {
     pub fn store_sequenced_entry(&self, sequenced_entry: Arc<SequencedEntry>) -> Result<()> {
         // Get all needed database rule values, then release the lock
         let rules = self.rules.read();
-        let mutable_size_threshold = rules.lifecycle_rules.mutable_size_threshold;
         let immutable = rules.lifecycle_rules.immutable;
         let buffer_size_hard = rules.lifecycle_rules.buffer_size_hard;
         std::mem::drop(rules);
@@ -975,77 +962,12 @@ impl Db {
                         .get_or_create_partition(table_batch.name(), partition_key);
 
                     let mut partition = partition.write();
-                    partition.update_last_write_at();
-
-                    match partition.open_chunk() {
-                        Some(chunk) => {
-                            let mut chunk = chunk.write();
-                            chunk.record_write();
-                            let chunk_id = chunk.id();
-
-                            let mb_chunk =
-                                chunk.mutable_buffer().expect("cannot mutate open chunk");
-
-                            mb_chunk
-                                .write_table_batch(
-                                    sequenced_entry.sequence().id,
-                                    sequenced_entry.sequence().number,
-                                    table_batch,
-                                )
-                                .context(WriteEntry {
-                                    partition_key,
-                                    chunk_id,
-                                })?;
-
-                            check_chunk_closed(&mut *chunk, mutable_size_threshold);
-                        }
-                        None => {
-                            let metrics = self.metrics_registry.register_domain_with_labels(
-                                "mutable_buffer",
-                                self.metric_labels.clone(),
-                            );
-                            let mut mb_chunk = MBChunk::new(
-                                table_batch.name(),
-                                MutableBufferChunkMetrics::new(
-                                    &metrics,
-                                    self.preserved_catalog
-                                        .state()
-                                        .metrics()
-                                        .memory()
-                                        .mutable_buffer(),
-                                ),
-                            );
-
-                            mb_chunk
-                                .write_table_batch(
-                                    sequenced_entry.sequence().id,
-                                    sequenced_entry.sequence().number,
-                                    table_batch,
-                                )
-                                .context(WriteEntryInitial { partition_key })?;
-
-                            let new_chunk = partition.create_open_chunk(mb_chunk);
-                            check_chunk_closed(&mut *new_chunk.write(), mutable_size_threshold);
-                        }
-                    };
+                    partition.write_table_batch(sequenced_entry.sequence(), table_batch, &self.metric_labels, &self.metrics_registry, self.preserved_catalog.state().metrics().memory()).context(WriteEntry)?;
                 }
             }
         }
 
         Ok(())
-    }
-}
-
-/// Check if the given chunk should be closed based on the the MutableBuffer size threshold.
-fn check_chunk_closed(chunk: &mut CatalogChunk, mutable_size_threshold: Option<NonZeroUsize>) {
-    if let Some(threshold) = mutable_size_threshold {
-        if let Ok(mb_chunk) = chunk.mutable_buffer() {
-            let size = mb_chunk.size();
-
-            if size > threshold.get() {
-                chunk.freeze().expect("cannot close open chunk");
-            }
-        }
     }
 }
 
@@ -1691,32 +1613,6 @@ mod tests {
             .await
             .unwrap();
 
-        // MUB chunk size
-        test_db
-            .metric_registry
-            .has_metric_family("catalog_chunk_creation_size_bytes")
-            .with_labels(&[
-                ("db_name", "placeholder"),
-                ("state", "closed"),
-                ("svr_id", "1"),
-            ])
-            .histogram()
-            .sample_sum_eq(280.0)
-            .unwrap();
-
-        // RB chunk size
-        test_db
-            .metric_registry
-            .has_metric_family("catalog_chunk_creation_size_bytes")
-            .with_labels(&[
-                ("db_name", "placeholder"),
-                ("state", "moved"),
-                ("svr_id", "1"),
-            ])
-            .histogram()
-            .sample_sum_eq(3189.0)
-            .unwrap();
-
         let rb = collect_read_filter(&rb_chunk).await;
 
         // Test that data on load into the read buffer is sorted
@@ -1990,41 +1886,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn write_updates_last_write_at() {
-        let db = Arc::new(make_db().await.db);
-        let before_create = Utc::now();
-
-        let partition_key = "1970-01-01T00";
-        write_lp(&db, "cpu bar=1 10");
-        let after_write = Utc::now();
-
-        let last_write_prev = {
-            let partition = db
-                .preserved_catalog
-                .state()
-                .partition("cpu", partition_key)
-                .unwrap();
-            let partition = partition.read();
-
-            assert_ne!(partition.created_at(), partition.last_write_at());
-            assert!(before_create < partition.last_write_at());
-            assert!(after_write > partition.last_write_at());
-            partition.last_write_at()
-        };
-
-        write_lp(&db, "cpu bar=1 20");
-        {
-            let partition = db
-                .preserved_catalog
-                .state()
-                .partition("cpu", partition_key)
-                .unwrap();
-            let partition = partition.read();
-            assert!(last_write_prev < partition.last_write_at());
-        }
-    }
-
-    #[tokio::test]
     async fn test_chunk_timestamps() {
         let start = Utc::now();
         let db = Arc::new(make_db().await.db);
@@ -2086,7 +1947,7 @@ mod tests {
             .unwrap();
         let partition = partition.read();
 
-        let chunks: Vec<_> = partition.chunks().collect();
+        let chunks: Vec<_> = partition.chunks();
         assert_eq!(chunks.len(), 2);
         assert!(matches!(
             chunks[0].read().stage(),
@@ -2347,8 +2208,8 @@ mod tests {
                 Arc::from("1970-01-01T00"),
                 Arc::from("cpu"),
                 1,
-                ChunkStorage::OpenMutableBuffer,
-                64,
+                ChunkStorage::ClosedMutableBuffer,
+                1690,
                 1,
             ),
             ChunkSummary::new_without_timestamps(
@@ -2356,15 +2217,15 @@ mod tests {
                 Arc::from("cpu"),
                 0,
                 ChunkStorage::ClosedMutableBuffer,
-                2190,
+                2214,
                 1,
             ),
             ChunkSummary::new_without_timestamps(
                 Arc::from("1970-01-05T15"),
                 Arc::from("cpu"),
                 1,
-                ChunkStorage::OpenMutableBuffer,
-                87,
+                ChunkStorage::ClosedMutableBuffer,
+                2216,
                 1,
             ),
         ];
@@ -2375,15 +2236,6 @@ mod tests {
             expected, chunk_summaries
         );
 
-        assert_eq!(
-            db.preserved_catalog
-                .state()
-                .metrics()
-                .memory()
-                .mutable_buffer()
-                .get_total(),
-            64 + 2190 + 87
-        );
         assert_eq!(
             db.preserved_catalog
                 .state()

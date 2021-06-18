@@ -18,6 +18,7 @@ use internal_types::schema::{Schema, TIME_COLUMN_NAME};
 use internal_types::selection::Selection;
 
 use super::MBChunk;
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -40,6 +41,8 @@ pub struct ChunkSnapshot {
     table_name: Arc<str>,
     stats: Vec<ColumnSummary>,
     memory: metrics::GaugeValue,
+    first_write_at: DateTime<Utc>,
+    last_write_at: DateTime<Utc>,
 }
 
 impl ChunkSnapshot {
@@ -62,6 +65,8 @@ impl ChunkSnapshot {
             table_name: Arc::clone(&chunk.table_name),
             stats: summary.columns,
             memory,
+            last_write_at: chunk.last_write_at,
+            first_write_at: chunk.created_at,
         };
         s.memory.set(s.size());
         s
@@ -212,5 +217,15 @@ impl ChunkSnapshot {
                 _ => panic!("invalid statistics for time column"),
             })
             .unwrap_or(false) // If no time column or no time column values - cannot match
+    }
+
+    /// Return when this snapshot received its first write
+    pub fn first_write_at(&self) -> DateTime<Utc> {
+        self.first_write_at
+    }
+
+    /// Return when this snapshot received its last write
+    pub fn last_write_at(&self) -> DateTime<Utc> {
+        self.last_write_at
     }
 }
