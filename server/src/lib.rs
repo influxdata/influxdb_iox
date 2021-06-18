@@ -816,7 +816,7 @@ where
             .lockable_chunk(&table_name, &partition_key, chunk_id)
             .context(ChunkNotFound)?;
 
-        let guard = chunk.read().upgrade();
+        let guard = chunk.write();
 
         Ok(LockableChunk::move_to_read_buffer(guard))
     }

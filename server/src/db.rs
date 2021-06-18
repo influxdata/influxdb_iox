@@ -724,7 +724,7 @@ impl Db {
         chunk_id: u32,
     ) -> Result<Arc<DbChunk>> {
         let chunk = self.lockable_chunk(table_name, partition_key, chunk_id)?;
-        let chunk = chunk.read().upgrade();
+        let chunk = chunk.write();
         Self::unload_read_buffer_impl(chunk)
     }
 
