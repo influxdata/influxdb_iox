@@ -30,7 +30,7 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Groups [`ChunkMeta`] objects into disjoint sets using values of
+/// Groups [`QueryChunkMeta`] objects into disjoint sets using values of
 /// min/max statistics. The groups are formed such that each group
 /// *may* contain InfluxDB data model primary key duplicates with
 /// others in that set.
