@@ -124,6 +124,36 @@ jobs:
           command: cargo test --workspace
       - cache_save
 
+  # Integration tests for the influxdb2_client crate against local emulators
+  test_object_store:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+
+      # AWS emulator
+      - image: localstack/localstack
+    environment:
+        # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+        CARGO_INCREMENTAL: "0"
+        # Disable full debug symbol generation to speed up CI build
+        # "1" means line tables only, which is useful for panic tracebacks.
+        RUSTFLAGS: "-C debuginfo=1"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Cargo test
+          command: cargo test -p object_store
+          environment:
+              TEST_INTEGRATION: "1"
+              INFLUXDB_IOX_BUCKET: "iox"
+
+              AWS_ENDPOINT: "http://localhost:4566"
+              AWS_DEFAULT_REGION: "us-east-1"
+              AWS_ACCESS_KEY_ID: "test"
+              AWS_SECRET_ACCESS_KEY: "test"
+      - cache_save
+
   # Integration tests for the influxdb2_client crate against InfluxDB 2.0 OSS.
   test_influxdb2_client:
     docker:
@@ -279,6 +309,7 @@ workflows:
       - protobuf-lint
       - test
       - test_influxdb2_client
+      - test_object_store
       - build
       - check-flatbuffers
       - doc
