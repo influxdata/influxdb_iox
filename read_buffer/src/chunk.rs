@@ -353,7 +353,9 @@ impl Chunk {
             .get(table_name)
             .context(TableNotFound { table_name })?;
 
-        Ok(table.read_filter(&select_columns, &predicate))
+        table
+            .read_filter(&select_columns, &predicate)
+            .context(TableError)
     }
 
     /// Returns an iterable collection of data in group columns and aggregate
@@ -549,7 +551,9 @@ impl Chunk {
         // TODO(edd): same potential contention as `table_names` but I'm ok
         // with this for now.
         match chunk_data.data.get(table_name) {
-            Some(table) => Ok(table.column_names(&predicate, only_columns, dst)),
+            Some(table) => table
+                .column_names(&predicate, only_columns, dst)
+                .context(TableError),
             None => TableNotFound {
                 table_name: table_name.to_owned(),
             }
@@ -1314,6 +1318,14 @@ mod test {
 
         // No more data
         assert!(itr.next().is_none());
+
+        // invalid predicate
+        let predicate =
+            Predicate::with_time_range(&[BinaryExpr::from(("env", "=", 22.3))], 100, 205); // filter on time
+
+        assert!(chunk
+            .read_filter("Coolverine", predicate, Selection::All)
+            .is_err());
     }
 
     #[test]
