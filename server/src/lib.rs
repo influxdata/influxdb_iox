@@ -86,8 +86,9 @@ use data_types::{
     server_id::ServerId,
     {DatabaseName, DatabaseNameError},
 };
-use entry::{lines_to_sharded_entries, Entry, ShardedEntry};
+use entry::{lines_to_sharded_entries, pb_to_entry, Entry, ShardedEntry};
 use influxdb_line_protocol::ParsedLine;
+use generated_types::influxdata::transfer::column::v1 as pb;
 use metrics::{KeyValue, MetricObserverBuilder, MetricRegistry};
 use object_store::{ObjectStore, ObjectStoreApi};
 use query::{exec::Executor, DatabaseStore};
@@ -180,6 +181,9 @@ pub enum Error {
 
     #[snafu(display("error converting line protocol to flatbuffers: {}", source))]
     LineConversion { source: entry::Error },
+
+    #[snafu(display("error converting protobuf to flatbuffers: {}", source))]
+    PBConversion { source: entry::Error },
 
     #[snafu(display("error decoding entry flatbuffers: {}", source))]
     DecodingEntry {
@@ -574,6 +578,16 @@ where
                 Arc::clone(&self.exec),
             )
             .await;
+    }
+
+    pub async fn write_pb(&self, database_batch: pb::DatabaseBatch) -> Result<()> {
+        // Return an error if this server is not yet ready
+        self.require_initialized()?;
+
+        let entry = pb_to_entry(&database_batch).context(PBConversion)?;
+        self.write_entry(&database_batch.database_name, entry.data().into()).await?;
+
+        Ok(())
     }
 
     /// `write_lines` takes in raw line protocol and converts it to a collection
