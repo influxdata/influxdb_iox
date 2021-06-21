@@ -39,19 +39,46 @@
 //!
 //! ```
 //! use lifecycle::LifecycleReadGuard;
-//! trait MyTrait {
+//! use tracker::RwLock;
+//! use std::sync::Arc;
+//!
+//! trait Lockable {
 //!     type AdditionalData;
 //!     type LockedType;
 //!
 //!     fn read(&self) -> LifecycleReadGuard<'_, Self::LockedType, Self::AdditionalData>;
 //!
-//!     fn guard_func(s: LifecycleReadGuard<'_, Self::LockedType, Self::AdditionalData>);
+//!     fn guard_func(s: LifecycleReadGuard<'_, Self::LockedType, Self::AdditionalData>) -> u32;
 //! }
 //!
-//! fn test<T: MyTrait>(t: T) {
-//!     let read = t.read();
-//!     T::guard_func(read);
+//! struct Locked {
+//!     num: u32,
 //! }
+//!
+//! #[derive(Clone)]
+//! struct MyLockable {
+//!     offset: u32,
+//!     data: Arc<RwLock<Locked>>
+//! }
+//!
+//! impl Lockable for MyLockable {
+//!     type AdditionalData = Self;
+//!     type LockedType = Locked;
+//!
+//!     fn read(&self) -> LifecycleReadGuard<'_, Self::LockedType, Self::AdditionalData> {
+//!         LifecycleReadGuard::new(self.clone(), &self.data)
+//!     }
+//!
+//!     fn guard_func(s: LifecycleReadGuard<'_, Self::LockedType, Self::AdditionalData>) -> u32 {
+//!         s.num + s.data().offset
+//!     }
+//! }
+//!
+//! let lockable = MyLockable{ offset: 32, data: Arc::new(RwLock::new(Locked{ num: 1 }))};
+//! assert_eq!(MyLockable::guard_func(lockable.read()), 33);
+//! lockable.data.write().num = 21;
+//! assert_eq!(MyLockable::guard_func(lockable.read()), 53);
+//!
 //! ```
 //!
 
