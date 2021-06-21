@@ -782,10 +782,11 @@ impl<C: QueryChunk> ChunkPruner<C> for NoOpPruner {
 
 #[cfg(test)]
 mod test {
-    use arrow::datatypes::DataType;
+    use arrow::{datatypes::DataType, record_batch::RecordBatch};
     use arrow_util::assert_batches_eq;
     use datafusion::physical_plan::collect;
-    use internal_types::schema::builder::SchemaBuilder;
+    use futures::StreamExt;
+    use internal_types::{schema::builder::SchemaBuilder, selection::Selection};
 
     use crate::{test::TestChunk, QueryChunkMeta};
 
@@ -993,15 +994,34 @@ mod test {
                 .with_int_field_column("t", "field_int")
                 .with_five_rows_of_data("t"),
         );
-
         // Datafusion schema of the chunk
         // the same for 2 chunks
         let schema = chunk1.schema();
+        let chunks = vec![chunk1, chunk2];
+
+        // data in its original form
+        let expected = vec![
+            "+-----------+------+------+-------------------------------+",
+            "| field_int | tag1 | tag2 | time                          |",
+            "+-----------+------+------+-------------------------------+",
+            "| 1000      | MT   | CT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | AL   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | MA   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | AL   | 1970-01-01 00:00:00.000005    |",
+            "| 1000      | MT   | CT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | AL   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | MA   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | AL   | 1970-01-01 00:00:00.000005    |",
+            "+-----------+------+------+-------------------------------+",
+        ];
+        assert_batches_eq!(&expected, &raw_data(&chunks).await);
 
         let sort_plan = Deduplicater::build_deduplicate_plan_for_overlapped_chunks(
             Arc::from("t"),
             schema,
-            vec![chunk1, chunk2],
+            chunks,
             Predicate::default(),
         );
         let batch = collect(sort_plan.unwrap()).await.unwrap();
@@ -1042,6 +1062,26 @@ mod test {
                 .with_int_field_column("t", "field_int")
                 .with_five_rows_of_data("t"),
         );
+        let chunks = vec![chunk1, chunk2];
+
+        // data in its original form
+        let expected = vec![
+            "+-----------+------+------+-------------------------------+",
+            "| field_int | tag1 | tag2 | time                          |",
+            "+-----------+------+------+-------------------------------+",
+            "| 1000      | MT   | CT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | AL   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | MA   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | AL   | 1970-01-01 00:00:00.000005    |",
+            "| 1000      | MT   | CT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | AL   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | MA   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | AL   | 1970-01-01 00:00:00.000005    |",
+            "+-----------+------+------+-------------------------------+",
+        ];
+        assert_batches_eq!(&expected, &raw_data(&chunks).await);
 
         // request just the field and timestamp
         let schema = SchemaBuilder::new()
@@ -1053,7 +1093,7 @@ mod test {
         let sort_plan = Deduplicater::build_deduplicate_plan_for_overlapped_chunks(
             Arc::from("t"),
             Arc::new(schema),
-            vec![chunk1, chunk2],
+            chunks,
             Predicate::default(),
         );
         let batch = collect(sort_plan.unwrap()).await.unwrap();
@@ -1103,6 +1143,31 @@ mod test {
                 .with_five_rows_of_data("t"),
         );
 
+        let chunks = vec![chunk1, chunk2, chunk3];
+        // data in its original form
+        let expected = vec![
+            "+-----------+------+-------------------------------+-------------------------------+",
+            "| field_int | tag1 | tag2                          | time                          |",
+            "+-----------+------+-------------------------------+-------------------------------+",
+            "| 1000      | MT   | CT                            | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | AL                            | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | CT                            | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | MA                            | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | AL                            | 1970-01-01 00:00:00.000005    |",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000001    |                               |",
+            "| 10        | MT   | 1970-01-01 00:00:00.000007    |                               |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000100 |                               |",
+            "| 100       | AL   | 1970-01-01 00:00:00.000000050 |                               |",
+            "| 5         | MT   | 1970-01-01 00:00:00.000005    |                               |",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000001    |                               |",
+            "| 10        | MT   | 1970-01-01 00:00:00.000007    |                               |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000100 |                               |",
+            "| 100       | AL   | 1970-01-01 00:00:00.000000050 |                               |",
+            "| 5         | MT   | 1970-01-01 00:00:00.000005    |                               |",
+            "+-----------+------+-------------------------------+-------------------------------+",
+        ];
+        assert_batches_eq!(&expected, &raw_data(&chunks).await);
+
         // request just the fields
         let schema = SchemaBuilder::new()
             .field("field_int", DataType::Int64)
@@ -1113,7 +1178,7 @@ mod test {
         let sort_plan = Deduplicater::build_deduplicate_plan_for_overlapped_chunks(
             Arc::from("t"),
             Arc::new(schema),
-            vec![chunk1, chunk2, chunk3],
+            chunks,
             Predicate::default(),
         );
         let batch = collect(sort_plan.unwrap()).await.unwrap();
@@ -1179,10 +1244,35 @@ mod test {
             .unwrap()
             .build();
 
+        let chunks = vec![chunk1, chunk2, chunk3];
+        // data in its original form
+        let expected = vec![
+            "+-----------+------+------+-------------------------------+",
+            "| field_int | tag1 | tag2 | time                          |",
+            "+-----------+------+------+-------------------------------+",
+            "| 1000      | MT   | CT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | AL   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | MA   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | AL   | 1970-01-01 00:00:00.000005    |",
+            "| 1000      | MT   | CT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | AL   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | MT   | 1970-01-01 00:00:00.000005    |",
+            "| 1000      | 1000 | CT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | 10   | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | 70   | AL   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | 100  | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | 5    | MT   | 1970-01-01 00:00:00.000005    |",
+            "+-----------+------+------+-------------------------------+",
+        ];
+        assert_batches_eq!(&expected, &raw_data(&chunks).await);
+
         let sort_plan = Deduplicater::build_deduplicate_plan_for_overlapped_chunks(
             Arc::from("t"),
             Arc::new(schema),
-            vec![chunk1, chunk2, chunk3],
+            chunks,
             Predicate::default(),
         );
         let batch = collect(sort_plan.unwrap()).await.unwrap();
@@ -1224,12 +1314,27 @@ mod test {
 
         // Datafusion schema of the chunk
         let schema = chunk.schema();
+        let chunks = vec![chunk];
+
+        // data in its original form
+        let expected = vec![
+            "+-----------+------+-------------------------------+",
+            "| field_int | tag1 | time                          |",
+            "+-----------+------+-------------------------------+",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | 1970-01-01 00:00:00.000005    |",
+            "+-----------+------+-------------------------------+",
+        ];
+        assert_batches_eq!(&expected, &raw_data(&chunks).await);
 
         let mut deduplicator = Deduplicater::new();
         let plan = deduplicator.build_scan_plan(
             Arc::from("t"),
             schema,
-            vec![Arc::clone(&chunk)],
+            chunks,
             Predicate::default(),
             true,
         );
@@ -1263,12 +1368,32 @@ mod test {
 
         // Datafusion schema of the chunk
         let schema = chunk.schema();
+        let chunks = vec![chunk];
+
+        // data in its original form
+        let expected = vec![
+            "+-----------+------+-------------------------------+",
+            "| field_int | tag1 | time                          |",
+            "+-----------+------+-------------------------------+",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | 1970-01-01 00:00:00.000000005 |",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000002    |",
+            "| 20        | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000500 |",
+            "| 10        | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 30        | MT   | 1970-01-01 00:00:00.000000005 |",
+            "+-----------+------+-------------------------------+",
+        ];
+        assert_batches_eq!(&expected, &raw_data(&chunks).await);
 
         let mut deduplicator = Deduplicater::new();
         let plan = deduplicator.build_scan_plan(
             Arc::from("t"),
             schema,
-            vec![Arc::clone(&chunk)],
+            chunks,
             Predicate::default(),
             true,
         );
@@ -1302,6 +1427,26 @@ mod test {
                 .with_ten_rows_of_data_some_duplicates("t"),
         );
 
+        let chunks = vec![chunk];
+        // data in its original form
+        let expected = vec![
+            "+-----------+------+-------------------------------+",
+            "| field_int | tag1 | time                          |",
+            "+-----------+------+-------------------------------+",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | 1970-01-01 00:00:00.000000005 |",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000002    |",
+            "| 20        | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000500 |",
+            "| 10        | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 30        | MT   | 1970-01-01 00:00:00.000000005 |",
+            "+-----------+------+-------------------------------+",
+        ];
+        assert_batches_eq!(&expected, &raw_data(&chunks).await);
+
         // request just the field and timestamp
         let schema = SchemaBuilder::new()
             .field("field_int", DataType::Int64)
@@ -1313,7 +1458,7 @@ mod test {
         let plan = deduplicator.build_scan_plan(
             Arc::from("t"),
             Arc::new(schema),
-            vec![Arc::clone(&chunk)],
+            chunks,
             Predicate::default(),
             true,
         );
@@ -1357,12 +1502,37 @@ mod test {
 
         // Datafusion schema of the chunk
         let schema = chunk1.schema();
+        let chunks = vec![chunk1, chunk2];
+
+        // data in its original form
+        let expected = vec![
+            "+-----------+------+-------------------------------+",
+            "| field_int | tag1 | time                          |",
+            "+-----------+------+-------------------------------+",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | 1970-01-01 00:00:00.000000005 |",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000002    |",
+            "| 20        | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000500 |",
+            "| 10        | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 30        | MT   | 1970-01-01 00:00:00.000000005 |",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | 1970-01-01 00:00:00.000005    |",
+            "+-----------+------+-------------------------------+",
+        ];
+        assert_batches_eq!(&expected, &raw_data(&chunks).await);
 
         let mut deduplicator = Deduplicater::new();
         let plan = deduplicator.build_scan_plan(
             Arc::from("t"),
             schema,
-            vec![Arc::clone(&chunk1), Arc::clone(&chunk2)],
+            chunks,
             Predicate::default(),
             true,
         );
@@ -1426,17 +1596,44 @@ mod test {
 
         // Datafusion schema of the chunk
         let schema = chunk1.schema();
+        let chunks = vec![chunk1, chunk2, chunk3, chunk4];
+
+        // data in its original form
+        let expected = vec![
+            "+-----------+------+-------------------------------+",
+            "| field_int | tag1 | time                          |",
+            "+-----------+------+-------------------------------+",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | 1970-01-01 00:00:00.000000005 |",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000002    |",
+            "| 20        | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000500 |",
+            "| 10        | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 30        | MT   | 1970-01-01 00:00:00.000000005 |",
+            "| 1000      | MT   | 1970-01-01 00:00:00.000001    |",
+            "| 10        | MT   | 1970-01-01 00:00:00.000007    |",
+            "| 70        | CT   | 1970-01-01 00:00:00.000000100 |",
+            "| 100       | AL   | 1970-01-01 00:00:00.000000050 |",
+            "| 5         | MT   | 1970-01-01 00:00:00.000005    |",
+            "| 1000      | WA   | 1970-01-01 00:00:00.000008    |",
+            "| 10        | VT   | 1970-01-01 00:00:00.000010    |",
+            "| 70        | UT   | 1970-01-01 00:00:00.000020    |",
+            "| 1000      | WA   | 1970-01-01 00:00:00.000008    |",
+            "| 10        | VT   | 1970-01-01 00:00:00.000010    |",
+            "| 70        | UT   | 1970-01-01 00:00:00.000020    |",
+            "| 50        | VT   | 1970-01-01 00:00:00.000010    |",
+            "+-----------+------+-------------------------------+",
+        ];
+        assert_batches_eq!(&expected, &raw_data(&chunks).await);
 
         let mut deduplicator = Deduplicater::new();
         let plan = deduplicator.build_scan_plan(
             Arc::from("t"),
             schema,
-            vec![
-                Arc::clone(&chunk1),
-                Arc::clone(&chunk2),
-                Arc::clone(&chunk3),
-                Arc::clone(&chunk4),
-            ],
+            chunks,
             Predicate::default(),
             true,
         );
@@ -1479,5 +1676,22 @@ mod test {
             .enumerate()
             .map(|(idx, group)| format!("Group {}: {}", idx, chunk_ids(group)))
             .collect()
+    }
+
+    /// Return the raw data from the list of chunks
+    async fn raw_data(chunks: &[Arc<TestChunk>]) -> Vec<RecordBatch> {
+        let mut batches = vec![];
+        for c in chunks {
+            let pred = Predicate::default();
+            let selection = Selection::All;
+            let mut stream = c
+                .read_filter(&pred, selection)
+                .expect("Error in read_filter");
+            while let Some(b) = stream.next().await {
+                let b = b.expect("Error in stream");
+                batches.push(b)
+            }
+        }
+        batches
     }
 }
