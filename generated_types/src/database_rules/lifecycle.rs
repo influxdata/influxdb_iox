@@ -38,6 +38,18 @@ impl From<LifecycleRules> for management::LifecycleRules {
             catalog_transactions_until_checkpoint: config
                 .catalog_transactions_until_checkpoint
                 .map_or(100, NonZeroU64::get),
+            persist_min_time_seconds: config
+                .persist_min_time_seconds
+                .map(Into::into)
+                .unwrap_or_default(),
+            persist_max_time_seconds: config
+                .persist_max_time_seconds
+                .map(Into::into)
+                .unwrap_or_default(),
+            persist_row_threshold: config
+                .persist_row_threshold
+                .map(|x| x.get() as u64)
+                .unwrap_or_default(),
         }
     }
 }
@@ -60,6 +72,9 @@ impl TryFrom<management::LifecycleRules> for LifecycleRules {
             catalog_transactions_until_checkpoint: NonZeroU64::new(
                 proto.catalog_transactions_until_checkpoint,
             ),
+            persist_min_time_seconds: proto.persist_min_time_seconds.try_into().ok(),
+            persist_max_time_seconds: proto.persist_max_time_seconds.try_into().ok(),
+            persist_row_threshold: (proto.persist_row_threshold as usize).try_into().ok(),
         })
     }
 }
@@ -148,6 +163,9 @@ mod tests {
             immutable: true,
             worker_backoff_millis: 1000,
             catalog_transactions_until_checkpoint: 10,
+            persist_min_time_seconds: 23,
+            persist_max_time_seconds: 15,
+            persist_row_threshold: 57,
         };
 
         let config: LifecycleRules = protobuf.clone().try_into().unwrap();
@@ -188,6 +206,15 @@ mod tests {
         assert_eq!(back.drop_non_persisted, protobuf.drop_non_persisted);
         assert_eq!(back.immutable, protobuf.immutable);
         assert_eq!(back.worker_backoff_millis, protobuf.worker_backoff_millis);
+        assert_eq!(
+            back.persist_min_time_seconds,
+            protobuf.persist_min_time_seconds
+        );
+        assert_eq!(
+            back.persist_max_time_seconds,
+            protobuf.persist_max_time_seconds
+        );
+        assert_eq!(back.persist_row_threshold, protobuf.persist_row_threshold);
     }
 
     #[test]

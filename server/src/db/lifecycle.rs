@@ -18,6 +18,8 @@ use crate::db::catalog::chunk::CatalogChunk;
 use crate::db::catalog::partition::Partition;
 use crate::Db;
 
+mod compact;
+
 ///
 /// A `LockableCatalogChunk` combines a `CatalogChunk` with its owning `Db`
 ///
@@ -93,8 +95,9 @@ impl<'a> LockablePartition for LockableCatalogPartition<'a> {
 
     type Chunk = LockableCatalogChunk<'a>;
 
-    // TODO: Separate error enumeration for lifecycle actions
-    type Error = super::catalog::partition::Error;
+    type DropError = super::catalog::partition::Error;
+
+    type CompactError = super::lifecycle::compact::Error;
 
     fn read(&self) -> LifecycleReadGuard<'_, Self::Partition, Self> {
         LifecycleReadGuard::new(self.clone(), self.partition.as_ref())
@@ -114,20 +117,35 @@ impl<'a> LockablePartition for LockableCatalogPartition<'a> {
         })
     }
 
-    fn chunks(s: &LifecycleReadGuard<'_, Self::Partition, Self>) -> Vec<Self::Chunk> {
+    fn chunks(s: &LifecycleReadGuard<'_, Self::Partition, Self>) -> Vec<(u32, Self::Chunk)> {
         let db = s.data().db;
-        s.chunks()
-            .map(|chunk| LockableCatalogChunk {
-                db,
-                chunk: Arc::clone(chunk),
+        s.keyed_chunks()
+            .map(|(id, chunk)| {
+                (
+                    id,
+                    LockableCatalogChunk {
+                        db,
+                        chunk: Arc::clone(chunk),
+                    },
+                )
             })
             .collect()
+    }
+
+    fn compact_chunks(
+        partition: LifecycleWriteGuard<'_, Self::Partition, Self>,
+        chunks: Vec<LifecycleWriteGuard<'_, CatalogChunk, Self::Chunk>>,
+    ) -> Result<TaskTracker<Job>, Self::CompactError> {
+        info!(partition=%partition.partition_key(), "compacting chunks");
+        let (tracker, fut) = compact::compact_chunks(partition, chunks)?;
+        let _ = tokio::spawn(async move { fut.await.log_if_error("compacting chunks") });
+        Ok(tracker)
     }
 
     fn drop_chunk(
         mut s: LifecycleWriteGuard<'_, Self::Partition, Self>,
         chunk_id: u32,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), Self::DropError> {
         s.drop_chunk(chunk_id)?;
         Ok(())
     }
@@ -203,5 +221,9 @@ impl LifecycleChunk for CatalogChunk {
 
     fn storage(&self) -> ChunkStorage {
         self.storage().1
+    }
+
+    fn row_count(&self) -> usize {
+        self.storage().0
     }
 }

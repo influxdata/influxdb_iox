@@ -154,6 +154,17 @@ pub struct LifecycleRules {
 
     /// After how many transactions should IOx write a new checkpoint?
     pub catalog_transactions_until_checkpoint: Option<NonZeroU64>,
+
+    // A write will not be persisted until at least this much time has passed
+    pub persist_min_time_seconds: Option<NonZeroU32>,
+
+    // A write older than this will be persisted
+    //
+    // NOTE: Currently not used
+    pub persist_max_time_seconds: Option<NonZeroU32>,
+
+    // Maximum number of rows before triggering persistence
+    pub persist_row_threshold: Option<NonZeroUsize>,
 }
 
 /// This struct specifies the rules for the order to sort partitions
