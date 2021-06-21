@@ -818,7 +818,9 @@ where
 
         let guard = chunk.write();
 
-        Ok(LockableChunk::move_to_read_buffer(guard))
+        LockableChunk::move_to_read_buffer(guard).map_err(|e| Error::UnknownDatabaseError {
+            source: Box::new(e),
+        })
     }
 
     /// Returns a list of all jobs tracked by this server

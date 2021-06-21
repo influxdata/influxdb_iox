@@ -69,6 +69,7 @@ pub trait LifecycleDb {
 pub trait LockableChunk: Sized {
     type Chunk: LifecycleChunk;
     type Job: Sized + Send + Sync + 'static;
+    type Error: std::error::Error + Send + Sync;
 
     /// Acquire a shared read lock on the chunk
     fn read(&self) -> LifecycleReadGuard<'_, Self::Chunk, Self>;
@@ -77,13 +78,14 @@ pub trait LockableChunk: Sized {
     fn write(&self) -> LifecycleWriteGuard<'_, Self::Chunk, Self>;
 
     /// Starts an operation to move a chunk to the read buffer
-    fn move_to_read_buffer(s: LifecycleWriteGuard<'_, Self::Chunk, Self>)
-        -> TaskTracker<Self::Job>;
+    fn move_to_read_buffer(
+        s: LifecycleWriteGuard<'_, Self::Chunk, Self>,
+    ) -> Result<TaskTracker<Self::Job>, Self::Error>;
 
     /// Starts an operation to write a chunk to the object store
     fn write_to_object_store(
         s: LifecycleWriteGuard<'_, Self::Chunk, Self>,
-    ) -> TaskTracker<Self::Job>;
+    ) -> Result<TaskTracker<Self::Job>, Self::Error>;
 
     /// Remove the copy of the Chunk's data from the read buffer.
     ///
@@ -91,7 +93,8 @@ pub trait LockableChunk: Sized {
     /// (otherwise the read buffer may contain the *only* copy of this
     /// chunk's data). In order to drop un-persisted chunks,
     /// [`drop_chunk`](Self::drop_chunk) must be used.
-    fn unload_read_buffer(s: LifecycleWriteGuard<'_, Self::Chunk, Self>);
+    fn unload_read_buffer(s: LifecycleWriteGuard<'_, Self::Chunk, Self>)
+        -> Result<(), Self::Error>;
 }
 
 /// The lifecycle operates on chunks implementing this trait

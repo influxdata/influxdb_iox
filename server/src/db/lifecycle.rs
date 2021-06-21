@@ -31,7 +31,11 @@ pub struct LockableCatalogChunk<'a> {
 
 impl<'a> LockableChunk for LockableCatalogChunk<'a> {
     type Chunk = CatalogChunk;
+
     type Job = Job;
+
+    // TODO: Separate error enumeration for lifecycle actions - db::Error is large
+    type Error = super::Error;
 
     fn read(&self) -> LifecycleReadGuard<'_, Self::Chunk, Self> {
         LifecycleReadGuard::new(self.clone(), self.chunk.as_ref())
@@ -43,27 +47,29 @@ impl<'a> LockableChunk for LockableCatalogChunk<'a> {
 
     fn move_to_read_buffer(
         s: LifecycleWriteGuard<'_, Self::Chunk, Self>,
-    ) -> TaskTracker<Self::Job> {
+    ) -> Result<TaskTracker<Self::Job>, Self::Error> {
         info!(chunk=%s.addr(), "move to read buffer");
-        let (tracker, fut) = Db::load_chunk_to_read_buffer_impl(s).expect("preparation failed");
+        let (tracker, fut) = Db::load_chunk_to_read_buffer_impl(s)?;
         let _ = tokio::spawn(async move { fut.await.log_if_error("move to read buffer") });
-        tracker
+        Ok(tracker)
     }
 
     fn write_to_object_store(
         s: LifecycleWriteGuard<'_, Self::Chunk, Self>,
-    ) -> TaskTracker<Self::Job> {
+    ) -> Result<TaskTracker<Self::Job>, Self::Error> {
         info!(chunk=%s.addr(), "writing to object store");
-        let (tracker, fut) = Db::write_chunk_to_object_store_impl(s).expect("preparation failed");
+        let (tracker, fut) = Db::write_chunk_to_object_store_impl(s)?;
         let _ = tokio::spawn(async move { fut.await.log_if_error("writing to object store") });
-        tracker
+        Ok(tracker)
     }
 
-    fn unload_read_buffer(s: LifecycleWriteGuard<'_, Self::Chunk, Self>) {
+    fn unload_read_buffer(
+        s: LifecycleWriteGuard<'_, Self::Chunk, Self>,
+    ) -> Result<(), Self::Error> {
         info!(chunk=%s.addr(), "unloading from readbuffer");
 
-        let _ = Db::unload_read_buffer_impl(s)
-            .log_if_error("unloading from read buffer to free up memory");
+        let _ = Db::unload_read_buffer_impl(s)?;
+        Ok(())
     }
 }
 

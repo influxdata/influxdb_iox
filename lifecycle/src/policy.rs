@@ -93,17 +93,23 @@ where
                 ChunkStorage::OpenMutableBuffer => {
                     open_partitions.insert(chunk_guard.partition_key().to_string());
                     if self.move_tracker.is_none() && would_move {
-                        self.move_tracker =
-                            Some(LockableChunk::move_to_read_buffer(chunk_guard.upgrade()));
+                        self.move_tracker = Some(
+                            LockableChunk::move_to_read_buffer(chunk_guard.upgrade())
+                                .expect("task preparation failed"),
+                        );
                     }
                 }
                 ChunkStorage::ClosedMutableBuffer if self.move_tracker.is_none() => {
-                    self.move_tracker =
-                        Some(LockableChunk::move_to_read_buffer(chunk_guard.upgrade()));
+                    self.move_tracker = Some(
+                        LockableChunk::move_to_read_buffer(chunk_guard.upgrade())
+                            .expect("task preparation failed"),
+                    );
                 }
                 ChunkStorage::ReadBuffer if would_write => {
-                    self.write_tracker =
-                        Some(LockableChunk::write_to_object_store(chunk_guard.upgrade()));
+                    self.write_tracker = Some(
+                        LockableChunk::write_to_object_store(chunk_guard.upgrade())
+                            .expect("task preparation failed"),
+                    );
                 }
                 _ => {
                     // Chunk is already persisted, no additional work needed to persist it
@@ -169,6 +175,7 @@ where
                             }
                             Action::Unload => {
                                 LockableChunk::unload_read_buffer(chunk_guard.upgrade())
+                                    .expect("failed to unload read buffer")
                             }
                         }
                     }
@@ -271,6 +278,7 @@ mod tests {
 
     use super::*;
     use crate::{ChunkLifecycleAction, LifecycleReadGuard, LifecycleWriteGuard, LockableChunk};
+    use std::convert::Infallible;
     use std::sync::Arc;
 
     #[derive(Debug, Eq, PartialEq)]
@@ -325,6 +333,7 @@ mod tests {
     impl<'a> LockableChunk for TestLockableChunk<'a> {
         type Chunk = TestChunk;
         type Job = ();
+        type Error = Infallible;
 
         fn read(&self) -> LifecycleReadGuard<'_, Self::Chunk, Self> {
             LifecycleReadGuard::new(self.clone(), &self.chunk)
@@ -336,35 +345,38 @@ mod tests {
 
         fn move_to_read_buffer(
             mut s: LifecycleWriteGuard<'_, Self::Chunk, Self>,
-        ) -> TaskTracker<()> {
+        ) -> Result<TaskTracker<()>, Self::Error> {
             s.storage = ChunkStorage::ReadBuffer;
             s.data()
                 .db
                 .events
                 .write()
                 .push(MoverEvents::Move(s.chunk_id()));
-            TaskTracker::complete(())
+            Ok(TaskTracker::complete(()))
         }
 
         fn write_to_object_store(
             mut s: LifecycleWriteGuard<'_, Self::Chunk, Self>,
-        ) -> TaskTracker<()> {
+        ) -> Result<TaskTracker<()>, Self::Error> {
             s.storage = ChunkStorage::ReadBufferAndObjectStore;
             s.data()
                 .db
                 .events
                 .write()
                 .push(MoverEvents::Write(s.chunk_id()));
-            TaskTracker::complete(())
+            Ok(TaskTracker::complete(()))
         }
 
-        fn unload_read_buffer(mut s: LifecycleWriteGuard<'_, Self::Chunk, Self>) {
+        fn unload_read_buffer(
+            mut s: LifecycleWriteGuard<'_, Self::Chunk, Self>,
+        ) -> Result<(), Self::Error> {
             s.storage = ChunkStorage::ObjectStoreOnly;
             s.data()
                 .db
                 .events
                 .write()
-                .push(MoverEvents::Unload(s.chunk_id()))
+                .push(MoverEvents::Unload(s.chunk_id()));
+            Ok(())
         }
     }
 
