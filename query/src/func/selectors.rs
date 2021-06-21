@@ -679,9 +679,7 @@ mod test {
         // Ensure the answer is the same regardless of the order of inputs
         let input = vec![batch1, batch2, batch3];
         let input_string = pretty_format_batches(&input).unwrap();
-        println!("Checking results for initial input\n{}", input_string);
         let results = run_with_inputs(Arc::clone(&schema), aggs.clone(), input.clone()).await;
-        println!("Results were\n{:#?}", results);
 
         use itertools::Itertools;
         // Get all permutations of the input
@@ -689,7 +687,6 @@ mod test {
             let p_batches = p.into_iter().cloned().collect::<Vec<_>>();
             let p_input_string = pretty_format_batches(&p_batches).unwrap();
             let p_results = run_with_inputs(Arc::clone(&schema), aggs.clone(), p_batches).await;
-            println!("Checking results for input\n{}", p_input_string);
             assert_eq!(
                 results, p_results,
                 "Mismatch with permutation.\n\
