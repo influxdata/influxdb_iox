@@ -137,7 +137,7 @@ pub trait LockableChunk: Sized {
     /// Note that this can only be called for persisted chunks
     /// (otherwise the read buffer may contain the *only* copy of this
     /// chunk's data). In order to drop un-persisted chunks,
-    /// [`drop_chunk`](LifecycleDb::drop_chunk) must be used.
+    /// [`drop_chunk`](LockablePartition::drop_chunk) must be used.
     fn unload_read_buffer(s: LifecycleWriteGuard<'_, Self::Chunk, Self>)
         -> Result<(), Self::Error>;
 }
