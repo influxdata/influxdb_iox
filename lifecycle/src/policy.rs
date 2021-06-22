@@ -123,11 +123,22 @@ where
                             }
 
                             match candidate.action {
-                                FreeAction::Drop => LockablePartition::drop_chunk(
-                                    partition.upgrade(),
-                                    candidate.chunk_id,
-                                )
-                                .expect("failed to drop"),
+                                FreeAction::Drop => match chunk.storage() {
+                                    ChunkStorage::ReadBuffer
+                                    | ChunkStorage::ClosedMutableBuffer => {
+                                        LockablePartition::drop_chunk(
+                                            partition.upgrade(),
+                                            candidate.chunk_id,
+                                        )
+                                        .expect("failed to drop")
+                                    }
+                                    _ => debug!(
+                                        chunk_id = candidate.chunk_id,
+                                        partition = partition.partition_key(),
+                                        ?storage,
+                                        "unexpected storage for drop"
+                                    ),
+                                },
                                 FreeAction::Unload => match chunk.storage() {
                                     ChunkStorage::ReadBufferAndObjectStore => {
                                         LockableChunk::unload_read_buffer(chunk.upgrade())
@@ -137,7 +148,7 @@ where
                                         chunk_id = candidate.chunk_id,
                                         partition = partition.partition_key(),
                                         ?storage,
-                                        "unexpected storage"
+                                        "unexpected storage for unload"
                                     ),
                                 },
                             }
