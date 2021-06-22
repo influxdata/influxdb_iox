@@ -20,6 +20,7 @@ use arrow::{
     datatypes::DataType,
 };
 use datafusion::{error::Result as DataFusionResult, scalar::ScalarValue};
+use observability_deps::tracing::debug;
 
 use super::{Selector, SelectorOutput};
 
@@ -383,7 +384,11 @@ macro_rules! make_min_selector {
                         // stream of Option<i64>
                         .map(|(idx, value)| {
                             // Note: time should never be null but handle it anyways
-                            if value == cur_min_value && !time_arr.is_null(idx) {
+                            let null_time = time_arr.is_null(idx);
+                            if null_time {
+                                debug!(idx, "MIN selector saw null time value");
+                            }
+                            if value == cur_min_value && !null_time {
                                 Some(time_arr.value(idx))
                             } else {
                                 None
@@ -492,8 +497,11 @@ macro_rules! make_max_selector {
                         .iter()
                         .enumerate()
                         .map(|(idx, value)| {
-                            // Note: time should never be null but handle it anyways
-                            if value == cur_max_value && !time_arr.is_null(idx) {
+                            let null_time = time_arr.is_null(idx);
+                            if null_time {
+                                debug!(idx, "MAX selector saw null time value");
+                            }
+                            if value == cur_max_value && !null_time {
                                 Some(time_arr.value(idx))
                             } else {
                                 None
