@@ -43,7 +43,16 @@ where
     }
 
     /// Check if database exceeds memory limits and free memory if necessary
-    fn check_memory(&mut self, soft_limit: usize, drop_non_persisted: bool) {
+    ///
+    /// The policy will first try to unload persisted chunks in order of creation
+    /// time, starting with the oldest.
+    ///
+    /// If permitted by the lifecycle policy, it will then drop unpersisted chunks,
+    /// also in order of creation time, starting with the oldest.
+    ///
+    /// TODO: use LRU instead of creation time
+    ///
+    fn check_memory_and_drop_chunks(&mut self, soft_limit: usize, drop_non_persisted: bool) {
         let buffer_size = self.db.buffer_size();
         if buffer_size < soft_limit {
             debug!(buffer_size, %soft_limit, "memory use under soft limit");
@@ -86,8 +95,10 @@ where
 
         // Loop through trying to free memory
         //
-        // As locks are not held across the state of the system may have changed since
-        // the "plan" above - this is considered acceptable
+        // There is an intentional lock gap here, to avoid holding read locks on all
+        // the droppable chunks within the database. The downside is we have to
+        // re-check pre-conditions in case they no longer hold
+        //
         loop {
             let buffer_size = self.db.buffer_size();
             if buffer_size < soft_limit {
@@ -219,7 +230,7 @@ where
         }
 
         if let Some(soft_limit) = rules.buffer_size_soft {
-            self.check_memory(soft_limit.get(), rules.drop_non_persisted)
+            self.check_memory_and_drop_chunks(soft_limit.get(), rules.drop_non_persisted)
         }
 
         let move_tracker = self.move_tracker.clone();
