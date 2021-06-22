@@ -52,7 +52,7 @@ where
     ///
     /// TODO: use LRU instead of creation time
     ///
-    fn check_memory_and_drop_chunks(&mut self, soft_limit: usize, drop_non_persisted: bool) {
+    fn maybe_free_memory(&mut self, soft_limit: usize, drop_non_persisted: bool) {
         let buffer_size = self.db.buffer_size();
         if buffer_size < soft_limit {
             debug!(buffer_size, %soft_limit, "memory use under soft limit");
@@ -230,7 +230,7 @@ where
         }
 
         if let Some(soft_limit) = rules.buffer_size_soft {
-            self.check_memory_and_drop_chunks(soft_limit.get(), rules.drop_non_persisted)
+            self.maybe_free_memory(soft_limit.get(), rules.drop_non_persisted)
         }
 
         let move_tracker = self.move_tracker.clone();
