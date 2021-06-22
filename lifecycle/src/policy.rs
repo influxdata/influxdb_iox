@@ -133,7 +133,7 @@ where
                                         )
                                         .expect("failed to drop")
                                     }
-                                    _ => debug!(
+                                    storage => debug!(
                                         chunk_id = candidate.chunk_id,
                                         partition = partition.partition_key(),
                                         ?storage,
@@ -350,7 +350,7 @@ struct FreeCandidate<'a, P> {
     first_write: Option<DateTime<Utc>>,
 }
 
-fn sort_free_candidates<P>(candidates: &mut Vec<FreeCandidate<P>>) {
+fn sort_free_candidates<P>(candidates: &mut Vec<FreeCandidate<'_, P>>) {
     candidates.sort_unstable_by(|a, b| match a.action.cmp(&b.action) {
         // Order candidates with the same FreeAction by first write time, with nulls last
         std::cmp::Ordering::Equal => match (a.first_write.as_ref(), b.first_write.as_ref()) {
