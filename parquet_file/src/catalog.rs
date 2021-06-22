@@ -254,56 +254,10 @@ pub trait CatalogState {
 
     /// Remove parquet file from state.
     fn remove(tstate: &mut Self::TransactionState, path: DirsAndFileName) -> Result<()>;
-
-    /// List all Parquet files that are currently (i.e. by the current version) tracked by the catalog.
-    ///
-    /// If a file was once [added](Self::add) but later [removed](Self::remove) it MUST NOT appear in the result.
-    fn files(&self) -> HashMap<DirsAndFileName, Arc<IoxParquetMetaData>>;
-}
-
-/// Find last transaction-start-timestamp.
-///
-/// This method is designed to read and verify as little as possible and should also work on most broken catalogs.
-pub async fn find_last_transaction_timestamp(
-    object_store: &ObjectStore,
-    server_id: ServerId,
-    db_name: &str,
-) -> Result<Option<DateTime<Utc>>> {
-    let mut res = None;
-    for (path, _file_type, _revision_counter, _uuid) in
-        list_files(object_store, server_id, db_name).await?
-    {
-        match load_transaction_proto(object_store, &path).await {
-            Ok(proto) => match parse_timestamp(&proto.start_timestamp) {
-                Ok(ts) => {
-                    res = Some(res.map_or(ts, |res: DateTime<Utc>| res.max(ts)));
-                }
-                Err(e) => warn!(%e, ?path, "Cannot parse timestamp"),
-            },
-            Err(e @ Error::Read { .. }) => {
-                // bubble up IO error
-                return Err(e);
-            }
-            Err(e) => warn!(%e, ?path, "Cannot read transaction"),
-        }
-    }
-    Ok(res)
-}
-
-/// Inner mutable part of the preserved catalog.
-struct PreservedCatalogInner<S>
-where
-    S: CatalogState,
-{
-    previous_tkey: Option<TransactionKey>,
-    state: Arc<S>,
 }
 
 /// In-memory view of the preserved catalog.
-pub struct PreservedCatalog<S>
-where
-    S: CatalogState,
-{
+pub struct PreservedCatalog {
     // We need an RWLock AND a semaphore, so that readers are NOT blocked during an open transactions. Note that this
     // requires a new transaction to:
     //
@@ -322,7 +276,7 @@ where
     // 9. release semaphore
     //
     // Note that there can only be a single transaction that acquires the semaphore.
-    inner: RwLock<PreservedCatalogInner<S>>,
+    previous_tkey: RwLock<Option<TransactionKey>>,
     transaction_semaphore: Semaphore,
 
     object_store: Arc<ObjectStore>,
@@ -330,27 +284,7 @@ where
     db_name: String,
 }
 
-/// Deletes catalog.
-///
-/// **Always create a backup before wiping your data!**
-///
-/// This also works for broken catalogs. Also succeeds if no catalog is present.
-///
-/// Note that wiping the catalog will NOT wipe any referenced parquet files.
-pub async fn wipe(object_store: &ObjectStore, server_id: ServerId, db_name: &str) -> Result<()> {
-    for (path, _file_type, _revision_counter, _uuid) in
-        list_files(object_store, server_id, db_name).await?
-    {
-        object_store.delete(&path).await.context(Write)?;
-    }
-
-    Ok(())
-}
-
-impl<S> PreservedCatalog<S>
-where
-    S: CatalogState + Send + Sync,
-{
+impl PreservedCatalog {
     /// Checks if a preserved catalog exists.
     pub async fn exists(
         object_store: &ObjectStore,
@@ -362,29 +296,76 @@ where
             .is_empty())
     }
 
+    /// Find last transaction-start-timestamp.
+    ///
+    /// This method is designed to read and verify as little as possible and should also work on most broken catalogs.
+    pub async fn find_last_transaction_timestamp(
+        object_store: &ObjectStore,
+        server_id: ServerId,
+        db_name: &str,
+    ) -> Result<Option<DateTime<Utc>>> {
+        let mut res = None;
+        for (path, _file_type, _revision_counter, _uuid) in
+            list_files(object_store, server_id, db_name).await?
+        {
+            match load_transaction_proto(object_store, &path).await {
+                Ok(proto) => match parse_timestamp(&proto.start_timestamp) {
+                    Ok(ts) => {
+                        res = Some(res.map_or(ts, |res: DateTime<Utc>| res.max(ts)));
+                    }
+                    Err(e) => warn!(%e, ?path, "Cannot parse timestamp"),
+                },
+                Err(e @ Error::Read { .. }) => {
+                    // bubble up IO error
+                    return Err(e);
+                }
+                Err(e) => warn!(%e, ?path, "Cannot read transaction"),
+            }
+        }
+        Ok(res)
+    }
+
+    /// Deletes catalog.
+    ///
+    /// **Always create a backup before wiping your data!**
+    ///
+    /// This also works for broken catalogs. Also succeeds if no catalog is present.
+    ///
+    /// Note that wiping the catalog will NOT wipe any referenced parquet files.
+    pub async fn wipe(
+        object_store: &ObjectStore,
+        server_id: ServerId,
+        db_name: &str,
+    ) -> Result<()> {
+        for (path, _file_type, _revision_counter, _uuid) in
+            list_files(object_store, server_id, db_name).await?
+        {
+            object_store.delete(&path).await.context(Write)?;
+        }
+
+        Ok(())
+    }
+
     /// Create new catalog w/o any data.
     ///
     /// An empty transaction will be used to mark the catalog start so that concurrent open but still-empty catalogs can
     /// easily be detected.
-    pub async fn new_empty(
+    pub async fn new_empty<S>(
         object_store: Arc<ObjectStore>,
         server_id: ServerId,
-        db_name: impl Into<String> + Send,
+        db_name: String,
         state_data: S::EmptyInput,
-    ) -> Result<Self> {
-        let db_name = db_name.into();
-
+    ) -> Result<(Self, Arc<S>)>
+    where
+        S: CatalogState + Send + Sync,
+    {
         if Self::exists(&object_store, server_id, &db_name).await? {
             return Err(Error::AlreadyExists {});
         }
-
-        let inner = PreservedCatalogInner {
-            previous_tkey: None,
-            state: Arc::new(S::new_empty(&db_name, state_data)),
-        };
+        let state = Arc::new(S::new_empty(&db_name, state_data));
 
         let catalog = Self {
-            inner: RwLock::new(inner),
+            previous_tkey: RwLock::new(None),
             transaction_semaphore: Semaphore::new(1),
             object_store,
             server_id,
@@ -392,22 +373,25 @@ where
         };
 
         // add empty transaction
-        let transaction = catalog.open_transaction().await;
-        transaction.commit(false).await?;
+        let transaction = catalog.open_transaction(state).await;
+        let state = transaction.commit(None).await?;
 
-        Ok(catalog)
+        Ok((catalog, state))
     }
 
     /// Load existing catalog from store, if it exists.
     ///
     /// Loading starts at the latest checkpoint or -- if none exists -- at transaction `0`. Transactions before that
     /// point are neither verified nor are they required to exist.
-    pub async fn load(
+    pub async fn load<S>(
         object_store: Arc<ObjectStore>,
         server_id: ServerId,
         db_name: String,
         state_data: S::EmptyInput,
-    ) -> Result<Option<Self>> {
+    ) -> Result<Option<(Self, Arc<S>)>>
+    where
+        S: CatalogState + Send + Sync,
+    {
         // parse all paths into revisions
         let mut transactions: HashMap<u64, Uuid> = HashMap::new();
         let mut max_revision = None;
@@ -462,7 +446,7 @@ where
         }
 
         // setup empty state
-        let mut state = Arc::new(CatalogState::new_empty(&db_name, state_data));
+        let mut state = Arc::new(S::new_empty(&db_name, state_data));
         let mut last_tkey = None;
 
         // detect replay start
@@ -498,18 +482,16 @@ where
             last_tkey = Some(tkey);
         }
 
-        let inner = PreservedCatalogInner {
-            previous_tkey: last_tkey,
+        Ok(Some((
+            Self {
+                previous_tkey: RwLock::new(last_tkey),
+                transaction_semaphore: Semaphore::new(1),
+                object_store,
+                server_id,
+                db_name,
+            },
             state,
-        };
-
-        Ok(Some(Self {
-            inner: RwLock::new(inner),
-            transaction_semaphore: Semaphore::new(1),
-            object_store,
-            server_id,
-            db_name,
-        }))
+        )))
     }
 
     /// Open a new transaction.
@@ -518,26 +500,30 @@ where
     /// transaction handle is dropped. The newly created transaction will contain the state after `await` (esp.
     /// post-blocking). This system is fair, which means that transactions are given out in the order they were
     /// requested.
-    pub async fn open_transaction(&self) -> TransactionHandle<'_, S> {
-        self.open_transaction_with_uuid(Uuid::new_v4()).await
+    pub async fn open_transaction<S>(&self, state: Arc<S>) -> TransactionHandle<'_, S>
+    where
+        S: CatalogState + Send + Sync,
+    {
+        self.open_transaction_with_uuid(Uuid::new_v4(), state).await
     }
 
     /// Crate-private API to open an transaction with a specified UUID. Should only be used for catalog rebuilding or
     /// with a fresh V4-UUID!
-    pub(crate) async fn open_transaction_with_uuid(&self, uuid: Uuid) -> TransactionHandle<'_, S> {
-        TransactionHandle::new(self, uuid).await
-    }
-
-    /// Return current state.
-    pub fn state(&self) -> Arc<S> {
-        Arc::clone(&self.inner.read().state)
+    pub(crate) async fn open_transaction_with_uuid<S>(
+        &self,
+        uuid: Uuid,
+        state: Arc<S>,
+    ) -> TransactionHandle<'_, S>
+    where
+        S: CatalogState + Send + Sync,
+    {
+        TransactionHandle::new(self, uuid, state).await
     }
 
     /// Get latest revision counter.
     pub fn revision_counter(&self) -> u64 {
-        self.inner
+        self.previous_tkey
             .read()
-            .previous_tkey
             .clone()
             .map(|tkey| tkey.revision_counter)
             .expect("catalog should have at least an empty transaction")
@@ -559,10 +545,7 @@ where
     }
 }
 
-impl<S> Debug for PreservedCatalog<S>
-where
-    S: CatalogState,
-{
+impl Debug for PreservedCatalog {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "PreservedCatalog{{..}}")
     }
@@ -835,14 +818,14 @@ where
     S: CatalogState + Send + Sync,
 {
     /// Private API to create new transaction, users should always use [`PreservedCatalog::open_transaction`].
-    fn new(catalog_inner: &PreservedCatalogInner<S>, uuid: Uuid) -> Self {
-        let (revision_counter, previous_uuid) = match &catalog_inner.previous_tkey {
+    fn new(previous_tkey: &Option<TransactionKey>, uuid: Uuid, state: Arc<S>) -> Self {
+        let (revision_counter, previous_uuid) = match previous_tkey {
             Some(tkey) => (tkey.revision_counter + 1, tkey.uuid.to_string()),
             None => (0, String::new()),
         };
 
         Self {
-            tstate: S::transaction_begin(&catalog_inner.state),
+            tstate: S::transaction_begin(&state),
             proto: proto::Transaction {
                 actions: vec![],
                 version: TRANSACTION_VERSION,
@@ -917,16 +900,19 @@ where
     }
 
     /// Commit to mutable catalog and return previous transaction key.
-    fn commit(self, catalog_inner: &mut PreservedCatalogInner<S>) -> Option<TransactionKey> {
+    fn commit(
+        self,
+        previous_tkey: &mut Option<TransactionKey>,
+    ) -> (Option<TransactionKey>, Arc<S>) {
         let mut tkey = Some(self.tkey());
-        catalog_inner.state = S::transaction_end(self.tstate, TransactionEnd::Commit);
-        std::mem::swap(&mut catalog_inner.previous_tkey, &mut tkey);
-        tkey
+        let state = S::transaction_end(self.tstate, TransactionEnd::Commit);
+        std::mem::swap(previous_tkey, &mut tkey);
+        (tkey, state)
     }
 
     /// Abort transaction
-    fn abort(self, catalog_inner: &mut PreservedCatalogInner<S>) {
-        catalog_inner.state = S::transaction_end(self.tstate, TransactionEnd::Abort);
+    fn abort(self) -> Arc<S> {
+        S::transaction_end(self.tstate, TransactionEnd::Abort)
     }
 
     async fn store(
@@ -1026,6 +1012,18 @@ where
     }
 }
 
+/// Structure that holds all information required to create a checkpoint.
+///
+/// Note that while checkpoint are addressed using the same schema as we use for transaction (revision counter, UUID),
+/// they contain the changes at the end (aka including) the transaction they refer.
+#[derive(Debug)]
+pub struct CheckpointData {
+    /// List of all Parquet files that are currently (i.e. by the current version) tracked by the catalog.
+    ///
+    /// If a file was once added but later removed it MUST NOT appear in the result.
+    pub files: HashMap<DirsAndFileName, Arc<IoxParquetMetaData>>,
+}
+
 /// Handle for an open uncommitted transaction.
 ///
 /// Dropping this object w/o calling [`commit`](Self::commit) will issue a warning.
@@ -1033,7 +1031,7 @@ pub struct TransactionHandle<'c, S>
 where
     S: CatalogState + Send + Sync,
 {
-    catalog: &'c PreservedCatalog<S>,
+    catalog: &'c PreservedCatalog,
 
     // NOTE: The permit is technically used since we use it to reference the semaphore. It implements `drop` which we
     //       rely on.
@@ -1047,19 +1045,23 @@ impl<'c, S> TransactionHandle<'c, S>
 where
     S: CatalogState + Send + Sync,
 {
-    async fn new(catalog: &'c PreservedCatalog<S>, uuid: Uuid) -> TransactionHandle<'c, S> {
+    async fn new(
+        catalog: &'c PreservedCatalog,
+        uuid: Uuid,
+        state: Arc<S>,
+    ) -> TransactionHandle<'c, S> {
         // first acquire semaphore (which is only being used for transactions), then get state lock
         let permit = catalog
             .transaction_semaphore
             .acquire()
             .await
             .expect("semaphore should not be closed");
-        let inner_guard = catalog.inner.write();
+        let previous_tkey_guard = catalog.previous_tkey.write();
 
-        let transaction = OpenTransaction::new(&inner_guard, uuid);
+        let transaction = OpenTransaction::new(&previous_tkey_guard, uuid, state);
 
         // free state for readers again
-        drop(inner_guard);
+        drop(previous_tkey_guard);
 
         let tkey = transaction.tkey();
         info!(?tkey, "transaction started");
@@ -1069,6 +1071,15 @@ where
             transaction: Some(transaction),
             permit,
         }
+    }
+
+    /// Get current transaction state.
+    pub fn tstate(&self) -> &S::TransactionState {
+        &self
+            .transaction
+            .as_ref()
+            .expect("No transaction in progress?")
+            .tstate
     }
 
     /// Get revision counter for this transaction.
@@ -1093,10 +1104,13 @@ where
     ///
     /// This will first commit to object store and then to the in-memory state.
     ///
-    /// If `create_checkpoint` is set this will also create a checkpoint at the end of the commit. Note that if the
+    /// # Checkpointing
+    /// If `checkpoint_data` is passed this will also create a checkpoint at the end of the commit. Note that if the
     /// checkpoint creation fails, the commit will still be treated as completed since the checkpoint is a mere
     /// optimization to speed up transaction replay and allow to prune the history.
-    pub async fn commit(mut self, create_checkpoint: bool) -> Result<()> {
+    ///
+    /// Note that `checkpoint_data` must contain the state INCLUDING the to-be-commited transaction.
+    pub async fn commit(mut self, checkpoint_data: Option<CheckpointData>) -> Result<Arc<S>> {
         let t = std::mem::take(&mut self.transaction)
             .expect("calling .commit on a closed transaction?!");
         let tkey = t.tkey();
@@ -1118,17 +1132,18 @@ where
                 // maybe create a checkpoint
                 // IMPORTANT: Create the checkpoint AFTER commiting the transaction to object store and to the in-memory state.
                 //            Checkpoints are an optional optimization and are not required to materialize a transaction.
-                if create_checkpoint {
+                if let Some(checkpoint_data) = checkpoint_data {
                     // NOTE: `inner_guard` will not be re-used here since it is a strong write lock and the checkpoint creation
                     //       only needs a read lock.
-                    self.create_checkpoint(tkey, previous_tkey, state).await?;
+                    self.create_checkpoint(tkey, previous_tkey, checkpoint_data)
+                        .await?;
                 }
 
-                Ok(())
+                Ok(state)
             }
             Err(e) => {
                 warn!(?tkey, "failure while writing transaction, aborting");
-                self.abort_inner(t);
+                t.abort();
                 Err(e)
             }
         }
@@ -1142,32 +1157,23 @@ where
     /// - rustc seems to fold the guard into the async generator state even when we `drop` it quickly, making the
     ///   resulting future `!Send`. However tokio requires our futures to be `Send`.
     fn commit_inner(&self, t: OpenTransaction<S>) -> (Option<TransactionKey>, Arc<S>) {
-        let mut inner_guard = self.catalog.inner.write();
-        let previous_tkey = t.commit(&mut inner_guard);
-        let state = Arc::clone(&inner_guard.state);
-
-        (previous_tkey, state)
-    }
-
-    fn abort_inner(&self, t: OpenTransaction<S>) {
-        let mut inner_guard = self.catalog.inner.write();
-        t.abort(&mut inner_guard);
+        let mut previous_tkey_guard = self.catalog.previous_tkey.write();
+        t.commit(&mut previous_tkey_guard)
     }
 
     async fn create_checkpoint(
         &self,
         tkey: TransactionKey,
         previous_tkey: Option<TransactionKey>,
-        state: Arc<S>,
+        checkpoint_data: CheckpointData,
     ) -> Result<()> {
-        let files = state.files();
         let object_store = self.catalog.object_store();
         let server_id = self.catalog.server_id();
         let db_name = self.catalog.db_name();
 
         // sort by key (= path) for deterministic output
         let files = {
-            let mut tmp: Vec<_> = files.into_iter().collect();
+            let mut tmp: Vec<_> = checkpoint_data.files.into_iter().collect();
             tmp.sort_by_key(|(path, _metadata)| path.clone());
             tmp
         };
@@ -1211,10 +1217,10 @@ where
     }
 
     /// Abort transaction w/o commit.
-    pub fn abort(mut self) {
+    pub fn abort(mut self) -> Arc<S> {
         let t = std::mem::take(&mut self.transaction)
             .expect("calling .commit on a closed transaction?!");
-        self.abort_inner(t);
+        t.abort()
     }
 
     /// Add a new parquet file to the catalog.
@@ -1272,7 +1278,7 @@ where
     fn drop(&mut self) {
         if let Some(t) = self.transaction.take() {
             warn!(?self, "dropped uncommitted transaction, calling abort");
-            self.abort_inner(t);
+            t.abort();
         }
     }
 }
@@ -1292,10 +1298,19 @@ pub mod test_helpers {
         pub parquet_files: HashMap<DirsAndFileName, Arc<IoxParquetMetaData>>,
     }
 
+    impl TestCatalogState {
+        /// Simple way to create [`CheckpointData`].
+        pub fn checkpoint_data(&self) -> CheckpointData {
+            CheckpointData {
+                files: self.parquet_files.clone(),
+            }
+        }
+    }
+
     #[derive(Debug)]
     pub struct TState {
-        old: Arc<TestCatalogState>,
-        new: TestCatalogState,
+        pub old: Arc<TestCatalogState>,
+        pub new: TestCatalogState,
     }
 
     impl CatalogState for TestCatalogState {
@@ -1354,17 +1369,10 @@ pub mod test_helpers {
 
             Ok(())
         }
-
-        fn files(&self) -> HashMap<DirsAndFileName, Arc<IoxParquetMetaData>> {
-            self.parquet_files.clone()
-        }
     }
 
     /// Break preserved catalog by moving one of the transaction files into a weird unknown version.
-    pub async fn break_catalog_with_weird_version<S>(catalog: &PreservedCatalog<S>)
-    where
-        S: CatalogState + Send + Sync,
-    {
+    pub async fn break_catalog_with_weird_version(catalog: &PreservedCatalog) {
         let tkey = get_tkey(catalog);
         let path = file_path(
             &catalog.object_store,
@@ -1383,26 +1391,25 @@ pub mod test_helpers {
     }
 
     /// Helper function to ensure that guards don't leak into the future state machine.
-    fn get_tkey<S>(catalog: &PreservedCatalog<S>) -> TransactionKey
-    where
-        S: CatalogState + Send + Sync,
-    {
-        let guard = catalog.inner.read();
+    fn get_tkey(catalog: &PreservedCatalog) -> TransactionKey {
+        let guard = catalog.previous_tkey.read();
         guard
-            .previous_tkey
             .as_ref()
             .expect("should have at least a single transaction")
             .clone()
     }
 
     /// Torture-test implementations for [`CatalogState`].
-    pub async fn assert_catalog_state_implementation<S>(state_data: S::EmptyInput)
+    ///
+    /// A function to extract [`CheckpointData`] from the [`CatalogState`] must be provided.
+    pub async fn assert_catalog_state_implementation<S, F>(state_data: S::EmptyInput, f: F)
     where
         S: CatalogState + Send + Sync,
+        F: Fn(&S) -> CheckpointData + Send,
     {
         // empty state
         let object_store = make_object_store();
-        let catalog = PreservedCatalog::<S>::new_empty(
+        let (catalog, mut state) = PreservedCatalog::new_empty::<S>(
             Arc::clone(&object_store),
             ServerId::try_from(1).unwrap(),
             "db1".to_string(),
@@ -1411,12 +1418,12 @@ pub mod test_helpers {
         .await
         .unwrap();
         let mut expected = HashMap::new();
-        assert_files_eq(&catalog.state().files(), &expected);
+        assert_checkpoint(state.as_ref(), &f, &expected);
 
         // add files
         let mut chunk_id_watermark = 5;
         {
-            let mut transaction = catalog.open_transaction().await;
+            let mut transaction = catalog.open_transaction(state).await;
 
             for chunk_id in 0..chunk_id_watermark {
                 let path = parsed_path!(format!("chunk_{}", chunk_id).as_ref());
@@ -1425,25 +1432,25 @@ pub mod test_helpers {
                 expected.insert(path, Arc::new(metadata));
             }
 
-            transaction.commit(true).await.unwrap();
+            state = transaction.commit(None).await.unwrap();
         }
-        assert_files_eq(&catalog.state().files(), &expected);
+        assert_checkpoint(state.as_ref(), &f, &expected);
 
         // remove files
         {
-            let mut transaction = catalog.open_transaction().await;
+            let mut transaction = catalog.open_transaction(state).await;
 
             let path = parsed_path!("chunk_1");
             transaction.remove_parquet(&path).unwrap();
             expected.remove(&path);
 
-            transaction.commit(true).await.unwrap();
+            state = transaction.commit(None).await.unwrap();
         }
-        assert_files_eq(&catalog.state().files(), &expected);
+        assert_checkpoint(state.as_ref(), &f, &expected);
 
         // add and remove in the same transaction
         {
-            let mut transaction = catalog.open_transaction().await;
+            let mut transaction = catalog.open_transaction(state).await;
 
             let path = parsed_path!(format!("chunk_{}", chunk_id_watermark).as_ref());
             let (_, metadata) =
@@ -1452,26 +1459,26 @@ pub mod test_helpers {
             transaction.remove_parquet(&path).unwrap();
             chunk_id_watermark += 1;
 
-            transaction.commit(true).await.unwrap();
+            state = transaction.commit(None).await.unwrap();
         }
-        assert_files_eq(&catalog.state().files(), &expected);
+        assert_checkpoint(state.as_ref(), &f, &expected);
 
         // remove and add in the same transaction
         {
-            let mut transaction = catalog.open_transaction().await;
+            let mut transaction = catalog.open_transaction(state).await;
 
             let path = parsed_path!("chunk_2");
             let (_, metadata) = make_metadata(&object_store, "ok", chunk_addr(2)).await;
             transaction.remove_parquet(&path).unwrap();
             transaction.add_parquet(&path, &metadata).unwrap();
 
-            transaction.commit(true).await.unwrap();
+            state = transaction.commit(None).await.unwrap();
         }
-        assert_files_eq(&catalog.state().files(), &expected);
+        assert_checkpoint(state.as_ref(), &f, &expected);
 
         // add, remove, add in the same transaction
         {
-            let mut transaction = catalog.open_transaction().await;
+            let mut transaction = catalog.open_transaction(state).await;
 
             let path = parsed_path!(format!("chunk_{}", chunk_id_watermark).as_ref());
             let (_, metadata) =
@@ -1482,13 +1489,13 @@ pub mod test_helpers {
             expected.insert(path, Arc::new(metadata));
             chunk_id_watermark += 1;
 
-            transaction.commit(true).await.unwrap();
+            state = transaction.commit(None).await.unwrap();
         }
-        assert_files_eq(&catalog.state().files(), &expected);
+        assert_checkpoint(state.as_ref(), &f, &expected);
 
         // remove, add, remove in same transaction
         {
-            let mut transaction = catalog.open_transaction().await;
+            let mut transaction = catalog.open_transaction(state).await;
 
             let path = parsed_path!("chunk_2");
             let (_, metadata) = make_metadata(&object_store, "ok", chunk_addr(2)).await;
@@ -1497,13 +1504,13 @@ pub mod test_helpers {
             transaction.remove_parquet(&path).unwrap();
             expected.remove(&path);
 
-            transaction.commit(true).await.unwrap();
+            state = transaction.commit(None).await.unwrap();
         }
-        assert_files_eq(&catalog.state().files(), &expected);
+        assert_checkpoint(state.as_ref(), &f, &expected);
 
         // error handling, no real opt
         {
-            let mut transaction = catalog.open_transaction().await;
+            let mut transaction = catalog.open_transaction(state).await;
 
             // already exists (should also not change the metadata)
             let path = parsed_path!("chunk_0");
@@ -1517,13 +1524,13 @@ pub mod test_helpers {
             assert!(matches!(err, Error::ParquetFileDoesNotExist { .. }));
             chunk_id_watermark += 1;
 
-            transaction.commit(true).await.unwrap();
+            state = transaction.commit(None).await.unwrap();
         }
-        assert_files_eq(&catalog.state().files(), &expected);
+        assert_checkpoint(state.as_ref(), &f, &expected);
 
         // error handling, still something works
         {
-            let mut transaction = catalog.open_transaction().await;
+            let mut transaction = catalog.open_transaction(state).await;
 
             // already exists (should also not change the metadata)
             let path = parsed_path!("chunk_0");
@@ -1558,13 +1565,13 @@ pub mod test_helpers {
             let err = transaction.remove_parquet(&path).unwrap_err();
             assert!(matches!(err, Error::ParquetFileDoesNotExist { .. }));
 
-            transaction.commit(true).await.unwrap();
+            state = transaction.commit(None).await.unwrap();
         }
-        assert_files_eq(&catalog.state().files(), &expected);
+        assert_checkpoint(state.as_ref(), &f, &expected);
 
         // transaction aborting
         {
-            let mut transaction = catalog.open_transaction().await;
+            let mut transaction = catalog.open_transaction(Arc::clone(&state)).await;
 
             // add
             let path = parsed_path!(format!("chunk_{}", chunk_id_watermark).as_ref());
@@ -1585,11 +1592,11 @@ pub mod test_helpers {
             transaction.remove_parquet(&path).unwrap();
             chunk_id_watermark += 1;
         }
-        assert_files_eq(&catalog.state().files(), &expected);
+        assert_checkpoint(state.as_ref(), &f, &expected);
 
         // transaction aborting w/ errors
         {
-            let mut transaction = catalog.open_transaction().await;
+            let mut transaction = catalog.open_transaction(Arc::clone(&state)).await;
 
             // already exists (should also not change the metadata)
             let path = parsed_path!("chunk_0");
@@ -1609,17 +1616,22 @@ pub mod test_helpers {
     }
 
     /// Assert that tracked files and their linked metadata are equal.
-    fn assert_files_eq(
-        actual: &HashMap<DirsAndFileName, Arc<IoxParquetMetaData>>,
-        expected: &HashMap<DirsAndFileName, Arc<IoxParquetMetaData>>,
-    ) {
-        let sorted_keys_actual = get_sorted_keys(actual);
-        let sorted_keys_expected = get_sorted_keys(expected);
+    fn assert_checkpoint<S, F>(
+        state: &S,
+        f: &F,
+        expected_files: &HashMap<DirsAndFileName, Arc<IoxParquetMetaData>>,
+    ) where
+        F: Fn(&S) -> CheckpointData,
+    {
+        let actual_files = f(state).files;
+
+        let sorted_keys_actual = get_sorted_keys(&actual_files);
+        let sorted_keys_expected = get_sorted_keys(expected_files);
         assert_eq!(sorted_keys_actual, sorted_keys_expected);
 
         for k in sorted_keys_actual {
-            let md_actual = &actual[&k];
-            let md_expected = &expected[&k];
+            let md_actual = &actual_files[&k];
+            let md_expected = &expected_files[&k];
 
             let iox_md_actual = md_actual.read_iox_metadata().unwrap();
             let iox_md_expected = md_expected.read_iox_metadata().unwrap();
@@ -1650,7 +1662,7 @@ pub mod test_helpers {
 
 #[cfg(test)]
 mod tests {
-    use std::{num::NonZeroU32, ops::Deref};
+    use std::num::NonZeroU32;
 
     use crate::test_utils::{chunk_addr, make_metadata, make_object_store};
     use object_store::parsed_path;
@@ -1667,11 +1679,11 @@ mod tests {
         let db_name = "db1";
 
         assert!(
-            !PreservedCatalog::<TestCatalogState>::exists(&object_store, server_id, db_name,)
+            !PreservedCatalog::exists(&object_store, server_id, db_name,)
                 .await
                 .unwrap()
         );
-        assert!(PreservedCatalog::<TestCatalogState>::load(
+        assert!(PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -1681,7 +1693,7 @@ mod tests {
         .unwrap()
         .is_none());
 
-        PreservedCatalog::<TestCatalogState>::new_empty(
+        PreservedCatalog::new_empty::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -1690,12 +1702,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(
-            PreservedCatalog::<TestCatalogState>::exists(&object_store, server_id, db_name,)
-                .await
-                .unwrap()
-        );
-        assert!(PreservedCatalog::<TestCatalogState>::load(
+        assert!(PreservedCatalog::exists(&object_store, server_id, db_name,)
+            .await
+            .unwrap());
+        assert!(PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -1721,7 +1731,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_from_empty_store() {
         let object_store = make_object_store();
-        let option = PreservedCatalog::<TestCatalogState>::load(
+        let option = PreservedCatalog::load::<TestCatalogState>(
             object_store,
             make_server_id(),
             "db1".to_string(),
@@ -1775,7 +1785,7 @@ mod tests {
         create_empty_file(&object_store, &path).await;
 
         // no data present
-        let option = PreservedCatalog::<TestCatalogState>::load(
+        let option = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.clone(),
@@ -1809,7 +1819,7 @@ mod tests {
         checked_delete(&object_store, &path).await;
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -1827,7 +1837,7 @@ mod tests {
         assert_single_catalog_inmem_works(&object_store, server_id, db_name).await;
 
         // break transaction file
-        let catalog = PreservedCatalog::<TestCatalogState>::load(
+        let (catalog, _state) = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -1839,7 +1849,7 @@ mod tests {
         break_catalog_with_weird_version(&catalog).await;
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -1876,7 +1886,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -1915,7 +1925,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -1955,7 +1965,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -1992,7 +2002,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2029,7 +2039,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2063,7 +2073,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2097,7 +2107,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2139,7 +2149,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2155,7 +2165,7 @@ mod tests {
     #[tokio::test]
     async fn test_transaction_handle_debug() {
         let object_store = make_object_store();
-        let catalog = PreservedCatalog::<TestCatalogState>::new_empty(
+        let (catalog, state) = PreservedCatalog::new_empty::<TestCatalogState>(
             object_store,
             make_server_id(),
             "db1".to_string(),
@@ -2163,7 +2173,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut t = catalog.open_transaction().await;
+        let mut t = catalog.open_transaction(state).await;
 
         // open transaction
         t.transaction.as_mut().unwrap().proto.uuid = Uuid::nil().to_string();
@@ -2212,7 +2222,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2263,7 +2273,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2308,7 +2318,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2345,7 +2355,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2385,7 +2395,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2422,7 +2432,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2459,7 +2469,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2496,7 +2506,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2539,7 +2549,7 @@ mod tests {
             .unwrap();
 
         // loading catalog should fail now
-        let res = PreservedCatalog::<TestCatalogState>::load(
+        let res = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2564,7 +2574,7 @@ mod tests {
         let mut trace = assert_single_catalog_inmem_works(&object_store, server_id, db_name).await;
 
         // re-open catalog
-        let catalog = PreservedCatalog::load(
+        let (catalog, mut state) = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2576,20 +2586,22 @@ mod tests {
 
         // create empty transaction w/ checkpoint (the delta transaction file is not required for catalog loading)
         {
-            let transaction = catalog.open_transaction().await;
-            transaction.commit(true).await.unwrap();
+            let transaction = catalog.open_transaction(state).await;
+            let checkpoint_data = Some(transaction.tstate().new.checkpoint_data());
+            state = transaction.commit(checkpoint_data).await.unwrap();
         }
-        trace.record(&catalog, false);
+        trace.record(&catalog, &state, false);
 
         // create another transaction on-top that adds a file (this transaction will be required to load the full state)
         {
-            let mut transaction = catalog.open_transaction().await;
+            let mut transaction = catalog.open_transaction(state).await;
             transaction
                 .add_parquet(&parsed_path!("last_one"), &metadata)
                 .unwrap();
-            transaction.commit(true).await.unwrap();
+            let checkpoint_data = Some(transaction.tstate().new.checkpoint_data());
+            state = transaction.commit(checkpoint_data).await.unwrap();
         }
-        trace.record(&catalog, false);
+        trace.record(&catalog, &state, false);
 
         // close catalog again
         drop(catalog);
@@ -2611,7 +2623,7 @@ mod tests {
         }
 
         // load catalog from store and check replayed state
-        let catalog = PreservedCatalog::load(
+        let (catalog, state) = PreservedCatalog::load(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2625,7 +2637,7 @@ mod tests {
             trace.tkeys.last().unwrap().revision_counter
         );
         assert_catalog_parquet_files(
-            &catalog,
+            &state,
             &get_catalog_parquet_files(trace.states.last().unwrap()),
         );
     }
@@ -2643,10 +2655,10 @@ mod tests {
 
     /// Assert that set of parquet files tracked by a catalog are identical to the given sorted list.
     fn assert_catalog_parquet_files(
-        catalog: &PreservedCatalog<TestCatalogState>,
+        state: &TestCatalogState,
         expected: &[(String, IoxParquetMetaData)],
     ) {
-        let actual = get_catalog_parquet_files(&catalog.state());
+        let actual = get_catalog_parquet_files(state);
         for ((actual_path, actual_md), (expected_path, expected_md)) in
             actual.iter().zip(expected.iter())
         {
@@ -2725,10 +2737,10 @@ mod tests {
             }
         }
 
-        fn record(&mut self, catalog: &PreservedCatalog<TestCatalogState>, aborted: bool) {
+        fn record(&mut self, catalog: &PreservedCatalog, state: &TestCatalogState, aborted: bool) {
             self.tkeys
-                .push(catalog.inner.read().previous_tkey.clone().unwrap());
-            self.states.push(catalog.state().deref().clone());
+                .push(catalog.previous_tkey.read().clone().unwrap());
+            self.states.push(state.clone());
             self.post_timestamps.push(Utc::now());
             self.aborted.push(aborted);
         }
@@ -2739,7 +2751,7 @@ mod tests {
         server_id: ServerId,
         db_name: &str,
     ) -> TestTrace {
-        let catalog = PreservedCatalog::new_empty(
+        let (catalog, mut state) = PreservedCatalog::new_empty(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2757,12 +2769,12 @@ mod tests {
 
         // empty catalog has no data
         assert_eq!(catalog.revision_counter(), 0);
-        assert_catalog_parquet_files(&catalog, &[]);
-        trace.record(&catalog, false);
+        assert_catalog_parquet_files(&state, &[]);
+        trace.record(&catalog, &state, false);
 
         // fill catalog with examples
         {
-            let mut t = catalog.open_transaction().await;
+            let mut t = catalog.open_transaction(state).await;
 
             t.add_parquet(&parsed_path!("test1"), &metadata1).unwrap();
             t.add_parquet(&parsed_path!(["sub1"], "test1"), &metadata2)
@@ -2772,11 +2784,11 @@ mod tests {
             t.add_parquet(&parsed_path!(["sub2"], "test1"), &metadata1)
                 .unwrap();
 
-            t.commit(false).await.unwrap();
+            state = t.commit(None).await.unwrap();
         }
         assert_eq!(catalog.revision_counter(), 1);
         assert_catalog_parquet_files(
-            &catalog,
+            &state,
             &[
                 ("sub1/test1".to_string(), metadata2.clone()),
                 ("sub1/test2".to_string(), metadata2.clone()),
@@ -2784,11 +2796,11 @@ mod tests {
                 ("test1".to_string(), metadata1.clone()),
             ],
         );
-        trace.record(&catalog, false);
+        trace.record(&catalog, &state, false);
 
         // modify catalog with examples
         {
-            let mut t = catalog.open_transaction().await;
+            let mut t = catalog.open_transaction(state).await;
 
             // "real" modifications
             t.add_parquet(&parsed_path!("test4"), &metadata1).unwrap();
@@ -2802,11 +2814,11 @@ mod tests {
             t.remove_parquet(&parsed_path!("test1"))
                 .expect_err("removing twice should error");
 
-            t.commit(false).await.unwrap();
+            state = t.commit(None).await.unwrap();
         }
         assert_eq!(catalog.revision_counter(), 2);
         assert_catalog_parquet_files(
-            &catalog,
+            &state,
             &[
                 ("sub1/test1".to_string(), metadata2.clone()),
                 ("sub1/test2".to_string(), metadata2.clone()),
@@ -2814,11 +2826,11 @@ mod tests {
                 ("test4".to_string(), metadata1.clone()),
             ],
         );
-        trace.record(&catalog, false);
+        trace.record(&catalog, &state, false);
 
         // uncommitted modifications have no effect
         {
-            let mut t = catalog.open_transaction().await;
+            let mut t = catalog.open_transaction(Arc::clone(&state)).await;
 
             t.add_parquet(&parsed_path!("test5"), &metadata1).unwrap();
             t.remove_parquet(&parsed_path!(["sub1"], "test2")).unwrap();
@@ -2827,7 +2839,7 @@ mod tests {
         }
         assert_eq!(catalog.revision_counter(), 2);
         assert_catalog_parquet_files(
-            &catalog,
+            &state,
             &[
                 ("sub1/test1".to_string(), metadata2.clone()),
                 ("sub1/test2".to_string(), metadata2.clone()),
@@ -2835,7 +2847,7 @@ mod tests {
                 ("test4".to_string(), metadata1.clone()),
             ],
         );
-        trace.record(&catalog, true);
+        trace.record(&catalog, &state, true);
 
         trace
     }
@@ -2846,7 +2858,7 @@ mod tests {
         let server_id = make_server_id();
         let db_name = "db1";
 
-        PreservedCatalog::<TestCatalogState>::new_empty(
+        PreservedCatalog::new_empty::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2855,7 +2867,7 @@ mod tests {
         .await
         .unwrap();
 
-        let res = PreservedCatalog::<TestCatalogState>::new_empty(
+        let res = PreservedCatalog::new_empty::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2871,7 +2883,9 @@ mod tests {
         let server_id = make_server_id();
         let db_name = "db1";
 
-        wipe(&object_store, server_id, db_name).await.unwrap();
+        PreservedCatalog::wipe(&object_store, server_id, db_name)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -2884,15 +2898,17 @@ mod tests {
         assert_single_catalog_inmem_works(&object_store, make_server_id(), "db1").await;
 
         // wipe
-        wipe(&object_store, server_id, db_name).await.unwrap();
+        PreservedCatalog::wipe(&object_store, server_id, db_name)
+            .await
+            .unwrap();
 
         // `exists` and `load` both report "no data"
         assert!(
-            !PreservedCatalog::<TestCatalogState>::exists(&object_store, server_id, db_name,)
+            !PreservedCatalog::exists(&object_store, server_id, db_name,)
                 .await
                 .unwrap()
         );
-        assert!(PreservedCatalog::<TestCatalogState>::load(
+        assert!(PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2903,7 +2919,7 @@ mod tests {
         .is_none());
 
         // can create new catalog
-        PreservedCatalog::<TestCatalogState>::new_empty(
+        PreservedCatalog::new_empty::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2923,7 +2939,7 @@ mod tests {
         assert_single_catalog_inmem_works(&object_store, make_server_id(), "db1").await;
 
         // break
-        let catalog = PreservedCatalog::<TestCatalogState>::load(
+        let (catalog, _state) = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2935,15 +2951,17 @@ mod tests {
         break_catalog_with_weird_version(&catalog).await;
 
         // wipe
-        wipe(&object_store, server_id, db_name).await.unwrap();
+        PreservedCatalog::wipe(&object_store, server_id, db_name)
+            .await
+            .unwrap();
 
         // `exists` and `load` both report "no data"
         assert!(
-            !PreservedCatalog::<TestCatalogState>::exists(&object_store, server_id, db_name,)
+            !PreservedCatalog::exists(&object_store, server_id, db_name,)
                 .await
                 .unwrap()
         );
-        assert!(PreservedCatalog::<TestCatalogState>::load(
+        assert!(PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2954,7 +2972,7 @@ mod tests {
         .is_none());
 
         // can create new catalog
-        PreservedCatalog::<TestCatalogState>::new_empty(
+        PreservedCatalog::new_empty::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -2980,7 +2998,9 @@ mod tests {
         create_empty_file(&object_store, &path).await;
 
         // wipe
-        wipe(&object_store, server_id, db_name).await.unwrap();
+        PreservedCatalog::wipe(&object_store, server_id, db_name)
+            .await
+            .unwrap();
 
         // check file is still there
         let prefix = catalog_path(&object_store, server_id, &db_name);
@@ -2999,7 +3019,7 @@ mod tests {
     #[tokio::test]
     async fn test_transaction_handle_revision_counter() {
         let object_store = make_object_store();
-        let catalog = PreservedCatalog::<TestCatalogState>::new_empty(
+        let (catalog, state) = PreservedCatalog::new_empty::<TestCatalogState>(
             object_store,
             make_server_id(),
             "db1".to_string(),
@@ -3007,7 +3027,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let t = catalog.open_transaction().await;
+        let t = catalog.open_transaction(state).await;
 
         assert_eq!(t.revision_counter(), 1);
     }
@@ -3015,7 +3035,7 @@ mod tests {
     #[tokio::test]
     async fn test_transaction_handle_uuid() {
         let object_store = make_object_store();
-        let catalog = PreservedCatalog::<TestCatalogState>::new_empty(
+        let (catalog, state) = PreservedCatalog::new_empty::<TestCatalogState>(
             object_store,
             make_server_id(),
             "db1".to_string(),
@@ -3023,7 +3043,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut t = catalog.open_transaction().await;
+        let mut t = catalog.open_transaction(state).await;
 
         t.transaction.as_mut().unwrap().proto.uuid = Uuid::nil().to_string();
         assert_eq!(t.uuid(), Uuid::nil());
@@ -3036,10 +3056,11 @@ mod tests {
         let db_name = "db1";
         let trace = assert_single_catalog_inmem_works(&object_store, server_id, db_name).await;
 
-        let ts = find_last_transaction_timestamp(&object_store, server_id, db_name)
-            .await
-            .unwrap()
-            .unwrap();
+        let ts =
+            PreservedCatalog::find_last_transaction_timestamp(&object_store, server_id, db_name)
+                .await
+                .unwrap()
+                .unwrap();
 
         // last trace entry is an aborted transaction, so the valid transaction timestamp is the third last
         assert!(trace.aborted[trace.aborted.len() - 1]);
@@ -3066,12 +3087,14 @@ mod tests {
         let server_id = make_server_id();
         let db_name = "db1";
 
-        assert!(
-            find_last_transaction_timestamp(&object_store, server_id, db_name)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(PreservedCatalog::find_last_transaction_timestamp(
+            &object_store,
+            server_id,
+            db_name
+        )
+        .await
+        .unwrap()
+        .is_none());
     }
 
     #[tokio::test]
@@ -3097,10 +3120,11 @@ mod tests {
             .await
             .unwrap();
 
-        let ts = find_last_transaction_timestamp(&object_store, server_id, db_name)
-            .await
-            .unwrap()
-            .unwrap();
+        let ts =
+            PreservedCatalog::find_last_transaction_timestamp(&object_store, server_id, db_name)
+                .await
+                .unwrap()
+                .unwrap();
 
         // last trace entry is an aborted transaction, so the valid transaction timestamp is the third last
         assert!(trace.aborted[trace.aborted.len() - 1]);
@@ -3149,10 +3173,11 @@ mod tests {
             .await
             .unwrap();
 
-        let ts = find_last_transaction_timestamp(&object_store, server_id, db_name)
-            .await
-            .unwrap()
-            .unwrap();
+        let ts =
+            PreservedCatalog::find_last_transaction_timestamp(&object_store, server_id, db_name)
+                .await
+                .unwrap()
+                .unwrap();
 
         // last trace entry is an aborted transaction, so the valid transaction timestamp is the third last
         assert!(trace.aborted[trace.aborted.len() - 1]);
@@ -3180,7 +3205,7 @@ mod tests {
         let db_name = "db1";
         let mut trace = assert_single_catalog_inmem_works(&object_store, server_id, db_name).await;
 
-        let catalog = PreservedCatalog::load(
+        let (catalog, mut state) = PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -3192,10 +3217,11 @@ mod tests {
 
         // create empty transaction w/ checkpoint
         {
-            let transaction = catalog.open_transaction().await;
-            transaction.commit(true).await.unwrap();
+            let transaction = catalog.open_transaction(state).await;
+            let checkpoint_data = Some(transaction.tstate().new.checkpoint_data());
+            state = transaction.commit(checkpoint_data).await.unwrap();
         }
-        trace.record(&catalog, false);
+        trace.record(&catalog, &state, false);
 
         // delete transaction files
         for (aborted, tkey) in trace.aborted.iter().zip(trace.tkeys.iter()) {
@@ -3213,10 +3239,11 @@ mod tests {
         }
         drop(catalog);
 
-        let ts = find_last_transaction_timestamp(&object_store, server_id, db_name)
-            .await
-            .unwrap()
-            .unwrap();
+        let ts =
+            PreservedCatalog::find_last_transaction_timestamp(&object_store, server_id, db_name)
+                .await
+                .unwrap()
+                .unwrap();
 
         // check timestamps
         assert!(!trace.aborted[trace.aborted.len() - 1]);
@@ -3246,7 +3273,7 @@ mod tests {
         let trace = assert_single_catalog_inmem_works(object_store, server_id, db_name).await;
 
         // load catalog from store and check replayed state
-        let catalog =
+        let (catalog, state) =
             PreservedCatalog::load(Arc::clone(object_store), server_id, db_name.to_string(), ())
                 .await
                 .unwrap()
@@ -3256,7 +3283,7 @@ mod tests {
             trace.tkeys.last().unwrap().revision_counter
         );
         assert_catalog_parquet_files(
-            &catalog,
+            &state,
             &get_catalog_parquet_files(trace.states.last().unwrap()),
         );
     }
@@ -3268,12 +3295,12 @@ mod tests {
         let db_name = "db1";
 
         assert!(
-            !PreservedCatalog::<TestCatalogState>::exists(&object_store, server_id, db_name,)
+            !PreservedCatalog::exists(&object_store, server_id, db_name,)
                 .await
                 .unwrap()
         );
 
-        let catalog = PreservedCatalog::<TestCatalogState>::new_empty(
+        let (catalog, state) = PreservedCatalog::new_empty::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -3283,7 +3310,7 @@ mod tests {
         .unwrap();
 
         // delete transaction file
-        let tkey = catalog.inner.read().previous_tkey.clone().unwrap();
+        let tkey = catalog.previous_tkey.read().clone().unwrap();
         let path = file_path(
             &object_store,
             server_id,
@@ -3295,12 +3322,13 @@ mod tests {
 
         // create empty transaction w/ checkpoint
         {
-            let transaction = catalog.open_transaction().await;
-            transaction.commit(true).await.unwrap();
+            let transaction = catalog.open_transaction(state).await;
+            let checkpoint_data = Some(transaction.tstate().new.checkpoint_data());
+            transaction.commit(checkpoint_data).await.unwrap();
         }
 
         // delete transaction file
-        let tkey = catalog.inner.read().previous_tkey.clone().unwrap();
+        let tkey = catalog.previous_tkey.read().clone().unwrap();
         let path = file_path(
             &object_store,
             server_id,
@@ -3312,12 +3340,10 @@ mod tests {
 
         drop(catalog);
 
-        assert!(
-            PreservedCatalog::<TestCatalogState>::exists(&object_store, server_id, db_name,)
-                .await
-                .unwrap()
-        );
-        assert!(PreservedCatalog::<TestCatalogState>::load(
+        assert!(PreservedCatalog::exists(&object_store, server_id, db_name,)
+            .await
+            .unwrap());
+        assert!(PreservedCatalog::load::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -3330,6 +3356,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_catalog_state() {
-        assert_catalog_state_implementation::<TestCatalogState>(()).await;
+        assert_catalog_state_implementation::<TestCatalogState, _>(
+            (),
+            TestCatalogState::checkpoint_data,
+        )
+        .await;
     }
 }

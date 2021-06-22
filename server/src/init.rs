@@ -9,7 +9,7 @@ use object_store::{
 };
 use observability_deps::tracing::{debug, error, info, warn};
 use parking_lot::Mutex;
-use parquet_file::catalog::wipe as wipe_preserved_catalog;
+use parquet_file::catalog::PreservedCatalog;
 use query::exec::Executor;
 use snafu::{OptionExt, ResultExt, Snafu};
 use std::{
@@ -136,7 +136,7 @@ impl InitStatus {
             initialize_semaphore: Semaphore::new(1),
             error_generic: Default::default(),
             errors_databases: Default::default(),
-            wipe_on_error: Default::default(),
+            wipe_on_error: AtomicBool::new(true),
         }
     }
 
@@ -325,10 +325,10 @@ impl InitStatus {
                 .map_err(|e| Box::new(e) as _)
                 .context(CatalogLoadError)
                 {
-                    Ok(preserved_catalog) => {
+                    Ok((preserved_catalog, catalog)) => {
                         // everything is there, can create DB
                         handle
-                            .commit_db(server_id, store, exec, preserved_catalog, rules)
+                            .commit_db(server_id, store, exec, preserved_catalog, catalog, rules)
                             .map_err(Box::new)
                             .context(CreateDbError)?;
                         Ok(())
@@ -397,7 +397,7 @@ impl InitStatus {
                 .map_err(|e| Arc::new(e) as _)
                 .context(RecoverDbError)?;
 
-            wipe_preserved_catalog(&store, server_id, &db_name)
+            PreservedCatalog::wipe(&store, server_id, &db_name)
                 .await
                 .map_err(Box::new)
                 .context(PreservedCatalogWipeError)?;
@@ -418,9 +418,9 @@ impl InitStatus {
                 .map_err(|e| Box::new(e) as _)
                 .context(CatalogLoadError)
                 {
-                    Ok(preserved_catalog) => {
+                    Ok((preserved_catalog, catalog)) => {
                         handle
-                            .commit_db(server_id, store, exec, preserved_catalog, None)
+                            .commit_db(server_id, store, exec, preserved_catalog, catalog, None)
                             .map_err(|e | {
                                 warn!(%db_name, %e, "wiped preserved catalog of registered database but still cannot recover");
                                 Box::new(e)
@@ -455,7 +455,7 @@ impl InitStatus {
                 .map_err(|e| Arc::new(e) as _)
                 .context(RecoverDbError)?;
 
-            wipe_preserved_catalog(&store, server_id, &db_name)
+            PreservedCatalog::wipe(&store, server_id, &db_name)
                 .await
                 .map_err(Box::new)
                 .context(PreservedCatalogWipeError)?;
