@@ -138,7 +138,7 @@ impl<'a> LifecycleDb for &'a Db {
     type Partition = LockableCatalogPartition<'a>;
 
     fn buffer_size(self) -> usize {
-        self.preserved_catalog.state().metrics().memory().total()
+        self.catalog.metrics().memory().total()
     }
 
     fn rules(self) -> LifecycleRules {
@@ -158,8 +158,7 @@ impl<'a> LifecycleDb for &'a Db {
     }
 
     fn chunks(self, sort_order: &SortOrder) -> Vec<Self::Chunk> {
-        self.preserved_catalog
-            .state()
+        self.catalog
             .chunks_sorted_by(sort_order)
             .into_iter()
             .map(|chunk| LockableCatalogChunk { db: self, chunk })

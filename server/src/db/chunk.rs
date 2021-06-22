@@ -211,10 +211,13 @@ impl QueryChunk for DbChunk {
     }
 
     fn may_contain_pk_duplicates(&self) -> bool {
+        // TODO: once merging is implemented
+
         // Assume that the MUB can contain duplicates as it has the
         // raw incoming stream of writes, but that all other types of
         // chunks are deduplicated as part of creation
-        matches!(self.state, State::ReadBuffer { .. })
+        //!matches!(self.state, State::ReadBuffer { .. })
+        true
     }
 
     fn apply_predicate(&self, predicate: &Predicate) -> Result<PredicateMatch> {
@@ -308,12 +311,7 @@ impl QueryChunk for DbChunk {
 
                 debug!(?rb_predicate, "Predicate pushed down to RUB");
 
-                let read_results = chunk
-                    .read_filter(table_name, rb_predicate, selection)
-                    .context(ReadBufferChunkError {
-                        chunk_id: self.id(),
-                    })?;
-
+                let read_results = chunk.read_filter(table_name, rb_predicate, selection);
                 let schema = chunk
                     .read_filter_table_schema(table_name, selection)
                     .context(ReadBufferChunkError {
