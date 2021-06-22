@@ -160,7 +160,8 @@ macro_rules! make_first_selector {
                     let index = time_arr
                         .iter()
                         // arrow doesn't tell us what index had the
-                        // minimum, so need to find it ourselves
+                        // minimum, so need to find it ourselves see also
+                        // https://github.com/apache/arrow-datafusion/issues/600
                         .enumerate()
                         .find(|(_, time)| cur_min_time == *time)
                         .map(|(idx, _)| idx)
@@ -374,7 +375,8 @@ macro_rules! make_min_selector {
                 if action_needed.update_time() {
                     // arrow doesn't tell us what index(es) had the
                     // minimum value, so need to find them ourselves
-                    // and compute the minimum timestamp found
+                    // and compute the minimum timestamp found. See
+                    // https://github.com/apache/arrow-datafusion/issues/600
                     self.time = value_arr
                         .iter()
                         .enumerate()
@@ -478,12 +480,14 @@ macro_rules! make_max_selector {
                     self.time = None; // ignore time associated with old value
                 }
 
-                // Note even though we are computing the MAX value, the
-                // timestamp returned is still the first one
+                // Note even though we are computing the MAX value,
+                // the timestamp returned is the one with the *lowest*
+                // numerical value
                 if action_needed.update_time() {
                     // arrow doesn't tell us what index(es) had the
                     // minimum value, so need to find them ourselves
-                    // and compute the minimum timestamp found
+                    // and compute the minimum timestamp found. See
+                    // https://github.com/apache/arrow-datafusion/issues/600
                     self.time = value_arr
                         .iter()
                         .enumerate()
