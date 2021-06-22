@@ -146,8 +146,7 @@ impl<'a> LifecycleDb for &'a Db {
     }
 
     fn partitions(self) -> Vec<Self::Partition> {
-        self.preserved_catalog
-            .state()
+        self.catalog
             .partitions()
             .into_iter()
             .map(|partition| LockableCatalogPartition {
