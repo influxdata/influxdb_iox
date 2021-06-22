@@ -130,9 +130,33 @@ impl ReorgPlanner {
     /// 1. Rows that have `time` *before* the split_time
     /// 2. Rows that have `time` *after* the split_time
     ///
-    /// For example:
+    /// For example, if the input looks like:
+    /// ```text
+    ///  a | time
+    /// ---+-----
+    ///  a | 1000
+    ///  b | 2000
+    ///  c | 4000
+    ///  d | 2000
+    ///  e | 3000
+    /// ```
+    /// A split plan with `split_time=2001` will produce the following two output streams
     ///
-    ///
+    /// ```text
+    ///  a | time
+    /// ---+-----
+    ///  a | 1000
+    ///  b | 2000
+    ///  d | 2000
+    /// ```
+    /// and
+    /// ```text
+    ///  a | time
+    /// ---+-----
+    ///  c | 4000
+    ///  e | 3000
+    /// ```
+
     pub fn split_plan<C>(
         &self,
         chunks: Vec<Arc<C>>,
