@@ -215,7 +215,7 @@ mod test {
             "| 5         | MT   | 1970-01-01 00:00:00.000005    |",
             "+-----------+------+-------------------------------+",
         ];
-        assert_batches_eq!(&expected, &raw_data(&[chunks[0].clone()]).await);
+        assert_batches_eq!(&expected, &raw_data(&[Arc::clone(&chunks[0])]).await);
 
         let expected = vec![
             "+-----------+------------+------+----------------------------+",
@@ -227,7 +227,7 @@ mod test {
             "| 50        | 50         | VT   | 1970-01-01 00:00:00.000010 |",
             "+-----------+------------+------+----------------------------+",
         ];
-        assert_batches_eq!(&expected, &raw_data(&[chunks[1].clone()]).await);
+        assert_batches_eq!(&expected, &raw_data(&[Arc::clone(&chunks[1])]).await);
 
         let mut sort_key = SortKey::with_capacity(2);
         sort_key.push(
