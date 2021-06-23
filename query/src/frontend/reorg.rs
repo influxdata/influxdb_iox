@@ -117,8 +117,8 @@ impl ReorgPlanner {
     /// 1. Merges chunks together into a single stream
     /// 2. Deduplicates via PK as necessary
     /// 3. Sorts the result according to the requested key
-    /// 4. Splits the stream on a specified timestamp:
-    ///    `time` columns before that timestamp and after
+    /// 4. Splits the stream on value of the `time` column: Those
+    ///    rows that are on or before the time and those that are after
     ///
     /// The plan looks like:
     ///
@@ -127,7 +127,7 @@ impl ReorgPlanner {
     ///     (Scan chunks) <-- any needed deduplication happens here
     ///
     /// The output execution plan has two "output streams" (DataFusion partition):
-    /// 1. Rows that have `time` *before* the split_time
+    /// 1. Rows that have `time` *on or before* the split_time
     /// 2. Rows that have `time` *after* the split_time
     ///
     /// For example, if the input looks like:
@@ -140,7 +140,7 @@ impl ReorgPlanner {
     ///  d | 2000
     ///  e | 3000
     /// ```
-    /// A split plan with `split_time=2001` will produce the following two output streams
+    /// A split plan with `split_time=2000` will produce the following two output streams
     ///
     /// ```text
     ///  a | time
