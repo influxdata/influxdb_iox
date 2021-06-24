@@ -13,7 +13,7 @@ use arrow::{datatypes::SchemaRef, error::Result as ArrowResult, record_batch::Re
 /// Implements a [`SendableRecordBatchStream`] to help create DataFusion outputs from tokio channels.
 ///
 /// It sends streams of RecordBatches from a tokio channel *and*
-/// crutially knows up front the schema each batch will have be used.
+/// crucially knows up front the schema each batch will have be used.
 pub struct AdapterStream {
     /// Schema
     schema: SchemaRef,
