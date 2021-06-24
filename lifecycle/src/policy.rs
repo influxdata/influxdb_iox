@@ -56,7 +56,7 @@ where
     ///
     fn maybe_free_memory<P: LockablePartition>(
         &mut self,
-        partitions: &Vec<P>,
+        partitions: &[P],
         soft_limit: usize,
         drop_non_persisted: bool,
     ) {
@@ -183,7 +183,7 @@ where
     /// by the mutable linger threshold
     fn maybe_compact_chunks<P: LockablePartition>(
         &mut self,
-        partitions: &Vec<P>,
+        partitions: &[P],
         rules: &LifecycleRules,
         now: DateTime<Utc>,
     ) {
@@ -249,7 +249,7 @@ where
     ///
     fn maybe_persist_chunks<P: LockablePartition>(
         &mut self,
-        partitions: &Vec<P>,
+        partitions: &[P],
         rules: &LifecycleRules,
         now: DateTime<Utc>,
     ) {
@@ -329,7 +329,7 @@ where
     ///
     /// Clear any such jobs if they exited more than `LIFECYCLE_ACTION_BACKOFF` seconds ago
     ///
-    fn maybe_cleanup_failed<P: LockablePartition>(&mut self, partitions: &Vec<P>, now: Instant) {
+    fn maybe_cleanup_failed<P: LockablePartition>(&mut self, partitions: &[P], now: Instant) {
         for partition in partitions {
             let partition = partition.read();
             for (_, chunk) in LockablePartition::chunks(&partition) {
@@ -643,7 +643,7 @@ mod tests {
             let mut new_chunk = TestChunk::new(id, None, None, ChunkStorage::ReadBuffer);
             new_chunk.row_count = 0;
 
-            for chunk in chunks.iter() {
+            for chunk in &chunks {
                 partition.chunks.remove(&chunk.addr.chunk_id);
                 new_chunk.row_count += chunk.row_count;
             }
