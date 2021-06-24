@@ -44,6 +44,10 @@ pub enum Error {
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// Compute a sort key that orders lower cardinality columns first
+///
+/// In the absence of more precise information, this should yield a
+/// good ordering for RLE compression
 fn compute_sort_key<'a>(summaries: impl Iterator<Item = &'a TableSummary>) -> SortKey<'a> {
     let mut cardinalities: HashMap<&str, u64> = Default::default();
     for summary in summaries {
