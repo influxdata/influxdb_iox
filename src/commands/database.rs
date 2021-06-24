@@ -123,13 +123,9 @@ struct Create {
     #[structopt(long, default_value = "100", parse(try_from_str))]
     catalog_transactions_until_checkpoint: NonZeroU64,
 
-    /// A write will not be persisted until at least this much time has passed
+    /// The average timestamp skew across concurrent writers
     #[structopt(long, default_value = "300")]
-    persist_min_time_seconds: u32,
-
-    /// A write older than this will be persisted
-    #[structopt(long, default_value = "1800")]
-    persist_max_time_seconds: u32,
+    late_arrive_window_seconds: u32,
 
     /// Maximum number of rows before triggering persistence
     #[structopt(long, default_value = "100000")]
@@ -206,8 +202,7 @@ pub async fn command(url: String, config: Config) -> Result<()> {
                     catalog_transactions_until_checkpoint: command
                         .catalog_transactions_until_checkpoint
                         .get(),
-                    persist_min_time_seconds: command.persist_min_time_seconds,
-                    persist_max_time_seconds: command.persist_max_time_seconds,
+                    late_arrive_window_seconds: command.late_arrive_window_seconds,
                     persist_row_threshold: command.persist_row_threshold,
                 }),
 

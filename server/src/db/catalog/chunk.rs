@@ -291,7 +291,7 @@ impl CatalogChunk {
 
         metrics
             .state
-            .inc_with_labels(&[KeyValue::new("state", "open")]);
+            .inc_with_labels(&[KeyValue::new("state", "compacted")]);
 
         let mut chunk = Self {
             addr,

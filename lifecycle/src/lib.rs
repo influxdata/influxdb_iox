@@ -10,7 +10,7 @@
 
 use chrono::{DateTime, Utc};
 
-use data_types::chunk_metadata::ChunkStorage;
+use data_types::chunk_metadata::{ChunkAddr, ChunkStorage};
 use data_types::database_rules::{LifecycleRules, SortOrder};
 pub use guard::*;
 pub use policy::*;
@@ -166,11 +166,7 @@ pub trait LifecycleChunk {
 
     fn time_of_last_write(&self) -> Option<DateTime<Utc>>;
 
-    fn table_name(&self) -> String;
-
-    fn partition_key(&self) -> String;
-
-    fn chunk_id(&self) -> u32;
+    fn addr(&self) -> &ChunkAddr;
 
     fn storage(&self) -> ChunkStorage;
 

@@ -332,7 +332,7 @@ pub async fn create_readable_database_plus(
 pub async fn create_quickly_persisting_database(
     db_name: impl Into<String>,
     channel: tonic::transport::Channel,
-    persist_min_time_seconds: u32,
+    late_arrive_window_seconds: u32,
 ) {
     let db_name = db_name.into();
 
@@ -354,8 +354,7 @@ pub async fn create_quickly_persisting_database(
             persist: true,
             worker_backoff_millis: 100,
             persist_row_threshold: 10_000,
-            persist_min_time_seconds,
-            persist_max_time_seconds: 20,
+            late_arrive_window_seconds,
             ..Default::default()
         }),
         ..Default::default()

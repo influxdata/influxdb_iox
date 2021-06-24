@@ -88,7 +88,7 @@ async fn test_full_lifecycle() {
         &fixture,
         &db_name,
         ChunkStorage::ObjectStoreOnly,
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(10),
     )
     .await;
 
@@ -123,7 +123,7 @@ async fn test_query_chunk_after_restart() {
     rules.lifecycle_rules = Some({
         let mut lifecycle_rules = rules.lifecycle_rules.unwrap();
         lifecycle_rules.persist = true;
-        lifecycle_rules.persist_min_time_seconds = 1;
+        lifecycle_rules.late_arrive_window_seconds = 1;
         lifecycle_rules
     });
     management_client.update_database(rules).await.unwrap();

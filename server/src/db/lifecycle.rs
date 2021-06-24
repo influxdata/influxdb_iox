@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use ::lifecycle::LifecycleDb;
-use data_types::chunk_metadata::ChunkStorage;
+use data_types::chunk_metadata::{ChunkAddr, ChunkStorage};
 use data_types::database_rules::{LifecycleRules, SortOrder};
 use data_types::error::ErrorLogger;
 use data_types::job::Job;
@@ -207,16 +207,8 @@ impl LifecycleChunk for CatalogChunk {
         self.time_of_last_write()
     }
 
-    fn table_name(&self) -> String {
-        self.table_name().to_string()
-    }
-
-    fn partition_key(&self) -> String {
-        self.key().to_string()
-    }
-
-    fn chunk_id(&self) -> u32 {
-        self.id()
+    fn addr(&self) -> &ChunkAddr {
+        self.addr()
     }
 
     fn storage(&self) -> ChunkStorage {

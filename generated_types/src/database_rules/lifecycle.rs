@@ -1,7 +1,11 @@
 use std::convert::{TryFrom, TryInto};
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
 
-use data_types::database_rules::{LifecycleRules, Sort, SortOrder};
+use data_types::database_rules::{
+    LifecycleRules, Sort, SortOrder, DEFAULT_CATALOG_TRANSACTIONS_UNTIL_CHECKPOINT,
+    DEFAULT_LATE_ARRIVE_WINDOW_SECONDS, DEFAULT_PERSIST_ROW_THRESHOLD,
+    DEFAULT_WORKER_BACKOFF_MILLIS,
+};
 
 use crate::google::protobuf::Empty;
 use crate::google::{FieldViolation, FromField, FromFieldOpt, FromFieldString};
@@ -34,22 +38,12 @@ impl From<LifecycleRules> for management::LifecycleRules {
             drop_non_persisted: config.drop_non_persisted,
             persist: config.persist,
             immutable: config.immutable,
-            worker_backoff_millis: config.worker_backoff_millis.map_or(0, NonZeroU64::get),
+            worker_backoff_millis: config.worker_backoff_millis.get(),
             catalog_transactions_until_checkpoint: config
                 .catalog_transactions_until_checkpoint
-                .map_or(100, NonZeroU64::get),
-            persist_min_time_seconds: config
-                .persist_min_time_seconds
-                .map(Into::into)
-                .unwrap_or_default(),
-            persist_max_time_seconds: config
-                .persist_max_time_seconds
-                .map(Into::into)
-                .unwrap_or_default(),
-            persist_row_threshold: config
-                .persist_row_threshold
-                .map(|x| x.get() as u64)
-                .unwrap_or_default(),
+                .get(),
+            late_arrive_window_seconds: config.late_arrive_window_seconds.get(),
+            persist_row_threshold: config.persist_row_threshold.get() as u64,
         }
     }
 }
@@ -68,13 +62,20 @@ impl TryFrom<management::LifecycleRules> for LifecycleRules {
             drop_non_persisted: proto.drop_non_persisted,
             persist: proto.persist,
             immutable: proto.immutable,
-            worker_backoff_millis: NonZeroU64::new(proto.worker_backoff_millis),
+            worker_backoff_millis: NonZeroU64::new(proto.worker_backoff_millis)
+                .unwrap_or_else(|| NonZeroU64::new(DEFAULT_WORKER_BACKOFF_MILLIS).unwrap()),
             catalog_transactions_until_checkpoint: NonZeroU64::new(
                 proto.catalog_transactions_until_checkpoint,
-            ),
-            persist_min_time_seconds: proto.persist_min_time_seconds.try_into().ok(),
-            persist_max_time_seconds: proto.persist_max_time_seconds.try_into().ok(),
-            persist_row_threshold: (proto.persist_row_threshold as usize).try_into().ok(),
+            )
+            .unwrap_or_else(|| {
+                NonZeroU64::new(DEFAULT_CATALOG_TRANSACTIONS_UNTIL_CHECKPOINT).unwrap()
+            }),
+            late_arrive_window_seconds: NonZeroU32::new(proto.late_arrive_window_seconds)
+                .unwrap_or_else(|| NonZeroU32::new(DEFAULT_LATE_ARRIVE_WINDOW_SECONDS).unwrap()),
+            persist_row_threshold: NonZeroUsize::new(proto.persist_row_threshold as usize)
+                .unwrap_or_else(|| {
+                    NonZeroUsize::new(DEFAULT_PERSIST_ROW_THRESHOLD as usize).unwrap()
+                }),
         })
     }
 }
@@ -146,8 +147,9 @@ impl TryFrom<management::lifecycle_rules::sort_order::Sort> for Sort {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use data_types::database_rules::{ColumnType, ColumnValue, Order};
+
+    use super::*;
 
     #[test]
     fn lifecycle_rules() {
@@ -163,8 +165,7 @@ mod tests {
             immutable: true,
             worker_backoff_millis: 1000,
             catalog_transactions_until_checkpoint: 10,
-            persist_min_time_seconds: 23,
-            persist_max_time_seconds: 15,
+            late_arrive_window_seconds: 23,
             persist_row_threshold: 57,
         };
 
@@ -207,26 +208,17 @@ mod tests {
         assert_eq!(back.immutable, protobuf.immutable);
         assert_eq!(back.worker_backoff_millis, protobuf.worker_backoff_millis);
         assert_eq!(
-            back.persist_min_time_seconds,
-            protobuf.persist_min_time_seconds
-        );
-        assert_eq!(
-            back.persist_max_time_seconds,
-            protobuf.persist_max_time_seconds
+            back.late_arrive_window_seconds,
+            protobuf.late_arrive_window_seconds
         );
         assert_eq!(back.persist_row_threshold, protobuf.persist_row_threshold);
     }
 
     #[test]
-    fn default_background_worker_backoff_millis() {
-        let protobuf = management::LifecycleRules {
-            worker_backoff_millis: 0,
-            ..Default::default()
-        };
-
-        let config: LifecycleRules = protobuf.clone().try_into().unwrap();
-        let back: management::LifecycleRules = config.into();
-        assert_eq!(back.worker_backoff_millis, protobuf.worker_backoff_millis);
+    fn lifecycle_rules_default() {
+        let protobuf = management::LifecycleRules::default();
+        let config: LifecycleRules = protobuf.try_into().unwrap();
+        assert_eq!(config, LifecycleRules::default());
     }
 
     #[test]
