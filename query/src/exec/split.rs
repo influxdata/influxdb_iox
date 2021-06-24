@@ -336,7 +336,7 @@ async fn split_the_stream(
                 match (val0, val1) {
                     (Some(true), Some(false)) => (batch, empty_record_batch),
                     (Some(false), Some(true)) => (empty_record_batch, batch),
-                    _ => panic!("mismatched boolean values"),
+                    _ => panic!("mismatched boolean values: {:?}, {:?}", val0, val1),
                 }
             }
             _ => {
