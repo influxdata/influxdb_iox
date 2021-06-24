@@ -100,7 +100,7 @@ pub async fn rebuild_catalog<S>(
     db_name: String,
     catalog_empty_input: S::EmptyInput,
     ignore_metadata_read_failure: bool,
-) -> Result<(PreservedCatalog, Arc<S>)>
+) -> Result<(PreservedCatalog, S)>
 where
     S: CatalogState + Debug + Send + Sync,
 {
@@ -109,7 +109,7 @@ where
         collect_revisions(&object_store, search_location, ignore_metadata_read_failure).await?;
 
     // create new empty catalog
-    let (catalog, state) = PreservedCatalog::new_empty::<S>(
+    let (catalog, mut state) = PreservedCatalog::new_empty::<S>(
         Arc::clone(&object_store),
         server_id,
         db_name,
@@ -117,7 +117,6 @@ where
     )
     .await
     .context(NewEmptyFailure)?;
-    let mut state = Arc::try_unwrap(state).expect("dangling Arc?");
 
     // trace all files for final checkpoint
     let mut collected_files = HashMap::new();
@@ -171,7 +170,7 @@ where
         }
     }
 
-    Ok((catalog, Arc::new(state)))
+    Ok((catalog, state))
 }
 
 /// Collect all files under the given locations.
@@ -276,6 +275,7 @@ async fn read_parquet(
 
 #[cfg(test)]
 mod tests {
+    use data_types::chunk_metadata::ChunkAddr;
     use datafusion::physical_plan::SendableRecordBatchStream;
     use datafusion_util::MemoryStream;
     use parquet::arrow::ArrowWriter;
@@ -298,7 +298,7 @@ mod tests {
         let db_name = "db1";
 
         // build catalog with some data
-        let (catalog, state) = PreservedCatalog::new_empty::<TestCatalogState>(
+        let (catalog, mut state) = PreservedCatalog::new_empty::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -306,7 +306,6 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut state = Arc::try_unwrap(state).unwrap();
         {
             let mut transaction = catalog.open_transaction().await;
 
@@ -607,7 +606,7 @@ mod tests {
         let db_name = "db1";
 
         // build catalog with some data (2 transactions + initial empty one)
-        let (catalog, state) = PreservedCatalog::new_empty::<TestCatalogState>(
+        let (catalog, mut state) = PreservedCatalog::new_empty::<TestCatalogState>(
             Arc::clone(&object_store),
             server_id,
             db_name.to_string(),
@@ -615,7 +614,6 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut state = Arc::try_unwrap(state).unwrap();
         {
             let mut transaction = catalog.open_transaction().await;
 
@@ -738,11 +736,11 @@ mod tests {
         transaction_uuid: Uuid,
         chunk_id: u32,
     ) -> (DirsAndFileName, IoxParquetMetaData) {
-        let partition_key = "part1";
         let table_name = "table1";
+        let partition_key = "part1";
         let (record_batches, _schema, _column_summaries, _num_rows) = make_record_batch("foo");
 
-        let storage = Storage::new(Arc::clone(object_store), server_id, db_name.to_string());
+        let storage = Storage::new(Arc::clone(object_store), server_id);
         let metadata = IoxMetadata {
             transaction_revision_counter,
             transaction_uuid,
@@ -753,9 +751,12 @@ mod tests {
         let stream: SendableRecordBatchStream = Box::pin(MemoryStream::new(record_batches));
         let (path, parquet_md) = storage
             .write_to_object_store(
-                partition_key.to_string(),
-                chunk_id,
-                table_name.to_string(),
+                ChunkAddr {
+                    db_name: Arc::from(db_name),
+                    table_name: Arc::from(table_name),
+                    partition_key: Arc::from(partition_key),
+                    chunk_id,
+                },
                 stream,
                 metadata,
             )
@@ -788,8 +789,13 @@ mod tests {
 
         let data = mem_writer.into_inner().unwrap();
         let md = IoxParquetMetaData::from_file_bytes(data.clone()).unwrap();
-        let storage = Storage::new(Arc::clone(object_store), server_id, db_name.to_string());
-        let path = storage.location("part1".to_string(), chunk_id, "table1".to_string());
+        let storage = Storage::new(Arc::clone(object_store), server_id);
+        let path = storage.location(&ChunkAddr {
+            db_name: Arc::from(db_name),
+            table_name: Arc::from("table1"),
+            partition_key: Arc::from("part1"),
+            chunk_id,
+        });
         storage.to_object_store(data, &path).await.unwrap();
 
         let path: DirsAndFileName = path.into();
