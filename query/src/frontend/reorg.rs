@@ -63,7 +63,6 @@ impl ReorgPlanner {
     ///   (Scan chunks) <-- any needed deduplication happens here
     pub fn compact_plan<C, I>(
         &self,
-        table_name: &str,
         chunks: I,
         output_sort: SortKey<'_>,
     ) -> Result<(Schema, LogicalPlan)>
@@ -310,7 +309,7 @@ mod test {
         );
 
         let (_, compact_plan) = ReorgPlanner::new()
-            .compact_plan("t", chunks, sort_key)
+            .compact_plan(chunks, sort_key)
             .expect("created compact plan");
 
         let executor = Executor::new(1);

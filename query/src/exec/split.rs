@@ -435,7 +435,7 @@ mod tests {
         let split_expr = compile_expr(input.as_ref(), col("int_col").lt(lit(3)));
         let split_exec = StreamSplitExec::new(input, split_expr);
 
-        let output0 = run_and_get_putput(&split_exec, 0).await.unwrap();
+        let output0 = run_and_get_output(&split_exec, 0).await.unwrap();
         let expected = vec![
             "+---------+------------+",
             "| int_col | str_col    |",
@@ -447,7 +447,7 @@ mod tests {
         ];
         assert_batches_sorted_eq!(&expected, &output0);
 
-        let output1 = run_and_get_putput(&split_exec, 1).await.unwrap();
+        let output1 = run_and_get_output(&split_exec, 1).await.unwrap();
         let expected = vec![
             "+---------+---------+",
             "| int_col | str_col |",
@@ -474,11 +474,11 @@ mod tests {
         let split_expr = compile_expr(input.as_ref(), lit(false));
         let split_exec = StreamSplitExec::new(input, split_expr);
 
-        let output0 = run_and_get_putput(&split_exec, 0).await.unwrap();
+        let output0 = run_and_get_output(&split_exec, 0).await.unwrap();
         let expected = vec!["++", "||", "++", "++"];
         assert_batches_sorted_eq!(&expected, &output0);
 
-        let output1 = run_and_get_putput(&split_exec, 1).await.unwrap();
+        let output1 = run_and_get_output(&split_exec, 1).await.unwrap();
         let expected = vec![
             "+---------+",
             "| int_col |",
@@ -507,7 +507,7 @@ mod tests {
         let split_expr = compile_expr(input.as_ref(), col("int_col").lt(lit(3)));
         let split_exec = StreamSplitExec::new(input, split_expr);
 
-        let output0 = run_and_get_putput(&split_exec, 0).await.unwrap();
+        let output0 = run_and_get_output(&split_exec, 0).await.unwrap();
         let expected = vec![
             "+---------+",
             "| int_col |",
@@ -518,7 +518,7 @@ mod tests {
         ];
         assert_batches_sorted_eq!(&expected, &output0);
 
-        let output1 = run_and_get_putput(&split_exec, 1).await.unwrap();
+        let output1 = run_and_get_output(&split_exec, 1).await.unwrap();
         let expected = vec![
             "+---------+",
             "| int_col |",
@@ -546,7 +546,7 @@ mod tests {
         let split_expr = compile_expr(input.as_ref(), col("int_col"));
         let split_exec = StreamSplitExec::new(input, split_expr);
 
-        let output0 = run_and_get_putput(&split_exec, 0)
+        let output0 = run_and_get_output(&split_exec, 0)
             .await
             .unwrap_err()
             .to_string();
