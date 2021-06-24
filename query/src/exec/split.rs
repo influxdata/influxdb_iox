@@ -226,7 +226,7 @@ impl StreamSplitExec {
         let num_input_streams = self.input.output_partitioning().partition_count();
         assert_eq!(
             num_input_streams, 1,
-            "need at least one input partition for stream split exec"
+            "need exactly one input partition for stream split exec"
         );
 
         debug!("Setting up SplitStreamExec state");
@@ -583,7 +583,7 @@ mod tests {
     }
 
     /// Runs the `output_num` output of the stream and returns the results
-    async fn run_and_get_putput(
+    async fn run_and_get_output(
         split_exec: &StreamSplitExec,
         output_num: usize,
     ) -> Result<Vec<RecordBatch>> {
