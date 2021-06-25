@@ -120,7 +120,7 @@ impl Chunk {
             .iter()
             .zip(table_data.schema().fields())
         {
-            info!(%table_name, column = %field.name(), rows=column.len(), data_type=%field.data_type(), "column");
+            info!(%table_name, column = %field.name(), rows=column.len(), data_type=%field.data_type(), buffer_size=column.get_buffer_memory_size(), array_size=column.get_array_memory_size(), "column");
             for (idx, buffer) in column.data().buffers().iter().enumerate() {
                 info!(%table_name, column = %field.name(), len=buffer.len(), capacity=buffer.capacity(), idx, "column data");
             }
