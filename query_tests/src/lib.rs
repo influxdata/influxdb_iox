@@ -8,6 +8,7 @@
 // Actual tests
 
 #[cfg(test)]
+#[rustfmt::skip]
 mod cases;
 #[cfg(test)]
 pub mod influxrpc;
