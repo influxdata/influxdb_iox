@@ -67,8 +67,8 @@ fn optimize_col(col: &ArrayRef, key_type: &DataType, value_type: &DataType) -> R
     }
 
     // Then perform deduplication
-    let mut new_dictionary = StringDictionary::with_capacity(keys.len(), values_len);
-    let mut old_to_new_idx: HashMap<i32, i32> = HashMap::with_capacity(keys.len());
+    let mut new_dictionary = StringDictionary::with_capacity(used_keys.len(), values_len);
+    let mut old_to_new_idx: HashMap<i32, i32> = HashMap::with_capacity(used_keys.len());
     for key in used_keys {
         let new_key = new_dictionary.lookup_value_or_insert(values.value(key as usize));
         old_to_new_idx.insert(key, new_key);
