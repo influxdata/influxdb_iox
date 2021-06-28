@@ -1241,7 +1241,9 @@ pub enum SequencedEntryError {
 #[derive(Debug)]
 pub struct SequencedEntry {
     entry: Entry,
-    sequence: Sequence,
+    // Sequences may not be present when IOx has no serialization
+    // mechanism
+    sequence: Option<Sequence>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1258,10 +1260,10 @@ impl SequencedEntry {
     ) -> Result<Self, SequencedEntryError> {
         Ok(Self {
             entry,
-            sequence: Sequence {
+            sequence: Some(Sequence {
                 id: server_id.get_u32(),
                 number: process_clock.get_u64(),
-            },
+            }),
         })
     }
 
@@ -1269,15 +1271,21 @@ impl SequencedEntry {
         sequence: Sequence,
         entry: Entry,
     ) -> Result<Self, SequencedEntryError> {
+        let sequence = Some(sequence);
         Ok(Self { entry, sequence })
+    }
+
+    pub fn new_unsequenced(entry: Entry) -> Self {
+        let sequence = None;
+        Self { entry, sequence }
     }
 
     pub fn partition_writes(&self) -> Option<Vec<PartitionWrite<'_>>> {
         self.entry.partition_writes()
     }
 
-    pub fn sequence(&self) -> &Sequence {
-        &self.sequence
+    pub fn sequence(&self) -> Option<&Sequence> {
+        self.sequence.as_ref()
     }
 }
 

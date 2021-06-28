@@ -13,7 +13,7 @@ fn write_chunk(count: usize, entries: &[Entry]) {
         for entry in entries {
             for write in entry.partition_writes().iter().flatten() {
                 for batch in write.table_batches() {
-                    chunk.write_table_batch(1, 5, batch).unwrap();
+                    chunk.write_table_batch(batch).unwrap();
                 }
             }
         }

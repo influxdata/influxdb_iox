@@ -350,7 +350,7 @@ mod tests {
             mutable_buffer::chunk::ChunkMetrics::new_unregistered(),
         );
 
-        mb_chunk.write_table_batch(1, 5, batch).unwrap();
+        mb_chunk.write_table_batch(batch).unwrap();
 
         partition.create_open_chunk(mb_chunk);
     }

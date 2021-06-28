@@ -906,12 +906,12 @@ mod tests {
         );
     }
 
-    fn make_mb_chunk(table_name: &str, sequencer_id: u32) -> MBChunk {
+    fn make_mb_chunk(table_name: &str, _sequencer_id: u32) -> MBChunk {
         let mut mb_chunk = MBChunk::new(table_name, MBChunkMetrics::new_unregistered());
         let entry = lp_to_entry(&format!("{} bar=1 10", table_name));
         let write = entry.partition_writes().unwrap().remove(0);
         let batch = write.table_batches().remove(0);
-        mb_chunk.write_table_batch(sequencer_id, 1, batch).unwrap();
+        mb_chunk.write_table_batch(batch).unwrap();
         mb_chunk
     }
 

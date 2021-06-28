@@ -829,16 +829,9 @@ impl Db {
                 DatabaseNotWriteable {}.fail()
             }
             (None, false) => {
-                // If no write buffer is configured, use the process clock and send to the mutable
-                // buffer.
-                let sequenced_entry = Arc::new(
-                    SequencedEntry::new_from_process_clock(
-                        self.process_clock.next(),
-                        self.server_id,
-                        entry,
-                    )
-                    .context(SequencedEntryError)?,
-                );
+                // If no write buffer is configured, nothing is
+                // sequencing entries so skip doing so here
+                let sequenced_entry = Arc::new(SequencedEntry::new_unsequenced(entry));
 
                 self.store_sequenced_entry(sequenced_entry)
             }
@@ -902,13 +895,8 @@ impl Db {
                             let mb_chunk =
                                 chunk.mutable_buffer().expect("cannot mutate open chunk");
 
-                            if let Err(e) = mb_chunk
-                                .write_table_batch(
-                                    sequenced_entry.sequence().id,
-                                    sequenced_entry.sequence().number,
-                                    table_batch,
-                                )
-                                .context(WriteEntry {
+                            if let Err(e) =
+                                mb_chunk.write_table_batch(table_batch).context(WriteEntry {
                                     partition_key,
                                     chunk_id,
                                 })
@@ -935,11 +923,7 @@ impl Db {
                             );
 
                             if let Err(e) = mb_chunk
-                                .write_table_batch(
-                                    sequenced_entry.sequence().id,
-                                    sequenced_entry.sequence().number,
-                                    table_batch,
-                                )
+                                .write_table_batch(table_batch)
                                 .context(WriteEntryInitial { partition_key })
                             {
                                 if errors.len() < MAX_ERRORS_PER_SEQUENCED_ENTRY {
@@ -953,26 +937,32 @@ impl Db {
                         }
                     };
 
-                    match partition.persistence_windows() {
-                        Some(windows) => {
+                    match (
+                        sequenced_entry.as_ref().sequence(),
+                        partition.persistence_windows(),
+                    ) {
+                        (Some(sequence), Some(windows)) => {
                             windows.add_range(
-                                sequenced_entry.as_ref().sequence(),
+                                sequence,
                                 row_count,
                                 min_time,
                                 max_time,
                                 Instant::now(),
                             );
                         }
-                        None => {
+                        (Some(sequence), None) => {
                             let mut windows = PersistenceWindows::new(late_arrival_window);
                             windows.add_range(
-                                sequenced_entry.as_ref().sequence(),
+                                sequence,
                                 row_count,
                                 min_time,
                                 max_time,
                                 Instant::now(),
                             );
                             partition.set_persistence_windows(windows);
+                        }
+                        (None, _) => {
+                            // unsequenced entry
                         }
                     }
                 }
@@ -1099,6 +1089,7 @@ mod tests {
     use bytes::Bytes;
     use chrono::Utc;
     use futures::{stream, StreamExt, TryStreamExt};
+    use mutable_buffer::persistence_windows::MinMaxSequence;
     use tokio_util::sync::CancellationToken;
 
     use ::test_helpers::assert_contains;
@@ -1944,22 +1935,44 @@ mod tests {
 
     #[tokio::test]
     async fn write_updates_persistence_windows() {
-        let db = Arc::new(make_db().await.db);
-
-        let now = Utc::now().timestamp_nanos() as u64;
+        // Writes should update the persistence windows when there
+        // is a write buffer configured.
+        let write_buffer = Arc::new(MockBuffer::default());
+        let db = TestDb::builder()
+            .write_buffer(Arc::clone(&write_buffer) as _)
+            .build()
+            .await
+            .db;
 
         let partition_key = "1970-01-01T00";
-        write_lp(&db, "cpu bar=1 10").await;
-
-        let later = Utc::now().timestamp_nanos() as u64;
+        write_lp(&db, "cpu bar=1 10").await; // seq 0
+        write_lp(&db, "cpu bar=1 20").await; // seq 1
+        write_lp(&db, "cpu bar=1 30").await; // seq 2
 
         let partition = db.catalog.partition("cpu", partition_key).unwrap();
         let mut partition = partition.write();
         let windows = partition.persistence_windows().unwrap();
         let seq = windows.minimum_unpersisted_sequence().unwrap();
 
-        let seq = seq.get(&1).unwrap();
-        assert!(now < seq.min && later > seq.min);
+        println!("Seq: {:#?}", seq);
+        let seq = seq.get(&0).unwrap();
+        assert_eq!(seq, &MinMaxSequence { min: 0, max: 2 });
+    }
+
+    #[tokio::test]
+    async fn write_with_no_write_buffer_does_not_update_persistence_windows() {
+        let db = Arc::new(make_db().await.db);
+
+        let partition_key = "1970-01-01T00";
+        write_lp(&db, "cpu bar=1 10").await;
+
+        let partition = db.catalog.partition("cpu", partition_key).unwrap();
+        let mut partition = partition.write();
+        // validate it has data
+        let table_summary = partition.summary().table;
+        assert_eq!(&table_summary.name, "cpu");
+        assert_eq!(table_summary.count(), 1);
+        assert!(partition.persistence_windows().is_none());
     }
 
     #[tokio::test]

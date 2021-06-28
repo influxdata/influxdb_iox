@@ -106,12 +106,7 @@ impl MBChunk {
     /// Write the contents of a [`TableBatch`] into this Chunk.
     ///
     /// Panics if the batch specifies a different name for the table in this Chunk
-    pub fn write_table_batch(
-        &mut self,
-        sequencer_id: u32,
-        sequence_number: u64,
-        batch: TableBatch<'_>,
-    ) -> Result<()> {
+    pub fn write_table_batch(&mut self, batch: TableBatch<'_>) -> Result<()> {
         let table_name = batch.name();
         assert_eq!(
             table_name,
@@ -120,7 +115,7 @@ impl MBChunk {
         );
 
         let columns = batch.columns();
-        self.write_columns(sequencer_id, sequence_number, columns)?;
+        self.write_columns(columns)?;
 
         // Invalidate chunk snapshot
         *self
@@ -273,12 +268,7 @@ impl MBChunk {
 
     /// Validates the schema of the passed in columns, then adds their values to
     /// the associated columns in the table and updates summary statistics.
-    pub fn write_columns(
-        &mut self,
-        _sequencer_id: u32,
-        _sequence_number: u64,
-        columns: Vec<entry::Column<'_>>,
-    ) -> Result<()> {
+    pub fn write_columns(&mut self, columns: Vec<entry::Column<'_>>) -> Result<()> {
         let row_count_before_insert = self.rows();
         let additional_rows = columns.first().map(|x| x.row_count).unwrap_or_default();
         let final_row_count = row_count_before_insert + additional_rows;
@@ -357,7 +347,7 @@ pub mod test_helpers {
             );
 
             for batch in table_batches {
-                chunk.write_table_batch(1, 5, batch)?;
+                chunk.write_table_batch(batch)?;
             }
         }
 
@@ -596,15 +586,11 @@ mod tests {
     #[test]
     fn write_columns_validates_schema() {
         let mut table = MBChunk::new("table_name", ChunkMetrics::new_unregistered());
-        let sequencer_id = 1;
-        let sequence_number = 5;
 
         let lp = "foo,t1=asdf iv=1i,uv=1u,fv=1.0,bv=true,sv=\"hi\" 1";
         let entry = lp_to_entry(&lp);
         table
             .write_columns(
-                sequencer_id,
-                sequence_number,
                 entry
                     .partition_writes()
                     .unwrap()
@@ -621,8 +607,6 @@ mod tests {
         let entry = lp_to_entry(&lp);
         let response = table
             .write_columns(
-                sequencer_id,
-                sequence_number,
                 entry
                     .partition_writes()
                     .unwrap()
@@ -654,8 +638,6 @@ mod tests {
         let entry = lp_to_entry(&lp);
         let response = table
             .write_columns(
-                sequencer_id,
-                sequence_number,
                 entry
                     .partition_writes()
                     .unwrap()
@@ -687,8 +669,6 @@ mod tests {
         let entry = lp_to_entry(&lp);
         let response = table
             .write_columns(
-                sequencer_id,
-                sequence_number,
                 entry
                     .partition_writes()
                     .unwrap()
@@ -720,8 +700,6 @@ mod tests {
         let entry = lp_to_entry(&lp);
         let response = table
             .write_columns(
-                sequencer_id,
-                sequence_number,
                 entry
                     .partition_writes()
                     .unwrap()
@@ -753,8 +731,6 @@ mod tests {
         let entry = lp_to_entry(&lp);
         let response = table
             .write_columns(
-                sequencer_id,
-                sequence_number,
                 entry
                     .partition_writes()
                     .unwrap()
@@ -786,8 +762,6 @@ mod tests {
         let entry = lp_to_entry(&lp);
         let response = table
             .write_columns(
-                sequencer_id,
-                sequence_number,
                 entry
                     .partition_writes()
                     .unwrap()
@@ -828,7 +802,7 @@ mod tests {
             .unwrap()
             .table_batches()
         {
-            table.write_columns(1, 5, batch.columns()).unwrap();
+            table.write_columns(batch.columns()).unwrap();
         }
     }
 }

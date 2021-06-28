@@ -121,6 +121,8 @@ pub mod test_helpers {
             let offset = entries.len() as u64;
             entries.push(entry.clone());
 
+            println!("Sequencing offset {}", offset);
+
             Ok(Sequence {
                 id: 0,
                 number: offset,

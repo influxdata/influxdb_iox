@@ -22,7 +22,7 @@ fn chunk(count: usize) -> MBChunk {
         for entry in lp_to_entries(&lp) {
             for write in entry.partition_writes().iter().flatten() {
                 for batch in write.table_batches() {
-                    chunk.write_table_batch(1, 5, batch).unwrap();
+                    chunk.write_table_batch(batch).unwrap();
                 }
             }
         }
