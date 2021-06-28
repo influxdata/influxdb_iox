@@ -1241,8 +1241,9 @@ pub enum SequencedEntryError {
 #[derive(Debug)]
 pub struct SequencedEntry {
     entry: Entry,
-    // Sequences may not be present when IOx has no serialization
-    // mechanism
+    /// The (optional) sequence for this entry.  At the time of
+    /// writing, sequences will not be present when there is no
+    /// configured mechanism to define the order of all writes.
     sequence: Option<Sequence>,
 }
 
