@@ -862,6 +862,8 @@ impl Db {
         }
 
         if let Some(partitioned_writes) = sequenced_entry.partition_writes() {
+            let sequence = sequenced_entry.as_ref().sequence();
+
             // Protect against DoS by limiting the number of errors we might collect
             const MAX_ERRORS_PER_SEQUENCED_ENTRY: usize = 10;
 
@@ -895,8 +897,9 @@ impl Db {
                             let mb_chunk =
                                 chunk.mutable_buffer().expect("cannot mutate open chunk");
 
-                            if let Err(e) =
-                                mb_chunk.write_table_batch(table_batch).context(WriteEntry {
+                            if let Err(e) = mb_chunk
+                                .write_table_batch(sequence, table_batch)
+                                .context(WriteEntry {
                                     partition_key,
                                     chunk_id,
                                 })
@@ -923,7 +926,7 @@ impl Db {
                             );
 
                             if let Err(e) = mb_chunk
-                                .write_table_batch(table_batch)
+                                .write_table_batch(sequence, table_batch)
                                 .context(WriteEntryInitial { partition_key })
                             {
                                 if errors.len() < MAX_ERRORS_PER_SEQUENCED_ENTRY {
@@ -937,10 +940,7 @@ impl Db {
                         }
                     };
 
-                    match (
-                        sequenced_entry.as_ref().sequence(),
-                        partition.persistence_windows(),
-                    ) {
+                    match (sequence, partition.persistence_windows()) {
                         (Some(sequence), Some(windows)) => {
                             windows.add_range(
                                 sequence,

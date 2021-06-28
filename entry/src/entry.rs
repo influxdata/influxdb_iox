@@ -1253,6 +1253,15 @@ pub struct Sequence {
     pub number: u64,
 }
 
+impl Sequence {
+    pub fn new(sequencer_id: u32, sequence_number: u64) -> Self {
+        Self {
+            id: sequencer_id,
+            number: sequence_number,
+        }
+    }
+}
+
 impl SequencedEntry {
     pub fn new_from_process_clock(
         process_clock: ClockValue,
