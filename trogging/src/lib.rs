@@ -29,8 +29,20 @@ use observability_deps::{
         EnvFilter,
     },
 };
+use std::cmp::min;
 use std::io;
+use std::io::Write;
 use thiserror::Error;
+
+/// Maximum length of a log line.
+/// Space for a final trailing newline if truncated.
+///
+/// Docker "chunks" log message in 16KB chunks. The log driver receives log lines in such chunks
+/// but not all of the log drivers properly recombine the lines, and even those who do have their
+/// own max buffer sizes (e.g. for our fluentd config it's 32KB).
+/// To avoid surprises, for now, let's just truncate log lines right below 16K and make sure
+/// they are properly terminated with a newline if they were so before the truncation.
+const MAX_LINE_LENGTH: usize = 16 * 1024 - 1;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -93,7 +105,7 @@ impl Builder {
 impl<W> Builder<W> {
     pub fn with_writer<W2>(self, make_writer: W2) -> Builder<W2>
     where
-        W2: MakeWriter + Send + Sync + Clone + 'static,
+        W2: MakeWriter + Send + Sync + 'static,
     {
         Builder::<W2> {
             make_writer,
@@ -153,13 +165,26 @@ where
     }
 
     pub fn with_log_destination(self, log_destination: LogDestination) -> Builder<BoxMakeWriter> {
+        // Ideally we need a synchronized writer so that threads don't stomp on each others.
+        // Unfortunately with the current release of `tracing-subscriber`, the trait doesn't expose
+        // a lifetime parameter. The HEAD version fixes that and even implements MakeWriter for Mutex<Writer>
+        // and shows some examples of how to use StdoutLock
+        //
+        // https://docs.rs/tracing-subscriber/0.2.18/tracing_subscriber/fmt/trait.MakeWriter.html)
+        // vs
+        // https://github.com/tokio-rs/tracing/blob/master/tracing-subscriber/src/fmt/writer.rs#L161
+        //
+        // The current hack is to ensure the LineWriter has enough buffer space to perform one single
+        // large call to the underlying writer. This is not a guarantee that the write won't be interrupted
+        // but hopefully it will happen much less often and not cause a pain until tracing_subscriber
+        // gets upgraded.
+        //
+        // For that to work we must cap the line length, which is also a good idea because docker
+        // caps log lines at 16K (and fluentd caps them at 32K).
+
         let make_writer = match log_destination {
-            LogDestination::Stdout => {
-                fmt::writer::BoxMakeWriter::new(|| std::io::LineWriter::new(std::io::stdout()))
-            }
-            LogDestination::Stderr => {
-                fmt::writer::BoxMakeWriter::new(|| std::io::LineWriter::new(std::io::stderr()))
-            }
+            LogDestination::Stdout => make_writer(std::io::stdout),
+            LogDestination::Stderr => make_writer(std::io::stderr),
         };
         Builder {
             make_writer,
@@ -411,6 +436,45 @@ impl Drop for TracingGuard {
     }
 }
 
+fn make_writer<M>(m: M) -> BoxMakeWriter
+where
+    M: MakeWriter + Send + Sync + 'static,
+{
+    fmt::writer::BoxMakeWriter::new(move || {
+        std::io::LineWriter::with_capacity(
+            MAX_LINE_LENGTH,
+            LimitedWriter(MAX_LINE_LENGTH, m.make_writer()),
+        )
+    })
+}
+
+struct LimitedWriter<W: Write>(usize, W);
+impl<W: Write> Write for LimitedWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let truncated = &buf[..min(self.0, buf.len())];
+        let had_trailing_newline = buf[buf.len() - 1] == b'\n';
+        if had_trailing_newline && (truncated[truncated.len() - 1] != b'\n') {
+            // slow path; copy buffer and append a newline at the end
+            // we still want to perform a single write syscall (if possible).
+            let mut tmp = truncated.to_vec();
+            tmp.push(b'\n');
+            self.1.write_all(&tmp).map(|_| buf.len())
+        } else {
+            self.1.write_all(truncated).map(|_| buf.len())
+        }
+        // ^^^ `write_all`:
+        // in case of interrupted syscalls we prefer to write a garbled log line.
+        // than to just truncate the logs.
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.1.flush()
+    }
+}
+
 #[cfg(test)]
 pub mod test_util {
     ///! Utilities for testing logging and tracing.
@@ -481,7 +545,7 @@ pub mod test_util {
     {
         let (writer, output) = TestWriter::new();
         let subscriber = builder
-            .with_writer(writer)
+            .with_writer(make_writer(writer))
             .with_target(false)
             .with_ansi(false)
             .build()
@@ -647,5 +711,98 @@ ERROR foo
         );
 
         assert_eq!(called.load(Ordering::SeqCst), false);
+    }
+
+    #[test]
+    fn test_long_lines() {
+        let test_cases = vec![
+            0..1,
+            10..11,
+            // test all the values around the line length limit; the logger adds some
+            // prefix text such as level and field name, so the field value length that
+            // actually trigger a line overflow is a bit smaller than MAX_LINE_LENGTH.
+            MAX_LINE_LENGTH - 40..MAX_LINE_LENGTH + 20,
+            20 * 1024..20 * 1024,
+        ];
+
+        for range in test_cases {
+            for len in range {
+                let long = std::iter::repeat("X").take(len).collect::<String>();
+
+                let captured = log_test(
+                    Builder::new().with_log_filter(&Some("error".to_string())),
+                    move || {
+                        error!(%long);
+                    },
+                )
+                .without_timestamps();
+
+                assert_eq!(captured.chars().last().unwrap(), '\n');
+
+                assert!(
+                    captured.len() <= MAX_LINE_LENGTH,
+                    "{} <= {}",
+                    captured.len(),
+                    MAX_LINE_LENGTH
+                );
+            }
+        }
+    }
+
+    // This test checks that [`make_writer`] returns a writer that implement line buffering, which means
+    // that written data is not flushed to the underlying IO writer until a a whole line is been written
+    // to the line buffered writer, possibly by multiple calls to the `write` method.
+    // (In fact, the `logfmt` layer does call `write` multiple times for each log line).
+    //
+    // What happens to the truncated strings w.r.t to newlines is out of scope for this test,
+    // see the [`limited_writer`] test instead.
+    #[test]
+    fn line_buffering() {
+        let (test_writer, captured) = TestWriter::new();
+        let mut writer = make_writer(test_writer).make_writer();
+        writer.write_all("foo".as_bytes()).unwrap();
+        // wasn't flushed yet because there was no newline yet
+        assert_eq!(captured.to_string(), "");
+        writer.write_all("\nbar".as_bytes()).unwrap();
+        // a newline caused the first line to be flushed but the trailing string is still buffered
+        assert_eq!(captured.to_string(), "foo\n");
+        writer.flush().unwrap();
+        // an explicit call to flush flushes even if there is no trailing newline
+        assert_eq!(captured.to_string(), "foo\nbar");
+
+        // another case when the line buffer flushes even before a newline is when the internal buffer limit
+        let (test_writer, captured) = TestWriter::new();
+        let mut writer = make_writer(test_writer).make_writer();
+        let long = std::iter::repeat(b'X')
+            .take(MAX_LINE_LENGTH)
+            .collect::<Vec<u8>>();
+        writer.write_all(&long).unwrap();
+        assert_eq!(captured.to_string().len(), MAX_LINE_LENGTH);
+    }
+
+    #[test]
+    fn limited_writer() {
+        const TEST_MAX_LINE_LENGTH: usize = 3;
+        let test_cases = vec![
+            ("", ""),
+            ("a", "a"),
+            ("ab", "ab"),
+            ("abc", "abc"),
+            ("abc", "abc"),
+            ("abcd", "abc"),
+            ("abcd\n", "abc\n"),
+            ("abcd\n\n", "abc\n"),
+            ("abcd\nx", "abc"),
+            ("\n", "\n"),
+            ("\nabc", "\nab"),
+        ];
+        for (input, want) in test_cases {
+            let mut buf = Vec::new();
+            {
+                let mut lw = LimitedWriter(TEST_MAX_LINE_LENGTH, &mut buf);
+                write!(&mut lw, "{}", input).unwrap();
+            }
+            assert_eq!(std::str::from_utf8(&buf).unwrap(), want);
+        }
     }
 }
