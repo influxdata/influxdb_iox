@@ -198,7 +198,7 @@ pub struct CatalogChunk {
     /// itself
     time_of_last_write: Option<DateTime<Utc>>,
 
-    /// Time at which this chunk was maked as closed. Note this is
+    /// Time at which this chunk was marked as closed. Note this is
     /// not the same as the timestamps on the data itself
     time_closed: Option<DateTime<Utc>>,
 }
@@ -237,10 +237,8 @@ impl ChunkMetrics {
 impl CatalogChunk {
     /// Creates a new open chunk from the provided MUB chunk.
     ///
-    /// Returns an error if the provided chunk is empty, otherwise creates a new open chunk and records a write at the
+    /// Panics if the provided chunk is empty, otherwise creates a new open chunk and records a write at the
     /// current time.
-    ///
-    /// Apart from [`new_object_store_only`](Self::new_object_store_only) this is the only way to create new chunks.
     pub(super) fn new_open(
         addr: ChunkAddr,
         chunk: mutable_buffer::chunk::MBChunk,
@@ -267,9 +265,48 @@ impl CatalogChunk {
         chunk
     }
 
-    /// Creates a new chunk that is only registered via an object store reference (= only exists in parquet).
+    /// Creates a new rub chunk from the provided RUB chunk and metadata
     ///
-    /// Apart from [`new_open`](Self::new_open) this is the only way to create new chunks.
+    /// Panics if the provided chunk is empty
+    pub(super) fn new_rub_chunk(
+        addr: ChunkAddr,
+        chunk: read_buffer::RBChunk,
+        schema: Schema,
+        metrics: ChunkMetrics,
+    ) -> Self {
+        assert!(chunk.rows() > 0, "chunk must not be empty");
+
+        // TODO: Move RUB to single table (#1295)
+        let summaries = chunk.table_summaries();
+        assert_eq!(summaries.len(), 1);
+        let summary = summaries.into_iter().next().unwrap();
+
+        let stage = ChunkStage::Frozen {
+            meta: Arc::new(ChunkMetadata {
+                table_summary: Arc::new(summary),
+                schema: Arc::new(schema),
+            }),
+            representation: ChunkStageFrozenRepr::ReadBuffer(Arc::new(chunk)),
+        };
+
+        metrics
+            .state
+            .inc_with_labels(&[KeyValue::new("state", "compacted")]);
+
+        let mut chunk = Self {
+            addr,
+            stage,
+            lifecycle_action: None,
+            metrics,
+            time_of_first_write: None,
+            time_of_last_write: None,
+            time_closed: None,
+        };
+        chunk.record_write(); // The creation is considered the first and only "write"
+        chunk
+    }
+
+    /// Creates a new chunk that is only registered via an object store reference (= only exists in parquet).
     pub(super) fn new_object_store_only(
         addr: ChunkAddr,
         chunk: Arc<parquet_file::chunk::ParquetChunk>,
@@ -557,6 +594,19 @@ impl CatalogChunk {
         }
     }
 
+    /// Set the chunk to be compacting
+    pub fn set_compacting(&mut self, registration: &TaskRegistration) -> Result<()> {
+        match &self.stage {
+            ChunkStage::Open { .. } | ChunkStage::Frozen { .. } => {
+                self.set_lifecycle_action(ChunkLifecycleAction::Compacting, registration)?;
+                Ok(())
+            }
+            ChunkStage::Persisted { .. } => {
+                unexpected_state!(self, "setting compacting", "Open or Frozen", &self.stage)
+            }
+        }
+    }
+
     /// Set the chunk in the Moved state, setting the underlying
     /// storage handle to db, and discarding the underlying mutable buffer
     /// storage.
@@ -686,7 +736,7 @@ impl CatalogChunk {
                 read_buffer,
                 ..
             } => {
-                if let Some(read_buffer_inner) = &read_buffer {
+                if let Some(rub_chunk) = read_buffer.take() {
                     self.metrics
                         .state
                         .inc_with_labels(&[KeyValue::new("state", "os")]);
@@ -696,8 +746,6 @@ impl CatalogChunk {
                         &[KeyValue::new("state", "os")],
                     );
 
-                    let rub_chunk = Arc::clone(read_buffer_inner);
-                    *read_buffer = None;
                     Ok(rub_chunk)
                 } else {
                     // TODO: do we really need to error here or should unloading an unloaded chunk be a no-op?

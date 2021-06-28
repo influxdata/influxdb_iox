@@ -73,7 +73,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::BytesMut;
-use db::load_or_create_preserved_catalog;
+use db::{load::load_or_create_preserved_catalog, DatabaseToCommit};
 use init::InitStatus;
 use observability_deps::tracing::{debug, info, warn};
 use parking_lot::Mutex;
@@ -146,9 +146,9 @@ pub enum Error {
     ErrorReplicating { source: DatabaseError },
 
     #[snafu(display(
-        "server ID is set but DBs are not yet loaded. Server is not yet ready to read/write data."
+        "Server ID is set ({}) but server is not yet initialized (e.g. DBs and remotes are not loaded). Server is not yet ready to read/write data.", server_id
     ))]
-    DatabasesNotLoaded,
+    ServerNotInitialized { server_id: ServerId },
 
     #[snafu(display("error serializing database rules to protobuf: {}", source))]
     ErrorSerializingRulesProtobuf {
@@ -207,6 +207,9 @@ pub enum Error {
 
     #[snafu(display("cannot get id: {}", source))]
     GetIdError { source: crate::init::Error },
+
+    #[snafu(display("cannot create write buffer for writing: {}", source))]
+    CreatingWriteBufferForWriting { source: DatabaseError },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -474,7 +477,7 @@ where
         if self.initialized() {
             Ok(server_id)
         } else {
-            Err(Error::DatabasesNotLoaded)
+            Err(Error::ServerNotInitialized { server_id })
         }
     }
 
@@ -498,14 +501,20 @@ where
         .map_err(|e| Box::new(e) as _)
         .context(CatalogLoadError)?;
 
-        db_reservation.commit_db(
+        let write_buffer = write_buffer::new(&rules)
+            .map_err(|e| Error::CreatingWriteBufferForWriting { source: e })?;
+
+        let database_to_commit = DatabaseToCommit {
             server_id,
-            Arc::clone(&self.store),
-            Arc::clone(&self.exec),
+            object_store: Arc::clone(&self.store),
+            exec: Arc::clone(&self.exec),
             preserved_catalog,
             catalog,
             rules,
-        )?;
+            write_buffer,
+        };
+
+        db_reservation.commit_db(database_to_commit)?;
 
         Ok(())
     }
@@ -714,7 +723,7 @@ where
 
     pub async fn write_entry_local(&self, db_name: &str, db: &Db, entry: Entry) -> Result<()> {
         let bytes = entry.data().len() as u64;
-        db.store_entry(entry).map_err(|e| {
+        db.store_entry(entry).await.map_err(|e| {
             self.metrics.ingest_entries_bytes_total.add_with_labels(
                 bytes,
                 &[
@@ -1168,7 +1177,7 @@ mod tests {
                 parts: vec![TemplatePart::TimeFormat("YYYY-MM".to_string())],
             },
             lifecycle_rules: LifecycleRules {
-                catalog_transactions_until_checkpoint: Some(13.try_into().unwrap()),
+                catalog_transactions_until_checkpoint: 13.try_into().unwrap(),
                 ..Default::default()
             },
             routing_rules: None,
@@ -1783,7 +1792,7 @@ mod tests {
         let err = create_simple_database(&server, "bananas")
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::DatabasesNotLoaded));
+        assert!(matches!(err, Error::ServerNotInitialized { .. }));
     }
 
     #[tokio::test]

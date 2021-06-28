@@ -1,19 +1,25 @@
 //! This module contains the main IOx Database object which has the
 //! instances of the mutable buffer, read buffer, and object store
 
-use self::access::QueryCatalogAccess;
-use self::catalog::TableNameFilter;
-use super::{write_buffer::WriteBuffer, JobRegistry};
-use crate::db::catalog::chunk::ChunkStage;
-use crate::db::catalog::partition::Partition;
-use crate::db::lifecycle::LockableCatalogChunk;
+pub(crate) use crate::db::chunk::DbChunk;
+use crate::{
+    db::{
+        access::QueryCatalogAccess,
+        catalog::{
+            chunk::{CatalogChunk, ChunkStage},
+            partition::Partition,
+            Catalog, TableNameFilter,
+        },
+        lifecycle::LockableCatalogChunk,
+    },
+    write_buffer::WriteBuffer,
+    JobRegistry,
+};
 use ::lifecycle::{LifecycleWriteGuard, LockableChunk};
 use arrow::datatypes::SchemaRef as ArrowSchemaRef;
 use async_trait::async_trait;
-use catalog::{chunk::CatalogChunk, Catalog};
-pub(crate) use chunk::DbChunk;
 use data_types::{
-    chunk_metadata::ChunkSummary,
+    chunk_metadata::{ChunkAddr, ChunkSummary},
     database_rules::DatabaseRules,
     job::Job,
     partition_metadata::{PartitionSummary, TableSummary},
@@ -25,14 +31,14 @@ use datafusion::{
 };
 use entry::{Entry, SequencedEntry};
 use internal_types::{arrow::sort::sort_record_batch, selection::Selection};
-use metrics::{KeyValue, MetricRegistry};
+use metrics::KeyValue;
 use mutable_buffer::chunk::{ChunkMetrics as MutableBufferChunkMetrics, MBChunk};
+use mutable_buffer::persistence_windows::PersistenceWindows;
 use object_store::{path::parsed::DirsAndFileName, ObjectStore};
 use observability_deps::tracing::{debug, error, info, warn};
 use parking_lot::RwLock;
-use parquet_file::catalog::{CheckpointData, TransactionEnd};
 use parquet_file::{
-    catalog::{CatalogParquetInfo, CatalogState, ChunkCreationFailed, PreservedCatalog},
+    catalog::{CheckpointData, PreservedCatalog},
     chunk::{ChunkMetrics as ParquetChunkMetrics, ParquetChunk},
     cleanup::cleanup_unreferenced_parquet_files,
     metadata::IoxMetadata,
@@ -41,17 +47,17 @@ use parquet_file::{
 use query::{exec::Executor, predicate::Predicate, QueryDatabase};
 use rand_distr::{Distribution, Poisson};
 use read_buffer::{ChunkMetrics as ReadBufferChunkMetrics, RBChunk};
-use snafu::{ResultExt, Snafu};
-use std::collections::{HashMap, HashSet};
-use std::future::Future;
+use snafu::{ensure, ResultExt, Snafu};
 use std::{
     any::Any,
+    collections::HashMap,
+    future::Future,
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tracker::{TaskTracker, TrackedFuture, TrackedFutureExt};
 
@@ -59,6 +65,7 @@ pub mod access;
 pub mod catalog;
 mod chunk;
 mod lifecycle;
+pub mod load;
 pub mod pred;
 mod process_clock;
 mod streams;
@@ -140,17 +147,38 @@ pub enum Error {
         source: mutable_buffer::chunk::Error,
     },
 
+    #[snafu(display(
+        "Storing sequenced entry failed with the following error(s), and possibly more: {}",
+        errors.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+    ))]
+    StoreSequencedEntryFailures { errors: Vec<Error> },
+
     #[snafu(display("Error building sequenced entry: {}", source))]
     SequencedEntryError { source: entry::SequencedEntryError },
+
+    #[snafu(display("Error while creating parquet chunk: {}", source))]
+    ParquetChunkError { source: parquet_file::chunk::Error },
 
     #[snafu(display("Error while handling transaction on preserved catalog: {}", source))]
     TransactionError {
         source: parquet_file::catalog::Error,
     },
 
+    #[snafu(display("Error while commiting transaction on preserved catalog: {}", source))]
+    CommitError {
+        source: parquet_file::catalog::Error,
+    },
+
+    #[snafu(display("Cannot write chunk: {}", addr))]
+    CannotWriteChunk { addr: ChunkAddr },
+
     #[snafu(display("background task cancelled: {}", source))]
     TaskCancelled { source: futures::future::Aborted },
+
+    #[snafu(display("error finding min/max time on table batch: {}", source))]
+    TableBatchTimeError { source: entry::Error },
 }
+
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// This is the main IOx Database object. It is the root object of any
@@ -261,112 +289,28 @@ pub struct Db {
     write_buffer: Option<Arc<dyn WriteBuffer>>,
 }
 
-/// Load preserved catalog state from store.
-///
-/// If no catalog exists yet, a new one will be created.
-///
-/// **For now, if the catalog is broken, it will be wiped! (https://github.com/influxdata/influxdb_iox/issues/1522)**
-pub async fn load_or_create_preserved_catalog(
-    db_name: &str,
-    object_store: Arc<ObjectStore>,
-    server_id: ServerId,
-    metrics_registry: Arc<MetricRegistry>,
-    wipe_on_error: bool,
-) -> std::result::Result<(PreservedCatalog, Arc<Catalog>), parquet_file::catalog::Error> {
-    let metric_labels = vec![
-        KeyValue::new("db_name", db_name.to_string()),
-        KeyValue::new("svr_id", format!("{}", server_id)),
-    ];
-
-    // first try to load existing catalogs
-    let metrics_domain =
-        metrics_registry.register_domain_with_labels("catalog", metric_labels.clone());
-
-    match PreservedCatalog::load(
-        Arc::clone(&object_store),
-        server_id,
-        db_name.to_string(),
-        CatalogEmptyInput {
-            domain: metrics_domain,
-            metrics_registry: Arc::clone(&metrics_registry),
-            metric_labels: metric_labels.clone(),
-        },
-    )
-    .await
-    {
-        Ok(Some(catalog)) => {
-            // successfull load
-            info!("Found existing catalog for DB {}", db_name);
-            Ok(catalog)
-        }
-        Ok(None) => {
-            // no catalog yet => create one
-            info!(
-                "Found NO existing catalog for DB {}, creating new one",
-                db_name
-            );
-            let metrics_domain =
-                metrics_registry.register_domain_with_labels("catalog", metric_labels.clone());
-
-            PreservedCatalog::new_empty(
-                Arc::clone(&object_store),
-                server_id,
-                db_name.to_string(),
-                CatalogEmptyInput {
-                    domain: metrics_domain,
-                    metrics_registry: Arc::clone(&metrics_registry),
-                    metric_labels: metric_labels.clone(),
-                },
-            )
-            .await
-        }
-        Err(e) => {
-            if wipe_on_error {
-                // https://github.com/influxdata/influxdb_iox/issues/1522)
-                // broken => wipe for now (at least during early iterations)
-                error!("cannot load catalog, so wipe it: {}", e);
-                PreservedCatalog::wipe(&object_store, server_id, db_name).await?;
-
-                let metrics_domain =
-                    metrics_registry.register_domain_with_labels("catalog", metric_labels.clone());
-
-                PreservedCatalog::new_empty(
-                    Arc::clone(&object_store),
-                    server_id,
-                    db_name.to_string(),
-                    CatalogEmptyInput {
-                        domain: metrics_domain,
-                        metrics_registry: Arc::clone(&metrics_registry),
-                        metric_labels: metric_labels.clone(),
-                    },
-                )
-                .await
-            } else {
-                Err(e)
-            }
-        }
-    }
+/// All the information needed to commit a database
+#[derive(Debug)]
+pub(crate) struct DatabaseToCommit {
+    pub(crate) server_id: ServerId,
+    pub(crate) object_store: Arc<ObjectStore>,
+    pub(crate) exec: Arc<Executor>,
+    pub(crate) preserved_catalog: PreservedCatalog,
+    pub(crate) catalog: Catalog,
+    pub(crate) rules: DatabaseRules,
+    pub(crate) write_buffer: Option<Arc<dyn WriteBuffer>>,
 }
 
 impl Db {
-    #[allow(clippy::clippy::too_many_arguments)]
-    pub fn new(
-        rules: DatabaseRules,
-        server_id: ServerId,
-        object_store: Arc<ObjectStore>,
-        exec: Arc<Executor>,
-        jobs: Arc<JobRegistry>,
-        preserved_catalog: PreservedCatalog,
-        catalog: Arc<Catalog>,
-        write_buffer: Option<Arc<dyn WriteBuffer>>,
-    ) -> Self {
-        let db_name = rules.name.clone();
+    pub(crate) fn new(database_to_commit: DatabaseToCommit, jobs: Arc<JobRegistry>) -> Self {
+        let db_name = database_to_commit.rules.name.clone();
 
-        let rules = RwLock::new(rules);
-        let server_id = server_id;
-        let store = Arc::clone(&object_store);
-        let metrics_registry = Arc::clone(&catalog.metrics_registry);
-        let metric_labels = catalog.metric_labels.clone();
+        let rules = RwLock::new(database_to_commit.rules);
+        let server_id = database_to_commit.server_id;
+        let store = Arc::clone(&database_to_commit.object_store);
+        let metrics_registry = Arc::clone(&database_to_commit.catalog.metrics_registry);
+        let metric_labels = database_to_commit.catalog.metric_labels.clone();
+        let catalog = Arc::new(database_to_commit.catalog);
 
         let catalog_access = QueryCatalogAccess::new(
             &db_name,
@@ -383,8 +327,8 @@ impl Db {
             rules,
             server_id,
             store,
-            exec,
-            preserved_catalog: Arc::new(preserved_catalog),
+            exec: database_to_commit.exec,
+            preserved_catalog: Arc::new(database_to_commit.preserved_catalog),
             catalog,
             jobs,
             metrics_registry,
@@ -393,7 +337,7 @@ impl Db {
             worker_iterations_lifecycle: AtomicUsize::new(0),
             worker_iterations_cleanup: AtomicUsize::new(0),
             metric_labels,
-            write_buffer,
+            write_buffer: database_to_commit.write_buffer,
         }
     }
 
@@ -591,40 +535,35 @@ impl Db {
             .set_writing_to_object_store(&registration)
             .context(LifecycleError)?;
 
-        let table_summary = guard.table_summary();
-
         debug!(chunk=%guard.addr(), "chunk marked WRITING , loading tables into object store");
 
-        // Drop locks
-        let chunk = guard.unwrap().chunk;
-
         // Create a storage to save data of this chunk
-        let storage = Storage::new(
-            Arc::clone(&db.store),
-            db.server_id,
-            db.rules.read().name.to_string(),
-        );
+        let storage = Storage::new(Arc::clone(&db.store), db.server_id);
 
         let catalog_transactions_until_checkpoint = db
             .rules
             .read()
             .lifecycle_rules
-            .catalog_transactions_until_checkpoint;
+            .catalog_transactions_until_checkpoint
+            .get();
 
         let preserved_catalog = Arc::clone(&db.preserved_catalog);
         let catalog = Arc::clone(&db.catalog);
+        let object_store = Arc::clone(&db.store);
+
+        // Drop locks
+        let chunk = guard.unwrap().chunk;
 
         let fut = async move {
-            let table_name = table_summary.name.as_str();
             debug!(chunk=%addr, "loading table to object store");
 
             let predicate = read_buffer::Predicate::default();
 
             // Get RecordBatchStream of data from the read buffer chunk
-            let read_results = rb_chunk.read_filter(table_name, predicate, Selection::All);
+            let read_results = rb_chunk.read_filter(&addr.table_name, predicate, Selection::All);
 
             let arrow_schema: ArrowSchemaRef = rb_chunk
-                .read_filter_table_schema(table_name, Selection::All)
+                .read_filter_table_schema(&addr.table_name, Selection::All)
                 .expect("read buffer is infallible")
                 .into();
 
@@ -632,9 +571,22 @@ impl Db {
                 streams::ReadFilterResultsStream::new(read_results, Arc::clone(&arrow_schema)),
             );
 
+            // check that the upcoming state change will very likely succeed
+            {
+                // re-lock
+                let guard = chunk.read();
+                if matches!(guard.stage(), &ChunkStage::Persisted { .. })
+                    || !guard.is_in_lifecycle(::lifecycle::ChunkLifecycleAction::Persisting)
+                {
+                    return Err(Error::CannotWriteChunk {
+                        addr: guard.addr().clone(),
+                    });
+                }
+            }
+
             // catalog-level transaction for preservation layer
             {
-                let mut transaction = preserved_catalog.open_transaction(catalog).await;
+                let mut transaction = preserved_catalog.open_transaction().await;
 
                 // Write this table data into the object store
                 //
@@ -650,39 +602,61 @@ impl Db {
                     chunk_id: addr.chunk_id,
                 };
                 let (path, parquet_metadata) = storage
-                    .write_to_object_store(
-                        addr.partition_key.to_string(),
-                        addr.chunk_id,
-                        table_name.to_string(),
-                        stream,
-                        metadata,
-                    )
+                    .write_to_object_store(addr, stream, metadata)
                     .await
                     .context(WritingToObjectStore)?;
+                let parquet_metadata = Arc::new(parquet_metadata);
+
+                let metrics = catalog
+                    .metrics_registry
+                    .register_domain_with_labels("parquet", catalog.metric_labels.clone());
+                let metrics =
+                    ParquetChunkMetrics::new(&metrics, catalog.metrics().memory().parquet());
+                let parquet_chunk = Arc::new(
+                    ParquetChunk::new(
+                        path.clone(),
+                        object_store,
+                        Arc::clone(&parquet_metadata),
+                        metrics,
+                    )
+                    .context(ParquetChunkError)?,
+                );
+
                 let path: DirsAndFileName = path.into();
 
                 transaction
                     .add_parquet(&path, &parquet_metadata)
                     .context(TransactionError)?;
 
-                let create_checkpoint = catalog_transactions_until_checkpoint
-                    .map_or(false, |interval| {
-                        transaction.revision_counter() % interval.get() == 0
-                    });
-                let checkpoint_data = create_checkpoint.then(|| {
-                    let mut checkpoint_data =
-                        checkpoint_data_from_catalog(&transaction.tstate().catalog);
-                    // don't forget the file that we've just added
-                    checkpoint_data
-                        .files
-                        .insert(path, Arc::new(parquet_metadata));
-                    checkpoint_data
-                });
+                // preserved commit
+                let ckpt_handle = transaction.commit().await.context(CommitError)?;
 
-                transaction
-                    .commit(checkpoint_data)
-                    .await
-                    .context(TransactionError)?;
+                // in-mem commit
+                {
+                    let mut guard = chunk.write();
+                    if let Err(e) = guard.set_written_to_object_store(parquet_chunk) {
+                        panic!("Chunk written but cannot mark as written {}", e);
+                    }
+                }
+
+                let create_checkpoint =
+                    ckpt_handle.revision_counter() % catalog_transactions_until_checkpoint == 0;
+                if create_checkpoint {
+                    // Commit is already done, so we can just scan the catalog for the state.
+                    //
+                    // NOTE: There can only be a single transaction in this section because the checkpoint handle holds
+                    //       transaction lock. Therefore we don't need to worry about concurrent modifications of
+                    //       preserved chunks.
+                    if let Err(e) = ckpt_handle
+                        .create_checkpoint(checkpoint_data_from_catalog(&catalog))
+                        .await
+                    {
+                        warn!(%e, "cannot create catalog checkpoint");
+
+                        // That's somewhat OK. Don't fail the entire task, because the actual preservation was completed
+                        // (both in-mem and within the preserved catalog).
+                    }
+                }
             }
 
             // We know this chunk is ParquetFile type
@@ -804,7 +778,7 @@ impl Db {
                             debug!(?duration, "cleanup worker sleeps");
                             tokio::time::sleep(duration).await;
 
-                            if let Err(e) = cleanup_unreferenced_parquet_files(&self.preserved_catalog, Arc::clone(&self.catalog), 1_000).await {
+                            if let Err(e) = cleanup_unreferenced_parquet_files(&self.preserved_catalog, 1_000).await {
                                 error!(%e, "error in background cleanup task");
                             }
                         } => {},
@@ -818,7 +792,7 @@ impl Db {
     }
 
     /// Stores an entry based on the configuration.
-    pub fn store_entry(&self, entry: Entry) -> Result<()> {
+    pub async fn store_entry(&self, entry: Entry) -> Result<()> {
         let immutable = {
             let rules = self.rules.read();
             rules.lifecycle_rules.immutable
@@ -829,13 +803,19 @@ impl Db {
                 // If only the write buffer is configured, this is passing the data through to
                 // the write buffer, and it's not an error. We ignore the returned metadata; it
                 // will get picked up when data is read from the write buffer.
-                let _ = write_buffer.store_entry(&entry).context(WriteBufferError)?;
+                let _ = write_buffer
+                    .store_entry(&entry)
+                    .await
+                    .context(WriteBufferError)?;
                 Ok(())
             }
             (Some(write_buffer), false) => {
                 // If using both write buffer and mutable buffer, we want to wait for the write
                 // buffer to return success before adding the entry to the mutable buffer.
-                let sequence = write_buffer.store_entry(&entry).context(WriteBufferError)?;
+                let sequence = write_buffer
+                    .store_entry(&entry)
+                    .await
+                    .context(WriteBufferError)?;
                 let sequenced_entry = Arc::new(
                     SequencedEntry::new_from_sequence(sequence, entry)
                         .context(SequencedEntryError)?,
@@ -873,6 +853,7 @@ impl Db {
         let mutable_size_threshold = rules.lifecycle_rules.mutable_size_threshold;
         let immutable = rules.lifecycle_rules.immutable;
         let buffer_size_hard = rules.lifecycle_rules.buffer_size_hard;
+        let late_arrival_window = rules.lifecycle_rules.late_arrive_window();
         std::mem::drop(rules);
 
         // We may have gotten here through `store_entry`, in which case this is checking the
@@ -888,10 +869,17 @@ impl Db {
         }
 
         if let Some(partitioned_writes) = sequenced_entry.partition_writes() {
+            // Protect against DoS by limiting the number of errors we might collect
+            const MAX_ERRORS_PER_SEQUENCED_ENTRY: usize = 10;
+
+            let mut errors = Vec::with_capacity(MAX_ERRORS_PER_SEQUENCED_ENTRY);
+
             for write in partitioned_writes {
                 let partition_key = write.key();
                 for table_batch in write.table_batches() {
-                    if table_batch.row_count() == 0 {
+                    let row_count = table_batch.row_count();
+
+                    if row_count == 0 {
                         continue;
                     }
 
@@ -902,6 +890,9 @@ impl Db {
                     let mut partition = partition.write();
                     partition.update_last_write_at();
 
+                    let (min_time, max_time) =
+                        table_batch.min_max_time().context(TableBatchTimeError)?;
+
                     match partition.open_chunk() {
                         Some(chunk) => {
                             let mut chunk = chunk.write();
@@ -911,7 +902,7 @@ impl Db {
                             let mb_chunk =
                                 chunk.mutable_buffer().expect("cannot mutate open chunk");
 
-                            mb_chunk
+                            if let Err(e) = mb_chunk
                                 .write_table_batch(
                                     sequenced_entry.sequence().id,
                                     sequenced_entry.sequence().number,
@@ -920,7 +911,13 @@ impl Db {
                                 .context(WriteEntry {
                                     partition_key,
                                     chunk_id,
-                                })?;
+                                })
+                            {
+                                if errors.len() < MAX_ERRORS_PER_SEQUENCED_ENTRY {
+                                    errors.push(e);
+                                }
+                                continue;
+                            };
 
                             check_chunk_closed(&mut *chunk, mutable_size_threshold);
                         }
@@ -937,20 +934,51 @@ impl Db {
                                 ),
                             );
 
-                            mb_chunk
+                            if let Err(e) = mb_chunk
                                 .write_table_batch(
                                     sequenced_entry.sequence().id,
                                     sequenced_entry.sequence().number,
                                     table_batch,
                                 )
-                                .context(WriteEntryInitial { partition_key })?;
+                                .context(WriteEntryInitial { partition_key })
+                            {
+                                if errors.len() < MAX_ERRORS_PER_SEQUENCED_ENTRY {
+                                    errors.push(e);
+                                }
+                                continue;
+                            }
 
                             let new_chunk = partition.create_open_chunk(mb_chunk);
                             check_chunk_closed(&mut *new_chunk.write(), mutable_size_threshold);
                         }
                     };
+
+                    match partition.persistence_windows() {
+                        Some(windows) => {
+                            windows.add_range(
+                                sequenced_entry.as_ref().sequence(),
+                                row_count,
+                                min_time,
+                                max_time,
+                                Instant::now(),
+                            );
+                        }
+                        None => {
+                            let mut windows = PersistenceWindows::new(late_arrival_window);
+                            windows.add_range(
+                                sequenced_entry.as_ref().sequence(),
+                                row_count,
+                                min_time,
+                                max_time,
+                                Instant::now(),
+                            );
+                            partition.set_persistence_windows(windows);
+                        }
+                    }
                 }
             }
+
+            ensure!(errors.is_empty(), StoreSequencedEntryFailures { errors });
         }
 
         Ok(())
@@ -1008,311 +1036,7 @@ impl CatalogProvider for Db {
     }
 }
 
-/// All input required to create an empty [`Catalog`](crate::db::catalog::Catalog).
-#[derive(Debug)]
-pub struct CatalogEmptyInput {
-    domain: ::metrics::Domain,
-    metrics_registry: Arc<::metrics::MetricRegistry>,
-    metric_labels: Vec<KeyValue>,
-}
-
-#[derive(Debug)]
-enum TransactionCommitAction {
-    DropChunk {
-        table_name: String,
-        partition_key: String,
-        chunk_id: u32,
-    },
-    NewChunk {
-        table_name: String,
-        partition_key: String,
-        chunk_id: u32,
-        inner: Arc<ParquetChunk>,
-    },
-    SetWritten {
-        table_name: String,
-        partition_key: String,
-        chunk_id: u32,
-        inner: Arc<ParquetChunk>,
-    },
-}
-
-/// Helper to manage transaction on the in-memory catalog.
-#[derive(Debug)]
-pub struct TransactionState {
-    /// Inner catalog used during this transaction.
-    catalog: Arc<Catalog>,
-
-    /// Actions that will be performed on successful commit. These are pre-checked and should not result in any errors.
-    commit_actions: Vec<TransactionCommitAction>,
-
-    /// New files that are to be added during this transaction with table, partition key and chunk ID.
-    ///
-    /// This only contains files that were not (yet) removed during the same transaction.
-    new_files: HashMap<DirsAndFileName, (String, String, u32)>,
-
-    /// Files removed during this transaction.
-    ///
-    /// This only contains files that were not (yet) re-added during the same transaction.
-    removed_files: HashSet<DirsAndFileName>,
-}
-
-impl CatalogState for Catalog {
-    type EmptyInput = CatalogEmptyInput;
-
-    fn new_empty(db_name: &str, data: Self::EmptyInput) -> Self {
-        Self::new(
-            Arc::from(db_name),
-            data.domain,
-            data.metrics_registry,
-            data.metric_labels,
-        )
-    }
-
-    type TransactionState = TransactionState;
-
-    fn transaction_begin(origin: &Arc<Self>) -> Self::TransactionState {
-        TransactionState {
-            catalog: Arc::clone(origin),
-            commit_actions: vec![],
-            new_files: HashMap::new(),
-            removed_files: HashSet::new(),
-        }
-    }
-
-    fn transaction_end(tstate: Self::TransactionState, how: TransactionEnd) -> Arc<Self> {
-        let TransactionState {
-            catalog,
-            commit_actions,
-            ..
-        } = tstate;
-
-        if matches!(how, TransactionEnd::Commit) {
-            for action in commit_actions {
-                match action {
-                    TransactionCommitAction::DropChunk {
-                        table_name,
-                        partition_key,
-                        chunk_id,
-                    } => {
-                        // TODO: Should this really be infallible?
-                        if let Ok(partition) = catalog.partition(&table_name, &partition_key) {
-                            let mut partition = partition.write();
-                            let _ = partition.drop_chunk(chunk_id);
-                        }
-
-                        debug!(%table_name, %partition_key, chunk_id, "removed chunk according to persisted catalog");
-                    }
-                    TransactionCommitAction::NewChunk {
-                        table_name,
-                        partition_key,
-                        chunk_id,
-                        inner,
-                    } => {
-                        let partition = catalog
-                            .get_or_create_partition(table_name.clone(), partition_key.clone());
-                        let mut partition = partition.write();
-                        partition.insert_object_store_only_chunk(chunk_id, inner);
-                        debug!(%table_name, %partition_key, chunk_id, "recovered chunk from persisted catalog");
-                    }
-                    TransactionCommitAction::SetWritten {
-                        table_name,
-                        partition_key,
-                        chunk_id,
-                        inner,
-                    } => {
-                        let partition = catalog
-                            .get_or_create_partition(table_name.clone(), partition_key.clone());
-                        let partition = partition.read();
-
-                        match partition.chunk(chunk_id) {
-                            Some(chunk) => {
-                                let mut chunk = chunk.write();
-
-                                match chunk.set_written_to_object_store(inner) {
-                                    Ok(()) => {
-                                        debug!(%table_name, %partition_key, chunk_id, "chunk marked WRITTEN. Persisting to object store complete");
-                                    }
-                                    Err(e) => {
-                                        warn!(%e, %table_name, %partition_key, chunk_id, "chunk state changed during transaction even though lifecycle action was present");
-                                    }
-                                }
-                            }
-                            None => {
-                                warn!(%table_name, %partition_key, chunk_id, "chunk is gone during transaction even though lifecycle action was present");
-                            }
-                        }
-                    }
-                };
-            }
-        }
-
-        catalog
-    }
-
-    fn add(
-        tstate: &mut Self::TransactionState,
-        object_store: Arc<ObjectStore>,
-        info: CatalogParquetInfo,
-    ) -> parquet_file::catalog::Result<()> {
-        use parquet_file::catalog::MetadataExtractFailed;
-
-        // extract relevant bits from parquet file metadata
-        let iox_md = info
-            .metadata
-            .read_iox_metadata()
-            .context(MetadataExtractFailed {
-                path: info.path.clone(),
-            })?;
-
-        // Create a parquet chunk for this chunk
-        let metrics = tstate
-            .catalog
-            .metrics_registry
-            .register_domain_with_labels("parquet", tstate.catalog.metric_labels.clone());
-
-        let metrics =
-            ParquetChunkMetrics::new(&metrics, tstate.catalog.metrics().memory().parquet());
-        let parquet_chunk = ParquetChunk::new(
-            object_store.path_from_dirs_and_filename(info.path.clone()),
-            object_store,
-            info.metadata,
-            metrics,
-        )
-        .context(ChunkCreationFailed {
-            path: info.path.clone(),
-        })?;
-        let parquet_chunk = Arc::new(parquet_chunk);
-
-        // Get partition from the catalog
-        // Note that the partition might not exist yet if the chunk is loaded from an existing preserved catalog.
-        let partition = tstate
-            .catalog
-            .get_or_create_partition(&iox_md.table_name, &iox_md.partition_key);
-        let partition_guard = partition.read();
-
-        if tstate.new_files.contains_key(&info.path) {
-            return Err(parquet_file::catalog::Error::ParquetFileAlreadyExists { path: info.path });
-        }
-
-        // Get the chunk from the catalog
-        match (
-            tstate.removed_files.remove(&info.path),
-            partition_guard.chunk(iox_md.chunk_id),
-        ) {
-            (false, Some(chunk)) => {
-                // Chunk exists => should be in frozen stage and will transition from there
-
-                // Relock the chunk again (nothing else should have been able
-                // to modify the chunk state while we were moving it
-                let chunk = chunk.read();
-
-                // check if chunk already exists
-                if matches!(chunk.stage(), &ChunkStage::Persisted { .. }) {
-                    return Err(parquet_file::catalog::Error::ParquetFileAlreadyExists {
-                        path: info.path,
-                    });
-                }
-
-                // check that the upcoming state change will very likely succeed
-                if !chunk.is_in_lifecycle(::lifecycle::ChunkLifecycleAction::Persisting) {
-                    return Err(parquet_file::catalog::Error::CatalogStateFailure {
-                        source: Box::new(
-                            crate::db::catalog::chunk::Error::UnexpectedLifecycleAction {
-                                chunk: chunk.addr().clone(),
-                                expected: "persisting".to_string(),
-                                actual: chunk
-                                    .lifecycle_action()
-                                    .map_or("n/a", |action| action.metadata().name())
-                                    .to_string(),
-                            },
-                        ),
-                        path: info.path,
-                    });
-                }
-
-                // update the catalog to say we are done processing
-                tstate
-                    .commit_actions
-                    .push(TransactionCommitAction::SetWritten {
-                        table_name: iox_md.table_name.clone(),
-                        partition_key: iox_md.partition_key.clone(),
-                        chunk_id: iox_md.chunk_id,
-                        inner: parquet_chunk,
-                    });
-                tstate.new_files.insert(
-                    info.path,
-                    (iox_md.table_name, iox_md.partition_key, iox_md.chunk_id),
-                );
-            }
-            _ => {
-                // table unknown => that's ok, create chunk in "object store only" stage which will also create the table
-                // table chunk, but table already known => that's ok, create chunk in "object store only" stage
-                tstate
-                    .commit_actions
-                    .push(TransactionCommitAction::NewChunk {
-                        table_name: iox_md.table_name.clone(),
-                        partition_key: iox_md.partition_key.clone(),
-                        chunk_id: iox_md.chunk_id,
-                        inner: parquet_chunk,
-                    });
-                tstate.new_files.insert(
-                    info.path,
-                    (iox_md.table_name, iox_md.partition_key, iox_md.chunk_id),
-                );
-            }
-        }
-
-        Ok(())
-    }
-
-    fn remove(
-        tstate: &mut Self::TransactionState,
-        path: DirsAndFileName,
-    ) -> parquet_file::catalog::Result<()> {
-        if tstate.removed_files.contains(&path) {
-            return Err(parquet_file::catalog::Error::ParquetFileDoesNotExist { path });
-        }
-
-        let mut actions: Vec<TransactionCommitAction> = vec![];
-
-        for partition in tstate.catalog.partitions() {
-            let partition = partition.read();
-
-            for chunk in partition.chunks() {
-                let chunk = chunk.read();
-                if let ChunkStage::Persisted { parquet, .. } = chunk.stage() {
-                    let chunk_path: DirsAndFileName = parquet.path().into();
-                    if path == chunk_path {
-                        actions.push(TransactionCommitAction::DropChunk {
-                            table_name: partition.table_name().to_string(),
-                            partition_key: partition.key().to_string(),
-                            chunk_id: chunk.id(),
-                        });
-                    }
-                }
-            }
-        }
-
-        if let Some((table_name, partition_key, chunk_id)) = tstate.new_files.remove(&path) {
-            actions.push(TransactionCommitAction::DropChunk {
-                table_name,
-                partition_key,
-                chunk_id,
-            });
-        }
-
-        if actions.is_empty() {
-            Err(parquet_file::catalog::Error::ParquetFileDoesNotExist { path })
-        } else {
-            tstate.commit_actions.append(&mut actions);
-            tstate.removed_files.insert(path);
-            Ok(())
-        }
-    }
-}
-
-fn checkpoint_data_from_catalog(catalog: &Catalog) -> CheckpointData {
+pub(crate) fn checkpoint_data_from_catalog(catalog: &Catalog) -> CheckpointData {
     let mut files = HashMap::new();
 
     for chunk in catalog.chunks() {
@@ -1327,28 +1051,27 @@ fn checkpoint_data_from_catalog(catalog: &Catalog) -> CheckpointData {
 }
 
 pub mod test_helpers {
-    use super::*;
-    use entry::test_helpers::lp_to_entries;
     use std::collections::HashSet;
 
+    use entry::test_helpers::lp_to_entries;
+
+    use super::*;
+
     /// Try to write lineprotocol data and return all tables that where written.
-    pub fn try_write_lp(db: &Db, lp: &str) -> Result<Vec<String>> {
+    pub async fn try_write_lp(db: &Db, lp: &str) -> Result<Vec<String>> {
         let entries = lp_to_entries(lp);
 
         let mut tables = HashSet::new();
-        for entry in &entries {
+        for entry in entries {
             if let Some(writes) = entry.partition_writes() {
                 for write in writes {
                     for batch in write.table_batches() {
                         tables.insert(batch.name().to_string());
                     }
                 }
+                db.store_entry(entry).await?;
             }
         }
-
-        entries
-            .into_iter()
-            .try_for_each(|entry| db.store_entry(entry))?;
 
         let mut tables: Vec<_> = tables.into_iter().collect();
         tables.sort();
@@ -1356,45 +1079,13 @@ pub mod test_helpers {
     }
 
     /// Same was [`try_write_lp`](try_write_lp) but will panic on failure.
-    pub fn write_lp(db: &Db, lp: &str) -> Vec<String> {
-        try_write_lp(db, lp).unwrap()
+    pub async fn write_lp(db: &Db, lp: &str) -> Vec<String> {
+        try_write_lp(db, lp).await.unwrap()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        test_helpers::{try_write_lp, write_lp},
-        *,
-    };
-    use crate::{
-        db::catalog::chunk::{ChunkStage, ChunkStageFrozenRepr},
-        utils::{make_db, TestDb},
-        write_buffer::test_helpers::MockBuffer,
-    };
-    use ::test_helpers::assert_contains;
-    use arrow::record_batch::RecordBatch;
-    use arrow_util::{assert_batches_eq, assert_batches_sorted_eq};
-    use bytes::Bytes;
-    use chrono::Utc;
-    use data_types::{
-        chunk_metadata::ChunkStorage,
-        database_rules::{Order, Sort, SortOrder},
-        partition_metadata::{ColumnSummary, InfluxDbType, StatValues, Statistics, TableSummary},
-    };
-    use entry::test_helpers::lp_to_entry;
-    use futures::{stream, StreamExt, TryStreamExt};
-    use object_store::{
-        memory::InMemory,
-        path::{parts::PathPart, ObjectStorePath, Path},
-        ObjectStore, ObjectStoreApi,
-    };
-    use parquet_file::{
-        catalog::test_helpers::{assert_catalog_state_implementation, TestCatalogState},
-        metadata::IoxParquetMetaData,
-        test_utils::{load_parquet_from_store_for_path, read_data_from_parquet_data},
-    };
-    use query::{frontend::sql::SqlQueryPlanner, QueryChunk, QueryDatabase};
     use std::{
         collections::HashSet,
         convert::TryFrom,
@@ -1403,7 +1094,43 @@ mod tests {
         str,
         time::{Duration, Instant},
     };
+
+    use arrow::record_batch::RecordBatch;
+    use bytes::Bytes;
+    use chrono::Utc;
+    use futures::{stream, StreamExt, TryStreamExt};
     use tokio_util::sync::CancellationToken;
+
+    use ::test_helpers::assert_contains;
+    use arrow_util::{assert_batches_eq, assert_batches_sorted_eq};
+    use data_types::{
+        chunk_metadata::ChunkStorage,
+        database_rules::{Order, Sort, SortOrder},
+        partition_metadata::{ColumnSummary, InfluxDbType, StatValues, Statistics, TableSummary},
+    };
+    use entry::test_helpers::lp_to_entry;
+    use object_store::{
+        memory::InMemory,
+        path::{parts::PathPart, ObjectStorePath, Path},
+        ObjectStore, ObjectStoreApi,
+    };
+    use parquet_file::{
+        catalog::test_helpers::TestCatalogState,
+        metadata::IoxParquetMetaData,
+        test_utils::{load_parquet_from_store_for_path, read_data_from_parquet_data},
+    };
+    use query::{frontend::sql::SqlQueryPlanner, QueryChunk, QueryDatabase};
+
+    use crate::{
+        db::catalog::chunk::{ChunkStage, ChunkStageFrozenRepr},
+        utils::{make_db, TestDb},
+        write_buffer::test_helpers::MockBuffer,
+    };
+
+    use super::{
+        test_helpers::{try_write_lp, write_lp},
+        *,
+    };
 
     type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
     type Result<T, E = Error> = std::result::Result<T, E>;
@@ -1414,7 +1141,7 @@ mod tests {
         let db = make_db().await.db;
         db.rules.write().lifecycle_rules.immutable = true;
         let entry = lp_to_entry("cpu bar=1 10");
-        let res = db.store_entry(entry);
+        let res = db.store_entry(entry).await;
         assert_contains!(
             res.unwrap_err().to_string(),
             "Cannot write to this database: no mutable buffer configured"
@@ -1435,7 +1162,7 @@ mod tests {
         test_db.rules.write().lifecycle_rules.immutable = true;
 
         let entry = lp_to_entry("cpu bar=1 10");
-        test_db.store_entry(entry).unwrap();
+        test_db.store_entry(entry).await.unwrap();
 
         assert_eq!(write_buffer.entries.lock().unwrap().len(), 1);
     }
@@ -1452,7 +1179,7 @@ mod tests {
             .db;
 
         let entry = lp_to_entry("cpu bar=1 10");
-        test_db.store_entry(entry).unwrap();
+        test_db.store_entry(entry).await.unwrap();
 
         assert_eq!(write_buffer.entries.lock().unwrap().len(), 1);
 
@@ -1473,7 +1200,7 @@ mod tests {
     async fn read_write() {
         // This test also exercises the path without a write buffer.
         let db = Arc::new(make_db().await.db);
-        write_lp(&db, "cpu bar=1 10");
+        write_lp(&db, "cpu bar=1 10").await;
 
         let batches = run_query(db, "select * from cpu").await;
 
@@ -1485,6 +1212,67 @@ mod tests {
             "+-----+-------------------------------+",
         ];
         assert_batches_eq!(expected, &batches);
+    }
+
+    #[tokio::test]
+    async fn try_all_partition_writes_when_some_fail() {
+        let db = Arc::new(make_db().await.db);
+
+        let nanoseconds_per_hour = 60 * 60 * 1_000_000_000u64;
+
+        // 3 lines that will go into 3 hour partitions and start new chunks.
+        let lp = format!(
+            "foo,t1=alpha iv=1i {}
+             foo,t1=bravo iv=1i {}
+             foo,t1=charlie iv=1i {}",
+            0,
+            nanoseconds_per_hour,
+            nanoseconds_per_hour * 2,
+        );
+
+        let entry = lp_to_entry(&lp);
+
+        // This should succeed and start chunks in the MUB
+        db.store_entry(entry).await.unwrap();
+
+        // 3 more lines that should go in the 3 partitions/chunks.
+        // Line 1 has the same schema and should end up in the MUB.
+        // Line 2 has a different schema than line 1 and should error
+        // Line 3 has the same schema as line 1 and should end up in the MUB.
+        let lp = format!(
+            "foo,t1=delta iv=1i {}
+             foo t1=10i {}
+             foo,t1=important iv=1i {}",
+            1,
+            nanoseconds_per_hour + 1,
+            nanoseconds_per_hour * 2 + 1,
+        );
+
+        let entry = lp_to_entry(&lp);
+
+        // This should return an error because there was at least one error in the loop
+        let result = db.store_entry(entry).await;
+        assert_contains!(
+            result.unwrap_err().to_string(),
+            "Storing sequenced entry failed with the following error(s), and possibly more:"
+        );
+
+        // But 5 points should be returned, most importantly the last one after the line with
+        // the mismatched schema
+        let batches = run_query(db, "select t1 from foo").await;
+
+        let expected = vec![
+            "+-----------+",
+            "| t1        |",
+            "+-----------+",
+            "| alpha     |",
+            "| bravo     |",
+            "| charlie   |",
+            "| delta     |",
+            "| important |",
+            "+-----------+",
+        ];
+        assert_batches_sorted_eq!(expected, &batches);
     }
 
     fn catalog_chunk_size_bytes_metric_eq(
@@ -1507,7 +1295,7 @@ mod tests {
         let test_db = make_db().await;
         let db = Arc::new(test_db.db);
 
-        write_lp(db.as_ref(), "cpu bar=1 10");
+        write_lp(db.as_ref(), "cpu bar=1 10").await;
 
         // A chunk has been opened
         test_db
@@ -1526,7 +1314,7 @@ mod tests {
         catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "mutable_buffer", 44).unwrap();
 
         // write into same chunk again.
-        write_lp(db.as_ref(), "cpu bar=2 10");
+        write_lp(db.as_ref(), "cpu bar=2 10").await;
 
         // verify chunk size updated
         catalog_chunk_size_bytes_metric_eq(&test_db.metric_registry, "mutable_buffer", 60).unwrap();
@@ -1635,7 +1423,7 @@ mod tests {
     #[tokio::test]
     async fn write_with_rollover() {
         let db = Arc::new(make_db().await.db);
-        write_lp(db.as_ref(), "cpu bar=1 10");
+        write_lp(db.as_ref(), "cpu bar=1 10").await;
         assert_eq!(vec!["1970-01-01T00"], db.partition_keys().unwrap());
 
         let mb_chunk = db
@@ -1656,7 +1444,7 @@ mod tests {
         assert_batches_sorted_eq!(expected, &batches);
 
         // add new data
-        write_lp(db.as_ref(), "cpu bar=2 20");
+        write_lp(db.as_ref(), "cpu bar=2 20").await;
         let expected = vec![
             "+-----+-------------------------------+",
             "| bar | time                          |",
@@ -1693,7 +1481,7 @@ mod tests {
             "cpu,core=one user=10.0 11",
         ];
 
-        write_lp(db.as_ref(), &lines.join("\n"));
+        write_lp(db.as_ref(), &lines.join("\n")).await;
         assert_eq!(vec!["1970-01-01T00"], db.partition_keys().unwrap());
 
         let mb_chunk = db
@@ -1722,8 +1510,8 @@ mod tests {
         let test_db = make_db().await;
         let db = Arc::new(test_db.db);
 
-        write_lp(db.as_ref(), "cpu bar=1 10");
-        write_lp(db.as_ref(), "cpu bar=2 20");
+        write_lp(db.as_ref(), "cpu bar=1 10").await;
+        write_lp(db.as_ref(), "cpu bar=2 20").await;
 
         let partition_key = "1970-01-01T00";
         let mb_chunk = db
@@ -1808,12 +1596,12 @@ mod tests {
         let test_db = make_db().await;
         let db = Arc::new(test_db.db);
 
-        write_lp(db.as_ref(), "cpu,tag1=cupcakes bar=1 10");
-        write_lp(db.as_ref(), "cpu,tag1=asfd,tag2=foo bar=2 20");
-        write_lp(db.as_ref(), "cpu,tag1=bingo,tag2=foo bar=2 10");
-        write_lp(db.as_ref(), "cpu,tag1=bongo,tag2=a bar=2 20");
-        write_lp(db.as_ref(), "cpu,tag1=bongo,tag2=a bar=2 10");
-        write_lp(db.as_ref(), "cpu,tag2=a bar=3 5");
+        write_lp(db.as_ref(), "cpu,tag1=cupcakes bar=1 10").await;
+        write_lp(db.as_ref(), "cpu,tag1=asfd,tag2=foo bar=2 20").await;
+        write_lp(db.as_ref(), "cpu,tag1=bingo,tag2=foo bar=2 10").await;
+        write_lp(db.as_ref(), "cpu,tag1=bongo,tag2=a bar=2 20").await;
+        write_lp(db.as_ref(), "cpu,tag1=bongo,tag2=a bar=2 10").await;
+        write_lp(db.as_ref(), "cpu,tag2=a bar=3 5").await;
 
         let partition_key = "1970-01-01T00";
         let mb_chunk = db
@@ -1923,8 +1711,8 @@ mod tests {
         let db = Arc::new(test_db.db);
 
         // Write some line protocols in Mutable buffer of the DB
-        write_lp(db.as_ref(), "cpu bar=1 10");
-        write_lp(db.as_ref(), "cpu bar=2 20");
+        write_lp(db.as_ref(), "cpu bar=1 10").await;
+        write_lp(db.as_ref(), "cpu bar=2 20").await;
 
         //Now mark the MB chunk close
         let partition_key = "1970-01-01T00";
@@ -2022,8 +1810,8 @@ mod tests {
         let db = Arc::new(test_db.db);
 
         // Write some line protocols in Mutable buffer of the DB
-        write_lp(db.as_ref(), "cpu bar=1 10");
-        write_lp(db.as_ref(), "cpu bar=2 20");
+        write_lp(db.as_ref(), "cpu bar=1 10").await;
+        write_lp(db.as_ref(), "cpu bar=2 20").await;
 
         // Now mark the MB chunk close
         let partition_key = "1970-01-01T00";
@@ -2133,7 +1921,7 @@ mod tests {
         let before_create = Utc::now();
 
         let partition_key = "1970-01-01T00";
-        write_lp(&db, "cpu bar=1 10");
+        write_lp(&db, "cpu bar=1 10").await;
         let after_write = Utc::now();
 
         let last_write_prev = {
@@ -2146,7 +1934,7 @@ mod tests {
             partition.last_write_at()
         };
 
-        write_lp(&db, "cpu bar=1 20");
+        write_lp(&db, "cpu bar=1 20").await;
         {
             let partition = db.catalog.partition("cpu", partition_key).unwrap();
             let partition = partition.read();
@@ -2155,12 +1943,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn write_updates_persistence_windows() {
+        let db = Arc::new(make_db().await.db);
+
+        let now = Utc::now().timestamp_nanos() as u64;
+
+        let partition_key = "1970-01-01T00";
+        write_lp(&db, "cpu bar=1 10").await;
+
+        let later = Utc::now().timestamp_nanos() as u64;
+
+        let partition = db.catalog.partition("cpu", partition_key).unwrap();
+        let mut partition = partition.write();
+        let windows = partition.persistence_windows().unwrap();
+        let seq = windows.minimum_unpersisted_sequence().unwrap();
+
+        let seq = seq.get(&1).unwrap();
+        assert!(now < seq.min && later > seq.min);
+    }
+
+    #[tokio::test]
     async fn test_chunk_timestamps() {
         let start = Utc::now();
         let db = Arc::new(make_db().await.db);
 
         // Given data loaded into two chunks
-        write_lp(&db, "cpu bar=1 10");
+        write_lp(&db, "cpu bar=1 10").await;
         let after_data_load = Utc::now();
 
         // When the chunk is rolled over
@@ -2198,8 +2006,8 @@ mod tests {
         db.rules.write().lifecycle_rules.mutable_size_threshold =
             Some(NonZeroUsize::new(2).unwrap());
 
-        write_lp(&db, "cpu bar=1 10");
-        write_lp(&db, "cpu bar=1 20");
+        write_lp(&db, "cpu bar=1 10").await;
+        write_lp(&db, "cpu bar=1 20").await;
 
         let partitions = db.catalog.partition_keys();
         assert_eq!(partitions.len(), 1);
@@ -2229,10 +2037,10 @@ mod tests {
     #[tokio::test]
     async fn chunks_sorted_by_times() {
         let db = Arc::new(make_db().await.db);
-        write_lp(&db, "cpu val=1 1");
-        write_lp(&db, "mem val=2 400000000000001");
-        write_lp(&db, "cpu val=1 2");
-        write_lp(&db, "mem val=2 400000000000002");
+        write_lp(&db, "cpu val=1 1").await;
+        write_lp(&db, "mem val=2 400000000000001").await;
+        write_lp(&db, "cpu val=1 2").await;
+        write_lp(&db, "mem val=2 400000000000002").await;
 
         let sort_rules = SortOrder {
             order: Order::Desc,
@@ -2264,8 +2072,8 @@ mod tests {
         let db = Arc::new(make_db().await.db);
         let partition_key = "1970-01-01T00";
 
-        write_lp(&db, "cpu bar=1 10");
-        write_lp(&db, "cpu bar=1 20");
+        write_lp(&db, "cpu bar=1 10").await;
+        write_lp(&db, "cpu bar=1 20").await;
 
         assert_eq!(mutable_chunk_ids(&db, partition_key), vec![0]);
         assert_eq!(
@@ -2283,7 +2091,7 @@ mod tests {
 
         // add a new chunk in mutable buffer, and move chunk1 (but
         // not chunk 0) to read buffer
-        write_lp(&db, "cpu bar=1 30");
+        write_lp(&db, "cpu bar=1 30").await;
         let mb_chunk = db
             .rollover_partition("cpu", "1970-01-01T00")
             .await
@@ -2293,7 +2101,7 @@ mod tests {
             .await
             .unwrap();
 
-        write_lp(&db, "cpu bar=1 40");
+        write_lp(&db, "cpu bar=1 40").await;
 
         assert_eq!(mutable_chunk_ids(&db, partition_key), vec![0, 2]);
         assert_eq!(read_buffer_chunk_ids(&db, partition_key), vec![1]);
@@ -2332,11 +2140,11 @@ mod tests {
         // Test that chunk id listing is hooked up
         let db = Arc::new(make_db().await.db);
 
-        write_lp(&db, "cpu bar=1 1");
+        write_lp(&db, "cpu bar=1 1").await;
         db.rollover_partition("cpu", "1970-01-01T00").await.unwrap();
 
         // write into a separate partitiion
-        write_lp(&db, "cpu bar=1,baz2,frob=3 400000000000000");
+        write_lp(&db, "cpu bar=1,baz2,frob=3 400000000000000").await;
 
         print!("Partitions: {:?}", db.partition_keys().unwrap());
 
@@ -2375,9 +2183,9 @@ mod tests {
     async fn partition_chunk_summaries_timestamp() {
         let db = Arc::new(make_db().await.db);
         let start = Utc::now();
-        write_lp(&db, "cpu bar=1 1");
+        write_lp(&db, "cpu bar=1 1").await;
         let after_first_write = Utc::now();
-        write_lp(&db, "cpu bar=2 2");
+        write_lp(&db, "cpu bar=2 2").await;
         db.rollover_partition("cpu", "1970-01-01T00").await.unwrap();
         let after_close = Utc::now();
 
@@ -2427,11 +2235,11 @@ mod tests {
         let db = Arc::new(make_db().await.db);
 
         // get three chunks: one open, one closed in mb and one close in rb
-        write_lp(&db, "cpu bar=1 1");
+        write_lp(&db, "cpu bar=1 1").await;
         db.rollover_partition("cpu", "1970-01-01T00").await.unwrap();
 
-        write_lp(&db, "cpu bar=1,baz=2 2");
-        write_lp(&db, "cpu bar=1,baz=2,frob=3 400000000000000");
+        write_lp(&db, "cpu bar=1,baz=2 2").await;
+        write_lp(&db, "cpu bar=1,baz=2,frob=3 400000000000000").await;
 
         print!("Partitions: {:?}", db.partition_keys().unwrap());
 
@@ -2446,7 +2254,7 @@ mod tests {
         print!("Partitions2: {:?}", db.partition_keys().unwrap());
 
         db.rollover_partition("cpu", "1970-01-05T15").await.unwrap();
-        write_lp(&db, "cpu bar=1,baz=3,blargh=3 400000000000000");
+        write_lp(&db, "cpu bar=1,baz=3,blargh=3 400000000000000").await;
 
         let chunk_summaries = db.chunk_summaries().expect("expected summary to return");
         let chunk_summaries = normalize_summaries(chunk_summaries);
@@ -2508,15 +2316,15 @@ mod tests {
         // Test that chunk id listing is hooked up
         let db = Arc::new(make_db().await.db);
 
-        write_lp(&db, "cpu bar=1 1");
+        write_lp(&db, "cpu bar=1 1").await;
         let chunk_id = db
             .rollover_partition("cpu", "1970-01-01T00")
             .await
             .unwrap()
             .unwrap()
             .id();
-        write_lp(&db, "cpu bar=2,baz=3.0 2");
-        write_lp(&db, "mem foo=1 1");
+        write_lp(&db, "cpu bar=2,baz=3.0 2").await;
+        write_lp(&db, "mem foo=1 1").await;
 
         // load a chunk to the read buffer
         db.load_chunk_to_read_buffer("cpu", "1970-01-01T00", chunk_id)
@@ -2529,8 +2337,8 @@ mod tests {
             .unwrap();
 
         // write into a separate partition
-        write_lp(&db, "cpu bar=1 400000000000000");
-        write_lp(&db, "mem frob=3 400000000000001");
+        write_lp(&db, "cpu bar=1 400000000000000").await;
+        write_lp(&db, "mem frob=3 400000000000001").await;
 
         print!("Partitions: {:?}", db.partition_keys().unwrap());
 
@@ -2695,8 +2503,8 @@ mod tests {
         let db = Arc::new(make_db().await.db);
 
         // create MB partition
-        write_lp(db.as_ref(), "cpu bar=1 10");
-        write_lp(db.as_ref(), "cpu bar=2 20");
+        write_lp(db.as_ref(), "cpu bar=1 10").await;
+        write_lp(db.as_ref(), "cpu bar=2 20").await;
 
         // MB => RB
         let partition_key = "1970-01-01T00";
@@ -2729,11 +2537,11 @@ mod tests {
         db.rules.write().lifecycle_rules.buffer_size_hard = Some(NonZeroUsize::new(10).unwrap());
 
         // inserting first line does not trigger hard buffer limit
-        write_lp(db.as_ref(), "cpu bar=1 10");
+        write_lp(db.as_ref(), "cpu bar=1 10").await;
 
         // but second line will
         assert!(matches!(
-            try_write_lp(db.as_ref(), "cpu bar=2 20"),
+            try_write_lp(db.as_ref(), "cpu bar=2 20").await,
             Err(super::Error::HardLimitReached {})
         ));
     }
@@ -2756,7 +2564,7 @@ mod tests {
 
         let db = Arc::new(test_db.db);
 
-        write_lp(db.as_ref(), "cpu bar=1 10");
+        write_lp(db.as_ref(), "cpu bar=1 10").await;
 
         test_db
             .metric_registry
@@ -2876,29 +2684,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_or_create_preserved_catalog_recovers_from_error() {
-        let object_store = Arc::new(ObjectStore::new_in_memory(InMemory::new()));
-        let server_id = ServerId::try_from(1).unwrap();
-        let db_name = "preserved_catalog_test";
-
-        let (preserved_catalog, _catalog) = PreservedCatalog::new_empty::<TestCatalogState>(
-            Arc::clone(&object_store),
-            server_id,
-            db_name.to_string(),
-            (),
-        )
-        .await
-        .unwrap();
-        parquet_file::catalog::test_helpers::break_catalog_with_weird_version(&preserved_catalog)
-            .await;
-
-        let metrics_registry = Arc::new(metrics::MetricRegistry::new());
-        load_or_create_preserved_catalog(db_name, object_store, server_id, metrics_registry, true)
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
     async fn write_one_chunk_to_preserved_catalog() {
         // Test that parquet data is committed to preserved catalog
 
@@ -2992,7 +2777,7 @@ mod tests {
         }
 
         // ==================== check: DB still writable ====================
-        write_lp(db.as_ref(), "cpu bar=1 10");
+        write_lp(db.as_ref(), "cpu bar=1 10").await;
     }
 
     #[tokio::test]
@@ -3159,26 +2944,11 @@ mod tests {
         }
 
         // ==================== check: DB still writable ====================
-        write_lp(db.as_ref(), "cpu bar=1 10");
-    }
-
-    #[tokio::test]
-    async fn test_catalog_state() {
-        let metrics_registry = Arc::new(::metrics::MetricRegistry::new());
-        let empty_input = CatalogEmptyInput {
-            domain: metrics_registry.register_domain("catalog"),
-            metrics_registry,
-            metric_labels: vec![],
-        };
-        assert_catalog_state_implementation::<Catalog, _>(
-            empty_input,
-            checkpoint_data_from_catalog,
-        )
-        .await;
+        write_lp(db.as_ref(), "cpu bar=1 10").await;
     }
 
     async fn create_parquet_chunk(db: &Db) -> (String, String, u32) {
-        write_lp(db, "cpu bar=1 10");
+        write_lp(db, "cpu bar=1 10").await;
         let partition_key = "1970-01-01T00";
         let table_name = "cpu";
 

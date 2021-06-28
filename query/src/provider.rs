@@ -17,7 +17,7 @@ use datafusion::{
 };
 use datafusion_util::AsPhysicalExpr;
 use internal_types::schema::{merge::SchemaMerger, Schema};
-use observability_deps::tracing::debug;
+use observability_deps::tracing::{debug, trace};
 
 use crate::{
     predicate::{Predicate, PredicateBuilder},
@@ -213,6 +213,11 @@ impl<C: QueryChunk + 'static> ChunkTableProvider<C> {
     pub fn arrow_schema(&self) -> ArrowSchemaRef {
         self.iox_schema.as_arrow()
     }
+
+    /// Return the table name
+    pub fn table_name(&self) -> &str {
+        self.table_name.as_ref()
+    }
 }
 
 impl<C: QueryChunk + 'static> TableProvider for ChunkTableProvider<C> {
@@ -232,8 +237,6 @@ impl<C: QueryChunk + 'static> TableProvider for ChunkTableProvider<C> {
         filters: &[Expr],
         _limit: Option<usize>,
     ) -> std::result::Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        debug!(?filters, "Input Filters to Scan");
-
         // Note that `filters` don't actually need to be evaluated in
         // the scan for the plans to be correct, they are an extra
         // optimization for providers which can offer them
@@ -256,7 +259,7 @@ impl<C: QueryChunk + 'static> TableProvider for ChunkTableProvider<C> {
 
         // This debug shows the self.arrow_schema() includes all columns in all chunks
         // which means the schema of all chunks are merged before invoking this scan
-        debug!("all chunks schema: {:#?}", self.arrow_schema());
+        trace!("all chunks schema: {:#?}", self.arrow_schema());
 
         let mut deduplicate = Deduplicater::new();
         let plan = deduplicate.build_scan_plan(
@@ -501,7 +504,7 @@ impl<C: QueryChunk + 'static> Deduplicater<C> {
         let pk_schema = Self::compute_pk_schema(&chunks);
         let input_schema = Self::compute_input_schema(&output_schema, &pk_schema);
 
-        debug!(
+        trace!(
             ?output_schema,
             ?pk_schema,
             ?input_schema,
@@ -771,13 +774,15 @@ impl<C: QueryChunk> ChunkPruner<C> for NoOpPruner {
 
 #[cfg(test)]
 mod test {
-    use arrow::{datatypes::DataType, record_batch::RecordBatch};
+    use arrow::datatypes::DataType;
     use arrow_util::assert_batches_eq;
     use datafusion::physical_plan::collect;
-    use futures::StreamExt;
-    use internal_types::{schema::builder::SchemaBuilder, selection::Selection};
+    use internal_types::schema::builder::SchemaBuilder;
 
-    use crate::{test::TestChunk, QueryChunkMeta};
+    use crate::{
+        test::{raw_data, TestChunk},
+        QueryChunkMeta,
+    };
 
     use super::*;
 
@@ -1644,22 +1649,5 @@ mod test {
             .enumerate()
             .map(|(idx, group)| format!("Group {}: {}", idx, chunk_ids(group)))
             .collect()
-    }
-
-    /// Return the raw data from the list of chunks
-    async fn raw_data(chunks: &[Arc<TestChunk>]) -> Vec<RecordBatch> {
-        let mut batches = vec![];
-        for c in chunks {
-            let pred = Predicate::default();
-            let selection = Selection::All;
-            let mut stream = c
-                .read_filter(&pred, selection)
-                .expect("Error in read_filter");
-            while let Some(b) = stream.next().await {
-                let b = b.expect("Error in stream");
-                batches.push(b)
-            }
-        }
-        batches
     }
 }

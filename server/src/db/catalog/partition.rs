@@ -14,7 +14,9 @@ use crate::db::catalog::metrics::PartitionMetrics;
 
 use super::chunk::{CatalogChunk, ChunkStage};
 use data_types::chunk_metadata::{ChunkAddr, ChunkSummary};
+use internal_types::schema::Schema;
 use lifecycle::ChunkLifecycleAction;
+use mutable_buffer::persistence_windows::PersistenceWindows;
 use snafu::Snafu;
 
 #[derive(Debug, Snafu)]
@@ -63,6 +65,9 @@ pub struct Partition {
 
     /// Partition metrics
     metrics: PartitionMetrics,
+
+    /// Ingest tracking for persisting data from memory to Parquet
+    persistence_windows: Option<PersistenceWindows>,
 }
 
 impl Partition {
@@ -87,7 +92,13 @@ impl Partition {
             last_write_at: now,
             next_chunk_id: 0,
             metrics,
+            persistence_windows: None,
         }
+    }
+
+    /// Return the db name of this Partition
+    pub fn db_name(&self) -> &str {
+        &self.db_name
     }
 
     /// Return the partition_key of this Partition
@@ -128,10 +139,7 @@ impl Partition {
         assert_eq!(chunk.table_name().as_ref(), self.table_name.as_ref());
 
         let chunk_id = self.next_chunk_id;
-        // Technically this only causes an issue on the next upsert but
-        // the MUB treats u32::MAX as a sentinel value
         assert_ne!(self.next_chunk_id, u32::MAX, "Chunk ID Overflow");
-
         self.next_chunk_id += 1;
 
         let addr = ChunkAddr {
@@ -152,6 +160,37 @@ impl Partition {
             panic!("chunk already existed with id {}", chunk_id)
         }
 
+        chunk
+    }
+
+    /// Create a new read buffer chunk
+    pub fn create_rub_chunk(
+        &mut self,
+        chunk: read_buffer::RBChunk,
+        schema: Schema,
+    ) -> Arc<RwLock<CatalogChunk>> {
+        let chunk_id = self.next_chunk_id;
+        assert_ne!(self.next_chunk_id, u32::MAX, "Chunk ID Overflow");
+        self.next_chunk_id += 1;
+
+        let addr = ChunkAddr {
+            db_name: Arc::clone(&self.db_name),
+            table_name: Arc::clone(&self.table_name),
+            partition_key: Arc::clone(&self.partition_key),
+            chunk_id,
+        };
+
+        let chunk = Arc::new(self.metrics.new_chunk_lock(CatalogChunk::new_rub_chunk(
+            addr,
+            chunk,
+            schema,
+            self.metrics.new_chunk_metrics(),
+        )));
+
+        if self.chunks.insert(chunk_id, Arc::clone(&chunk)).is_some() {
+            // A fundamental invariant has been violated - abort
+            panic!("chunk already existed with id {}", chunk_id)
+        }
         chunk
     }
 
@@ -217,6 +256,11 @@ impl Partition {
         }
     }
 
+    /// Drop the specified chunk even if it has an in-progress lifecycle action
+    pub fn force_drop_chunk(&mut self, chunk_id: u32) {
+        self.chunks.remove(&chunk_id);
+    }
+
     /// return the first currently open chunk, if any
     pub fn open_chunk(&self) -> Option<Arc<RwLock<CatalogChunk>>> {
         self.chunks
@@ -238,6 +282,11 @@ impl Partition {
         self.chunks.values()
     }
 
+    /// Return a iterator over chunks in this partition with their ids
+    pub fn keyed_chunks(&self) -> impl Iterator<Item = (u32, &Arc<RwLock<CatalogChunk>>)> {
+        self.chunks.iter().map(|(a, b)| (*a, b))
+    }
+
     /// Return a PartitionSummary for this partition
     pub fn summary(&self) -> PartitionSummary {
         PartitionSummary::from_table_summaries(
@@ -255,5 +304,13 @@ impl Partition {
 
     pub fn metrics(&self) -> &PartitionMetrics {
         &self.metrics
+    }
+
+    pub fn persistence_windows(&mut self) -> Option<&mut PersistenceWindows> {
+        self.persistence_windows.as_mut()
+    }
+
+    pub fn set_persistence_windows(&mut self, windows: PersistenceWindows) {
+        self.persistence_windows = Some(windows);
     }
 }
