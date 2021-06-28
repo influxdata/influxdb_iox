@@ -940,8 +940,8 @@ impl Db {
                         }
                     };
 
-                    match (sequence, partition.persistence_windows()) {
-                        (Some(sequence), Some(windows)) => {
+                    match partition.persistence_windows() {
+                        Some(windows) => {
                             windows.add_range(
                                 sequence,
                                 row_count,
@@ -950,7 +950,7 @@ impl Db {
                                 Instant::now(),
                             );
                         }
-                        (Some(sequence), None) => {
+                        None => {
                             let mut windows = PersistenceWindows::new(late_arrival_window);
                             windows.add_range(
                                 sequence,
@@ -960,9 +960,6 @@ impl Db {
                                 Instant::now(),
                             );
                             partition.set_persistence_windows(windows);
-                        }
-                        (None, _) => {
-                            // unsequenced entry
                         }
                     }
                 }
@@ -1959,19 +1956,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn write_with_no_write_buffer_does_not_update_persistence_windows() {
+    async fn write_with_no_write_buffer_updates_sequence() {
         let db = Arc::new(make_db().await.db);
 
         let partition_key = "1970-01-01T00";
         write_lp(&db, "cpu bar=1 10").await;
+        write_lp(&db, "cpu bar=1 20").await;
 
         let partition = db.catalog.partition("cpu", partition_key).unwrap();
         let mut partition = partition.write();
         // validate it has data
         let table_summary = partition.summary().table;
         assert_eq!(&table_summary.name, "cpu");
-        assert_eq!(table_summary.count(), 1);
-        assert!(partition.persistence_windows().is_none());
+        assert_eq!(table_summary.count(), 2);
+        let windows = partition.persistence_windows().unwrap();
+        let open_min = windows.open_min_time().unwrap();
+        let open_max = windows.open_max_time().unwrap();
+        assert_eq!(open_min.timestamp_nanos(), 10);
+        assert_eq!(open_max.timestamp_nanos(), 20);
     }
 
     #[tokio::test]
