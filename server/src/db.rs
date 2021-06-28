@@ -1954,7 +1954,6 @@ mod tests {
         let windows = partition.persistence_windows().unwrap();
         let seq = windows.minimum_unpersisted_sequence().unwrap();
 
-        println!("Seq: {:#?}", seq);
         let seq = seq.get(&0).unwrap();
         assert_eq!(seq, &MinMaxSequence { min: 0, max: 2 });
     }
