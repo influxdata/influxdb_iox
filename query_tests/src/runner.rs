@@ -61,7 +61,9 @@ pub enum Error {
     #[snafu(display(
         "Answers produced by scenario {} differ from previous answer\
          \n\nprevious:\n\n{:#?}\ncurrent:\n\n{:#?}\n\n",
-        scenario_name, previous_results, current_results
+        scenario_name,
+        previous_results,
+        current_results
     ))]
     ScenarioMismatch {
         scenario_name: String,
@@ -133,9 +135,11 @@ impl<W: Write> Runner<W> {
         Ok(log)
     }
 
-    /// Run the test case of the specified file
+    /// Run the test case of the specified `input_path`
     ///
-    /// Expect to find the file at `cases/path`
+    /// Produces output at `input_path`.out
+    ///
+    /// Compares it to an expected result at `input_path`.expected
     ///
     /// Returns Ok on success, or Err() on failure
     pub async fn run(&mut self, input_path: impl Into<PathBuf>) -> Result<()> {
@@ -258,8 +262,11 @@ impl<W: Write> Runner<W> {
 
             if !previous_results.is_empty() && previous_results != current_results {
                 return ScenarioMismatch {
-                    scenario_name, previous_results, current_results
-                }.fail();
+                    scenario_name,
+                    previous_results,
+                    current_results,
+                }
+                .fail();
             }
             previous_results = current_results;
         }
