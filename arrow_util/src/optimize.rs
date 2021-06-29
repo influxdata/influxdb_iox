@@ -11,6 +11,8 @@ use crate::dictionary::StringDictionary;
 
 /// Takes a record batch and returns a new record batch with dictionaries
 /// optimized to contain no duplicate or unreferenced values
+///
+/// Where the input dictionaries are sorted, the output dictionaries will also be
 pub fn optimize_dictionaries(batch: &RecordBatch) -> Result<RecordBatch> {
     let schema = batch.schema();
     let new_columns = batch
@@ -18,7 +20,7 @@ pub fn optimize_dictionaries(batch: &RecordBatch) -> Result<RecordBatch> {
         .iter()
         .zip(schema.fields())
         .map(|(col, field)| match field.data_type() {
-            DataType::Dictionary(key, value) => optimize_col(col, &key, &value),
+            DataType::Dictionary(key, value) => optimize_dict_col(col, &key, &value),
             _ => Ok(Arc::clone(col)),
         })
         .collect::<Result<Vec<_>>>()?;
@@ -27,7 +29,11 @@ pub fn optimize_dictionaries(batch: &RecordBatch) -> Result<RecordBatch> {
 }
 
 /// Optimizes the dictionaries for a column
-fn optimize_col(col: &ArrayRef, key_type: &DataType, value_type: &DataType) -> Result<ArrayRef> {
+fn optimize_dict_col(
+    col: &ArrayRef,
+    key_type: &DataType,
+    value_type: &DataType,
+) -> Result<ArrayRef> {
     if key_type != &DataType::Int32 {
         return Err(ArrowError::NotYetImplemented(format!(
             "truncating non-Int32 dictionaries not supported: {}",
@@ -108,8 +114,8 @@ mod tests {
             None,
             Some(1),
             Some(2),
-            Some(3),
             Some(5),
+            Some(3),
         ]);
 
         let data = ArrayDataBuilder::new(DataType::Dictionary(
@@ -151,8 +157,8 @@ mod tests {
                 "|           |",
                 "| duplicate |",
                 "| foo       |",
-                "| boo       |",
                 "| duplicate |",
+                "| boo       |",
                 "+-----------+",
             ],
             &[optimized]
