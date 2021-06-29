@@ -40,7 +40,7 @@ use parking_lot::RwLock;
 use parquet_file::{
     catalog::{CheckpointData, PreservedCatalog},
     chunk::{ChunkMetrics as ParquetChunkMetrics, ParquetChunk},
-    cleanup::cleanup_unreferenced_parquet_files,
+    cleanup::{delete_files as delete_parquet_files, get_unreferenced_parquet_files},
     metadata::IoxMetadata,
     storage::Storage,
 };
@@ -287,6 +287,13 @@ pub struct Db {
 
     /// Optionally buffer writes
     write_buffer: Option<Arc<dyn WriteBuffer>>,
+
+    /// Lock that prevents the cleanup job from deleting files that are written but not yet added to the preserved
+    /// catalog.
+    ///
+    /// The cleanup job needs exclusive access and hence will acquire a write-guard. Creating parquet files and creating
+    /// catalog transaction only needs shared access and hence will acquire a read-guard.
+    cleanup_lock: Arc<tokio::sync::RwLock<()>>,
 }
 
 /// All the information needed to commit a database
@@ -338,6 +345,7 @@ impl Db {
             worker_iterations_cleanup: AtomicUsize::new(0),
             metric_labels,
             write_buffer: database_to_commit.write_buffer,
+            cleanup_lock: Default::default(),
         }
     }
 
@@ -550,6 +558,7 @@ impl Db {
         let preserved_catalog = Arc::clone(&db.preserved_catalog);
         let catalog = Arc::clone(&db.catalog);
         let object_store = Arc::clone(&db.store);
+        let cleanup_lock = Arc::clone(&db.cleanup_lock);
 
         // Drop locks
         let chunk = guard.unwrap().chunk;
@@ -586,6 +595,9 @@ impl Db {
 
             // catalog-level transaction for preservation layer
             {
+                // fetch shared (= read) guard preventing the cleanup job from deleting our files
+                let _guard = cleanup_lock.read().await;
+
                 let mut transaction = preserved_catalog.open_transaction().await;
 
                 // Write this table data into the object store
@@ -778,7 +790,7 @@ impl Db {
                             debug!(?duration, "cleanup worker sleeps");
                             tokio::time::sleep(duration).await;
 
-                            if let Err(e) = cleanup_unreferenced_parquet_files(&self.preserved_catalog, 1_000).await {
+                            if let Err(e) = self.cleanup_unreferenced_parquet_files().await {
                                 error!(%e, "error in background cleanup task");
                             }
                         } => {},
@@ -789,6 +801,16 @@ impl Db {
         );
 
         info!("finished background worker");
+    }
+
+    async fn cleanup_unreferenced_parquet_files(
+        self: &Arc<Self>,
+    ) -> std::result::Result<(), parquet_file::cleanup::Error> {
+        let guard = self.cleanup_lock.write().await;
+        let files = get_unreferenced_parquet_files(&self.preserved_catalog, 1_000).await?;
+        drop(guard);
+
+        delete_parquet_files(&self.preserved_catalog, &files).await
     }
 
     /// Stores an entry based on the configuration.
@@ -829,16 +851,9 @@ impl Db {
                 DatabaseNotWriteable {}.fail()
             }
             (None, false) => {
-                // If no write buffer is configured, use the process clock and send to the mutable
-                // buffer.
-                let sequenced_entry = Arc::new(
-                    SequencedEntry::new_from_process_clock(
-                        self.process_clock.next(),
-                        self.server_id,
-                        entry,
-                    )
-                    .context(SequencedEntryError)?,
-                );
+                // If no write buffer is configured, nothing is
+                // sequencing entries so skip doing so here
+                let sequenced_entry = Arc::new(SequencedEntry::new_unsequenced(entry));
 
                 self.store_sequenced_entry(sequenced_entry)
             }
@@ -869,6 +884,8 @@ impl Db {
         }
 
         if let Some(partitioned_writes) = sequenced_entry.partition_writes() {
+            let sequence = sequenced_entry.as_ref().sequence();
+
             // Protect against DoS by limiting the number of errors we might collect
             const MAX_ERRORS_PER_SEQUENCED_ENTRY: usize = 10;
 
@@ -903,11 +920,7 @@ impl Db {
                                 chunk.mutable_buffer().expect("cannot mutate open chunk");
 
                             if let Err(e) = mb_chunk
-                                .write_table_batch(
-                                    sequenced_entry.sequence().id,
-                                    sequenced_entry.sequence().number,
-                                    table_batch,
-                                )
+                                .write_table_batch(sequence, table_batch)
                                 .context(WriteEntry {
                                     partition_key,
                                     chunk_id,
@@ -935,11 +948,7 @@ impl Db {
                             );
 
                             if let Err(e) = mb_chunk
-                                .write_table_batch(
-                                    sequenced_entry.sequence().id,
-                                    sequenced_entry.sequence().number,
-                                    table_batch,
-                                )
+                                .write_table_batch(sequence, table_batch)
                                 .context(WriteEntryInitial { partition_key })
                             {
                                 if errors.len() < MAX_ERRORS_PER_SEQUENCED_ENTRY {
@@ -956,7 +965,7 @@ impl Db {
                     match partition.persistence_windows() {
                         Some(windows) => {
                             windows.add_range(
-                                sequenced_entry.as_ref().sequence(),
+                                sequence,
                                 row_count,
                                 min_time,
                                 max_time,
@@ -966,7 +975,7 @@ impl Db {
                         None => {
                             let mut windows = PersistenceWindows::new(late_arrival_window);
                             windows.add_range(
-                                sequenced_entry.as_ref().sequence(),
+                                sequence,
                                 row_count,
                                 min_time,
                                 max_time,
@@ -1099,6 +1108,7 @@ mod tests {
     use bytes::Bytes;
     use chrono::Utc;
     use futures::{stream, StreamExt, TryStreamExt};
+    use mutable_buffer::persistence_windows::MinMaxSequence;
     use tokio_util::sync::CancellationToken;
 
     use ::test_helpers::assert_contains;
@@ -1944,22 +1954,48 @@ mod tests {
 
     #[tokio::test]
     async fn write_updates_persistence_windows() {
-        let db = Arc::new(make_db().await.db);
-
-        let now = Utc::now().timestamp_nanos() as u64;
+        // Writes should update the persistence windows when there
+        // is a write buffer configured.
+        let write_buffer = Arc::new(MockBuffer::default());
+        let db = TestDb::builder()
+            .write_buffer(Arc::clone(&write_buffer) as _)
+            .build()
+            .await
+            .db;
 
         let partition_key = "1970-01-01T00";
-        write_lp(&db, "cpu bar=1 10").await;
-
-        let later = Utc::now().timestamp_nanos() as u64;
+        write_lp(&db, "cpu bar=1 10").await; // seq 0
+        write_lp(&db, "cpu bar=1 20").await; // seq 1
+        write_lp(&db, "cpu bar=1 30").await; // seq 2
 
         let partition = db.catalog.partition("cpu", partition_key).unwrap();
         let mut partition = partition.write();
         let windows = partition.persistence_windows().unwrap();
         let seq = windows.minimum_unpersisted_sequence().unwrap();
 
-        let seq = seq.get(&1).unwrap();
-        assert!(now < seq.min && later > seq.min);
+        let seq = seq.get(&0).unwrap();
+        assert_eq!(seq, &MinMaxSequence { min: 0, max: 2 });
+    }
+
+    #[tokio::test]
+    async fn write_with_no_write_buffer_updates_sequence() {
+        let db = Arc::new(make_db().await.db);
+
+        let partition_key = "1970-01-01T00";
+        write_lp(&db, "cpu bar=1 10").await;
+        write_lp(&db, "cpu bar=1 20").await;
+
+        let partition = db.catalog.partition("cpu", partition_key).unwrap();
+        let mut partition = partition.write();
+        // validate it has data
+        let table_summary = partition.summary().table;
+        assert_eq!(&table_summary.name, "cpu");
+        assert_eq!(table_summary.count(), 2);
+        let windows = partition.persistence_windows().unwrap();
+        let open_min = windows.open_min_time().unwrap();
+        let open_max = windows.open_max_time().unwrap();
+        assert_eq!(open_min.timestamp_nanos(), 10);
+        assert_eq!(open_max.timestamp_nanos(), 20);
     }
 
     #[tokio::test]
