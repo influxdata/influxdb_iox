@@ -568,11 +568,11 @@ fn pb_column_to_fb<'a>(fbb: &mut FlatBufferBuilder<'a>, column: &pb::Column, tab
 
     let name = Some(fbb.create_string(&column.column_name));
     Ok(entry_fb::Column::create(fbb, &entry_fb::ColumnArgs {
-        name: name,
-        logical_column_type: logical_column_type,
-        values_type: values_type,
+        name,
+        logical_column_type,
+        values_type,
         values: Some(values),
-        null_mask: null_mask,
+        null_mask,
     }))
 }
 
