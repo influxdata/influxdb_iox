@@ -313,7 +313,7 @@ impl TestServer {
         println!("****************");
 
         // If set in test environment, use that value, else default to info
-        let log_filter = std::env::var("LOG_FILTER").unwrap_or("info".to_string());
+        let log_filter = std::env::var("LOG_FILTER").unwrap_or_else(|_| "info".to_string());
 
         // This will inherit environment from the test runner
         // in particular `LOG_FILTER`
