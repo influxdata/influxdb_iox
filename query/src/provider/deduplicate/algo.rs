@@ -9,6 +9,7 @@ use arrow::{
     record_batch::RecordBatch,
 };
 
+use arrow_util::optimize::optimize_dictionaries;
 use datafusion::physical_plan::{
     coalesce_batches::concat_batches, expressions::PhysicalSortExpr, PhysicalExpr, SQLMetric,
 };
@@ -233,7 +234,8 @@ impl RecordBatchDeduplicator {
             .map(|old_column| old_column.slice(offset, len))
             .collect();
 
-        RecordBatch::try_new(schema, new_columns)
+        let batch = RecordBatch::try_new(schema, new_columns)?;
+        optimize_dictionaries(&batch)
     }
 }
 
