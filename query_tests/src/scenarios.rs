@@ -46,6 +46,7 @@ macro_rules! register_setup {
 pub fn get_all_setups() -> &'static HashMap<String, Arc<dyn DbSetup>> {
     SETUPS.get_or_init(|| {
         vec![
+            register_setup!(TwoMeasurements),
             register_setup!(TwoMeasurementsPredicatePushDown),
             register_setup!(OneMeasurementThreeChunksWithDuplicates),
         ]

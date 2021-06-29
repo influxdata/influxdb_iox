@@ -58,17 +58,79 @@ pub enum Error {
         expected_path: PathBuf,
     },
 
+    #[snafu(display(
+        "Answers produced by scenario {} differ from previous answer\
+         \n\nprevious:\n\n{:#?}\ncurrent:\n\n{:#?}\n\n",
+        scenario_name, previous_results, current_results
+    ))]
+    ScenarioMismatch {
+        scenario_name: String,
+        previous_results: Vec<String>,
+        current_results: Vec<String>,
+    },
+
     #[snafu(display("Test Setup Error: {}", source))]
     SetupError { source: self::setup::Error },
+
+    #[snafu(display("Error writing to runner log: {}", source))]
+    LogIO { source: std::io::Error },
+
+    #[snafu(display("IO inner while flushing buffer: {}", source))]
+    FlushingBuffer { source: std::io::Error },
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-pub struct Runner {}
+/// Allow automatic conversion from IO errors
+impl From<std::io::Error> for Error {
+    fn from(source: std::io::Error) -> Self {
+        Self::LogIO { source }
+    }
+}
 
-// The case runner
-impl Runner {
+/// The case runner. It writes its test log output to the `Write`
+/// output stream
+pub struct Runner<W: Write> {
+    log: BufWriter<W>,
+}
+
+impl<W: Write> std::fmt::Debug for Runner<W> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Runner<W>")
+    }
+}
+
+impl Runner<std::io::Stdout> {
+    /// Create a new runner which writes to std::out
     pub fn new() -> Self {
-        Self {}
+        let log = BufWriter::new(std::io::stdout());
+        Self { log }
+    }
+
+    pub fn flush(mut self) -> Result<Self> {
+        self.log.flush()?;
+        Ok(self)
+    }
+}
+
+impl<W: Write> Runner<W> {
+    pub fn new_with_writer(log: W) -> Self {
+        let log = BufWriter::new(log);
+        Self { log }
+    }
+
+    /// Consume self and return the inner `Write` instance
+    pub fn into_inner(self) -> Result<W> {
+        let Self { mut log } = self;
+
+        log.flush()?;
+        let log = match log.into_inner() {
+            Ok(log) => log,
+            Err(e) => {
+                panic!("Error flushing runner's buffer: {}", e.error());
+            }
+        };
+
+        Ok(log)
     }
 
     /// Run the test case of the specified file
@@ -76,24 +138,24 @@ impl Runner {
     /// Expect to find the file at `cases/path`
     ///
     /// Returns Ok on success, or Err() on failure
-    pub async fn run(&self, input_filename: &str) -> Result<()> {
-        let input_path = Path::new("cases").join(input_filename);
+    pub async fn run(&mut self, input_path: impl Into<PathBuf>) -> Result<()> {
+        let input_path = input_path.into();
         // create output and expected output
         let output_path = input_path.with_extension("out");
         let expected_path = input_path.with_extension("expected");
 
-        println!("Running case in {:?}", input_path);
-        println!("  writing output to {:?}", output_path);
-        println!("  expected output in {:?}", expected_path);
+        writeln!(self.log, "Running case in {:?}", input_path)?;
+        writeln!(self.log, "  writing output to {:?}", output_path)?;
+        writeln!(self.log, "  expected output in {:?}", expected_path)?;
 
         let contents = std::fs::read(&input_path).context(NoCaseFile { path: &input_path })?;
         let contents =
             String::from_utf8(contents).context(CaseFileNotUtf8 { path: &input_path })?;
 
-        println!("Processing contents:\n{}", contents);
+        writeln!(self.log, "Processing contents:\n{}", contents)?;
         let test_setup = TestSetup::try_from_lines(contents.lines()).context(SetupError)?;
         let queries = TestQueries::from_lines(contents.lines());
-        println!("Using test setup:\n{}", test_setup);
+        writeln!(self.log, "Using test setup:\n{}", test_setup)?;
 
         // Make a place to store output files
         let output_file = std::fs::File::create(&output_path).context(CreatingOutputFile {
@@ -107,7 +169,7 @@ impl Runner {
         for q in queries.iter() {
             output.push(format!("-- SQL: {}", q));
 
-            output.append(&mut self.run_query(q, db_setup.as_ref()).await);
+            output.append(&mut self.run_query(q, db_setup.as_ref()).await?);
         }
 
         let mut output_file = BufWriter::new(output_file);
@@ -139,14 +201,14 @@ impl Runner {
             let expected_path = make_absolute(&expected_path);
             let output_path = make_absolute(&output_path);
 
-            println!("Expected output does not match actual output");
-            println!("  expected output in {:?}", expected_path);
-            println!("  actual output in {:?}", output_path);
-            println!("Possibly helpful commands:");
-            println!("  # See diff");
-            println!("  diff -du {:?} {:?}", expected_path, output_path);
-            println!("  # Update expected");
-            println!("  cp -f {:?} {:?}", output_path, expected_path);
+            writeln!(self.log, "Expected output does not match actual output")?;
+            writeln!(self.log, "  expected output in {:?}", expected_path)?;
+            writeln!(self.log, "  actual output in {:?}", output_path)?;
+            writeln!(self.log, "Possibly helpful commands:")?;
+            writeln!(self.log, "  # See diff")?;
+            writeln!(self.log, "  diff -du {:?} {:?}", expected_path, output_path)?;
+            writeln!(self.log, "  # Update expected")?;
+            writeln!(self.log, "  cp -f {:?} {:?}", output_path, expected_path)?;
             OutputMismatch {
                 output_path,
                 expected_path,
@@ -166,7 +228,7 @@ impl Runner {
     ///
     /// Note this does not (yet) understand how to compare results
     /// while ignoring output order
-    async fn run_query(&self, sql: &str, db_setup: &dyn DbSetup) -> Vec<String> {
+    async fn run_query(&mut self, sql: &str, db_setup: &dyn DbSetup) -> Result<Vec<String>> {
         let mut previous_results = vec![];
 
         for scenario in db_setup.make().await {
@@ -175,8 +237,8 @@ impl Runner {
             } = scenario;
             let db = Arc::new(db);
 
-            println!("Running scenario '{}'", scenario_name);
-            println!("SQL: '{:#?}'", sql);
+            writeln!(self.log, "Running scenario '{}'", scenario_name)?;
+            writeln!(self.log, "SQL: '{:#?}'", sql)?;
             let planner = SqlQueryPlanner::default();
             let executor = db.executor();
 
@@ -194,17 +256,14 @@ impl Runner {
                 .map(|s| s.to_string())
                 .collect::<Vec<_>>();
 
-            if !previous_results.is_empty() {
-                assert_eq!(
-                    previous_results, current_results,
-                    "Answers produced by scenario {} differ from previous answer\
-                     \n\nprevious:\n\n{:#?}\ncurrent:\n\n{:#?}\n\n",
+            if !previous_results.is_empty() && previous_results != current_results {
+                return ScenarioMismatch {
                     scenario_name, previous_results, current_results
-                );
+                }.fail();
             }
             previous_results = current_results;
         }
-        previous_results
+        Ok(previous_results)
     }
 }
 
@@ -218,9 +277,103 @@ fn make_absolute(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod test {
+    use test_helpers::assert_contains;
+
     use super::*;
 
-    // TODO; implement end to end test of the runner
+    const TEST_INPUT: &str = r#"
+-- Runner test, positive
+-- IOX_SETUP: TwoMeasurements
+
+-- Only a single query
+SELECT * from disk;
+"#;
+
+    const EXPECTED_OUTPUT: &str = r#"-- Test Setup: TwoMeasurements
+-- SQL: SELECT * from disk;
++-------+--------+-------------------------------+
+| bytes | region | time                          |
++-------+--------+-------------------------------+
+| 99    | east   | 1970-01-01 00:00:00.000000200 |
++-------+--------+-------------------------------+
+"#;
+
     #[tokio::test]
-    async fn runner_positive() {}
+    async fn runner_positive() {
+        let input_file = test_helpers::make_temp_file(TEST_INPUT);
+        let output_path = input_file.path().with_extension("out");
+        let expected_path = input_file.path().with_extension("expected");
+
+        // write expected output
+        std::fs::write(&expected_path, EXPECTED_OUTPUT).unwrap();
+
+        let mut runner = Runner::new_with_writer(vec![]);
+        let runner_results = runner.run(&input_file.path()).await;
+
+        // ensure that the generated output and expected output match
+        let output_contents = read_file(&output_path);
+        assert_eq!(output_contents, EXPECTED_OUTPUT);
+
+        // Test should have succeeded
+        runner_results.expect("successful run");
+
+        // examine the output log and ensure it contains expected resouts
+        let runner_log = runner_to_log(runner);
+        assert_contains!(&runner_log, format!("writing output to {:?}", &output_path));
+        assert_contains!(
+            &runner_log,
+            format!("expected output in {:?}", &expected_path)
+        );
+        assert_contains!(&runner_log, "Setup: TwoMeasurements");
+        assert_contains!(
+            &runner_log,
+            "Running scenario 'Data in open chunk of mutable buffer'"
+        );
+    }
+
+    #[tokio::test]
+    async fn runner_negative() {
+        let input_file = test_helpers::make_temp_file(TEST_INPUT);
+        let output_path = input_file.path().with_extension("out");
+        let expected_path = input_file.path().with_extension("expected");
+
+        // write incorrect expected output
+        std::fs::write(&expected_path, "this is not correct").unwrap();
+
+        let mut runner = Runner::new_with_writer(vec![]);
+        let runner_results = runner.run(&input_file.path()).await;
+
+        // ensure that the generated output and expected output match
+        let output_contents = read_file(&output_path);
+        assert_eq!(output_contents, EXPECTED_OUTPUT);
+
+        // Test should have failed
+        let err_string = runner_results.unwrap_err().to_string();
+        assert_contains!(
+            err_string,
+            format!(
+                "Contents of output '{:?}' does not match contents of expected '{:?}'",
+                &output_path, &expected_path
+            )
+        );
+
+        // examine the output log and ensure it contains expected resouts
+        let runner_log = runner_to_log(runner);
+        assert_contains!(&runner_log, format!("writing output to {:?}", &output_path));
+        assert_contains!(
+            &runner_log,
+            format!("expected output in {:?}", &expected_path)
+        );
+        assert_contains!(&runner_log, "Setup: TwoMeasurements");
+    }
+
+    fn read_file(path: &Path) -> String {
+        let output_contents = std::fs::read(path).expect("Can read file");
+        String::from_utf8(output_contents).expect("utf8")
+    }
+
+    fn runner_to_log(runner: Runner<Vec<u8>>) -> String {
+        let runner_log = runner.into_inner().expect("getting inner");
+        String::from_utf8(runner_log).expect("output was utf8")
+    }
 }
