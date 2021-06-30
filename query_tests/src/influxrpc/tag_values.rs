@@ -221,6 +221,23 @@ async fn list_tag_values_table_and_timestamp_and_state_pred_state_col_no_rows() 
 }
 
 #[tokio::test]
+async fn list_tag_values_table_and_timestamp_and_state_pred_state_col_no_rows_single_chunk() {
+    let tag_name = "state";
+    let predicate = PredicateBuilder::default()
+        .table("o2")
+        .timestamp_range(1, 300) // filters out the NY row
+        .add_expr(col("state").eq(lit("NY"))) // state=NY
+        .build();
+    let expected_tag_keys = vec![];
+    run_tag_values_test_case!(
+        TwoMeasurementsManyNullsSingleChunk {},
+        tag_name,
+        predicate,
+        expected_tag_keys
+    );
+}
+
+#[tokio::test]
 async fn list_tag_values_field_col() {
     let db_setup = TwoMeasurementsManyNulls {};
     let predicate = PredicateBuilder::default().build();

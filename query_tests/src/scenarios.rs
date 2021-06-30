@@ -264,6 +264,28 @@ impl DbSetup for MultiChunkSchemaMerge {
     }
 }
 
+
+/// Two measurements data with many null values in a single chunk
+#[derive(Debug)]
+pub struct TwoMeasurementsManyNullsSingleChunk {}
+#[async_trait]
+impl DbSetup for TwoMeasurementsManyNullsSingleChunk {
+    async fn make(&self) -> Vec<DbScenario> {
+        let partition_key = "1970-01-01T00";
+
+        let lp_lines = vec![
+            "o2,state=MA,city=Boston temp=50.4 200",
+            "o2,state=CA temp=79.0 300",
+            "o2,state=NY temp=60.8 400",
+            "o2,state=NY,city=NYC temp=61.0 500",
+            "o2,state=NY,city=NYC,borough=Brooklyn temp=61.0 600",
+        ];
+
+        make_one_chunk_scenarios(partition_key, &lp_lines.join("\n")).await
+    }
+}
+
+
 /// Two measurements data with many null values
 #[derive(Debug)]
 pub struct TwoMeasurementsManyNulls {}
