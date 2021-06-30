@@ -4,8 +4,6 @@ use generated_types::influxdata::transfer::column::v1::*;
 use server::{ConnectionManager, Server};
 use std::fmt::Debug;
 use std::sync::Arc;
-use tonic;
-use tonic::Interceptor;
 
 struct PBWriteService<M: ConnectionManager> {
     server: Arc<Server<M>>,
@@ -23,7 +21,7 @@ where
         let database_batch = request
             .into_inner()
             .database_batch
-            .ok_or(FieldViolation::required("database_batch"))?;
+            .ok_or_else(|| FieldViolation::required("database_batch"))?;
 
         self.server
             .write_pb(database_batch)
@@ -36,7 +34,7 @@ where
 
 pub fn make_server<M>(
     server: Arc<Server<M>>,
-    interceptor: impl Into<Interceptor>,
+    interceptor: impl Into<tonic::Interceptor>,
 ) -> write_service_server::WriteServiceServer<impl write_service_server::WriteService>
 where
     M: ConnectionManager + Send + Sync + Debug + 'static,

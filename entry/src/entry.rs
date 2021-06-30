@@ -366,6 +366,12 @@ fn pb_check_table_batch_column_types(table_batch: &pb::TableBatch) -> Result<()>
                     time_nontime_detected = true;
                 }
             }
+            _ => {
+                return Err(Error::PBColumnSemanticTypeInvalid {
+                    column_name: column.column_name.to_string(),
+                    semantic_type: column.semantic_type,
+                })
+            }
         }
     }
 

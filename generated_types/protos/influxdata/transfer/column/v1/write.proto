@@ -29,14 +29,15 @@ message Column {
 
   // Semantic meaning behind the column data.
   enum SemanticType {
-    // No semantic type (value types: i64, f64, u64, string, bool, bytes)
-    SEMANTIC_TYPE_IOX = 0;
+    SEMANTIC_TYPE_UNSPECIFIED = 0;
+    // "Native" semantic type (value types: i64, f64, u64, string, bool, bytes)
+    SEMANTIC_TYPE_IOX = 1;
     // InfluxDB/TSM tag (value type string only)
-    SEMANTIC_TYPE_TAG = 1;
+    SEMANTIC_TYPE_TAG = 2;
     // InfluxDB/TSM field (value types: i64, f64, u64, string, bool)
-    SEMANTIC_TYPE_FIELD = 2;
+    SEMANTIC_TYPE_FIELD = 3;
     // Timestamps, which must have value type i64
-    SEMANTIC_TYPE_TIME = 3;
+    SEMANTIC_TYPE_TIME = 4;
   }
   SemanticType semantic_type = 2;
 
