@@ -50,7 +50,10 @@ pub mod influxdata {
     pub mod transfer {
         pub mod column {
             pub mod v1 {
-                include!(concat!(env!("OUT_DIR"), "/influxdata.transfer.column.v1.rs"));
+                include!(concat!(
+                    env!("OUT_DIR"),
+                    "/influxdata.transfer.column.v1.rs"
+                ));
             }
         }
     }

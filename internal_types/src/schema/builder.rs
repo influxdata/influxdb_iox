@@ -73,7 +73,9 @@ impl SchemaBuilder {
         match column_type {
             InfluxColumnType::IOx(iox_value_type) => self.field(column_name, iox_value_type.into()),
             InfluxColumnType::Tag => self.tag(column_name),
-            InfluxColumnType::Field(influx_field_type) => self.field(column_name, influx_field_type.into()),
+            InfluxColumnType::Field(influx_field_type) => {
+                self.field(column_name, influx_field_type.into())
+            }
             InfluxColumnType::Timestamp => self.timestamp(),
         }
     }

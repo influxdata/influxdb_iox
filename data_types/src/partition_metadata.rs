@@ -25,7 +25,7 @@ impl PartitionSummary {
     /// summary. Field type conflicts will be ignored.
     pub fn from_table_summaries(
         key: impl Into<String>,
-        summaries: impl IntoIterator<Item=TableSummary>,
+        summaries: impl IntoIterator<Item = TableSummary>,
     ) -> Self {
         Self {
             key: key.into(),
@@ -42,7 +42,7 @@ pub struct PartitionChunkSummary {
 }
 
 impl FromIterator<Self> for TableSummary {
-    fn from_iter<T: IntoIterator<Item=Self>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = Self>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
         let first = iter.next().expect("must contain at least one element");
         let mut s = Self {
@@ -91,7 +91,7 @@ impl TableSummary {
         size
             + self.name.len() // Add size of the table name
             + mem::size_of::<Self>() // Add size of this struct that points to
-        // table and ColumnSummary
+                                     // table and ColumnSummary
     }
     pub fn has_table(&self, table_name: &str) -> bool {
         self.name.eq(table_name)
@@ -333,8 +333,8 @@ impl<T> Default for StatValues<T> {
 }
 
 impl<T> StatValues<T>
-    where
-        T: Clone + PartialEq + PartialOrd + IsNan,
+where
+    T: Clone + PartialEq + PartialOrd + IsNan,
 {
     pub fn new_with_value(starting_value: T) -> Self {
         let starting_value = if starting_value.is_nan() {
@@ -408,9 +408,9 @@ impl<T> StatValues<T> {
     ///
     /// The type plumbing exists to allow calling with &str on a StatValues<String>
     pub fn update<U: ?Sized>(&mut self, other: &U)
-        where
-            T: Borrow<U>,
-            U: ToOwned<Owned=T> + PartialOrd + IsNan,
+    where
+        T: Borrow<U>,
+        U: ToOwned<Owned = T> + PartialOrd + IsNan,
     {
         self.count += 1;
 
@@ -461,8 +461,8 @@ pub enum StatOverlap {
 }
 
 impl<T> StatValues<T>
-    where
-        T: PartialOrd,
+where
+    T: PartialOrd,
 {
     /// returns information about the overlap between two `StatValues`
     pub fn overlaps(&self, other: &Self) -> StatOverlap {

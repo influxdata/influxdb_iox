@@ -46,7 +46,7 @@ pub mod sort;
 /// Database schema creation / validation errors.
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Error: Duplicate column name found in schema: '{}'", column_name, ))]
+    #[snafu(display("Error: Duplicate column name found in schema: '{}'", column_name,))]
     DuplicateColumnName { column_name: String },
 
     #[snafu(display(
@@ -160,7 +160,7 @@ impl Schema {
     /// used only by the SchemaBuilder.
     pub(crate) fn new_from_parts(
         measurement: Option<String>,
-        fields: impl Iterator<Item=(ArrowField, Option<InfluxColumnType>)>,
+        fields: impl Iterator<Item = (ArrowField, Option<InfluxColumnType>)>,
         sort_key: &SortKey<'_>,
         sort_columns: bool,
     ) -> Result<Self> {
@@ -263,7 +263,7 @@ impl Schema {
 
     /// Returns an iterator of `&Field` for all the tag columns of
     /// this schema, in order
-    pub fn tags_iter(&self) -> impl Iterator<Item=&ArrowField> {
+    pub fn tags_iter(&self) -> impl Iterator<Item = &ArrowField> {
         self.iter().filter_map(|(influx_column_type, field)| {
             if matches!(influx_column_type, Some(InfluxColumnType::Tag)) {
                 Some(field)
@@ -275,7 +275,7 @@ impl Schema {
 
     /// Returns an iterator of `&Field` for all the field columns of
     /// this schema, in order
-    pub fn fields_iter(&self) -> impl Iterator<Item=&ArrowField> {
+    pub fn fields_iter(&self) -> impl Iterator<Item = &ArrowField> {
         self.iter().filter_map(|(influx_column_type, field)| {
             if matches!(influx_column_type, Some(InfluxColumnType::Field(_))) {
                 Some(field)
@@ -288,7 +288,7 @@ impl Schema {
     /// Returns an iterator of `&Field` for all the timestamp columns
     /// of this schema, in order. At the time of writing there should
     /// be only one or 0 such columns
-    pub fn time_iter(&self) -> impl Iterator<Item=&ArrowField> {
+    pub fn time_iter(&self) -> impl Iterator<Item = &ArrowField> {
         self.iter().filter_map(|(influx_column_type, field)| {
             if matches!(influx_column_type, Some(InfluxColumnType::Timestamp)) {
                 Some(field)
@@ -835,8 +835,8 @@ mod test {
             "iox::measurement::name".to_string(),
             "the_measurement".to_string(),
         )]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
 
         let arrow_schema = ArrowSchemaRef::new(ArrowSchema::new_with_metadata(fields, metadata));
 
