@@ -60,6 +60,7 @@ mod process_clock;
 mod streams;
 mod system_tables;
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(context(false))]
