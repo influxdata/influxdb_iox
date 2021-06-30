@@ -317,7 +317,7 @@ pub fn pb_to_entry(database_batch: &pb::DatabaseBatch) -> Result<Entry> {
             table_batches: Some(table_batches),
         },
     );
-    let partition_writes = fbb.create_vector(&vec![partition_write]);
+    let partition_writes = fbb.create_vector(&[partition_write]);
     let operation = entry_fb::WriteOperations::create(
         &mut fbb,
         &entry_fb::WriteOperationsArgs {
@@ -446,7 +446,7 @@ fn pb_column_to_fb<'a>(
         .ok_or(Error::PBColumnContainsOnlyNullValues {
             column_name: column.column_name.clone(),
         })?;
-    let (logical_column_type, values_type, values) = if values.i64_values.len() > 0 {
+    let (logical_column_type, values_type, values) = if !values.i64_values.is_empty() {
         let logical_column_type = match pb::column::SemanticType::from_i32(column.semantic_type) {
             Some(pb::column::SemanticType::Iox) => entry_fb::LogicalColumnType::IOx,
             Some(pb::column::SemanticType::Field) => entry_fb::LogicalColumnType::Field,
@@ -485,7 +485,7 @@ fn pb_column_to_fb<'a>(
             entry_fb::ColumnValues::I64Values,
             values.as_union_value(),
         )
-    } else if values.f64_values.len() > 0 {
+    } else if !values.f64_values.is_empty() {
         let logical_column_type = match pb::column::SemanticType::from_i32(column.semantic_type) {
             Some(pb::column::SemanticType::Iox) => entry_fb::LogicalColumnType::IOx,
             Some(pb::column::SemanticType::Field) => entry_fb::LogicalColumnType::Field,
@@ -524,7 +524,7 @@ fn pb_column_to_fb<'a>(
             entry_fb::ColumnValues::F64Values,
             values.as_union_value(),
         )
-    } else if values.u64_values.len() > 0 {
+    } else if !values.u64_values.is_empty() {
         let logical_column_type = match pb::column::SemanticType::from_i32(column.semantic_type) {
             Some(pb::column::SemanticType::Iox) => entry_fb::LogicalColumnType::IOx,
             Some(pb::column::SemanticType::Field) => entry_fb::LogicalColumnType::Field,
@@ -563,7 +563,7 @@ fn pb_column_to_fb<'a>(
             entry_fb::ColumnValues::U64Values,
             values.as_union_value(),
         )
-    } else if values.string_values.len() > 0 {
+    } else if !values.string_values.is_empty() {
         let logical_column_type = match pb::column::SemanticType::from_i32(column.semantic_type) {
             Some(pb::column::SemanticType::Iox) => entry_fb::LogicalColumnType::IOx,
             Some(pb::column::SemanticType::Field) => entry_fb::LogicalColumnType::Field,
@@ -611,7 +611,7 @@ fn pb_column_to_fb<'a>(
             entry_fb::ColumnValues::StringValues,
             values.as_union_value(),
         )
-    } else if values.bool_values.len() > 0 {
+    } else if !values.bool_values.is_empty() {
         let logical_column_type = match pb::column::SemanticType::from_i32(column.semantic_type) {
             Some(pb::column::SemanticType::Iox) => entry_fb::LogicalColumnType::IOx,
             Some(pb::column::SemanticType::Field) => entry_fb::LogicalColumnType::Field,
@@ -650,7 +650,7 @@ fn pb_column_to_fb<'a>(
             entry_fb::ColumnValues::BoolValues,
             values.as_union_value(),
         )
-    } else if values.bytes_values.len() > 0 {
+    } else if !values.bytes_values.is_empty() {
         let logical_column_type = match pb::column::SemanticType::from_i32(column.semantic_type) {
             Some(pb::column::SemanticType::Iox) => entry_fb::LogicalColumnType::IOx,
             Some(pb::column::SemanticType::Field) => entry_fb::LogicalColumnType::Field,
