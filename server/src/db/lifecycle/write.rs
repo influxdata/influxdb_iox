@@ -25,8 +25,7 @@ use std::{future::Future, sync::Arc};
 use tracker::{TaskTracker, TrackedFuture, TrackedFutureExt};
 
 use super::error::{
-    CommitError, Error, ParquetChunkError, Result, TransactionError,
-    WritingToObjectStore,
+    CommitError, Error, ParquetChunkError, Result, TransactionError, WritingToObjectStore,
 };
 
 /// The implementation for writing a chunk to the object store

@@ -9,10 +9,7 @@ use read_buffer::{ChunkMetrics as ReadBufferChunkMetrics, RBChunk};
 use std::{future::Future, sync::Arc};
 use tracker::{TaskTracker, TrackedFuture, TrackedFutureExt};
 
-use super::{
-    error::Result,
-    LockableCatalogChunk,
-};
+use super::{error::Result, LockableCatalogChunk};
 
 /// The implementation for moving a chunk to the read buffer
 ///
