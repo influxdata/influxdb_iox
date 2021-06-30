@@ -25,7 +25,7 @@ use std::{future::Future, sync::Arc};
 use tracker::{TaskTracker, TrackedFuture, TrackedFutureExt};
 
 use super::error::{
-    CommitError, Error, LifecycleError, ParquetChunkError, Result, TransactionError,
+    CommitError, Error, ParquetChunkError, Result, TransactionError,
     WritingToObjectStore,
 };
 
@@ -33,7 +33,7 @@ use super::error::{
 ///
 /// Returns a future registered with the tracker registry, and the corresponding tracker
 /// The caller can either spawn this future to tokio, or block directly on it
-pub fn write_chunk_to_object_store_impl(
+pub fn write_chunk_to_object_store(
     mut guard: LifecycleWriteGuard<'_, CatalogChunk, LockableCatalogChunk<'_>>,
 ) -> Result<(
     TaskTracker<Job>,
@@ -51,9 +51,7 @@ pub fn write_chunk_to_object_store_impl(
     });
 
     // update the catalog to say we are processing this chunk and
-    let rb_chunk = guard
-        .set_writing_to_object_store(&registration)
-        .context(LifecycleError)?;
+    let rb_chunk = guard.set_writing_to_object_store(&registration)?;
 
     debug!(chunk=%guard.addr(), "chunk marked WRITING , loading tables into object store");
 
