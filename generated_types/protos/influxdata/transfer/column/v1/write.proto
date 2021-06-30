@@ -30,13 +30,13 @@ message Column {
   // Semantic meaning behind the column data.
   enum SemanticType {
     // No semantic type (value types: i64, f64, u64, string, bool, bytes)
-    iox = 0;
+    SEMANTIC_TYPE_IOX = 0;
     // InfluxDB/TSM tag (value type string only)
-    tag = 1;
+    SEMANTIC_TYPE_TAG = 1;
     // InfluxDB/TSM field (value types: i64, f64, u64, string, bool)
-    field = 2;
+    SEMANTIC_TYPE_FIELD = 2;
     // Timestamps, which must have value type i64
-    time = 3;
+    SEMANTIC_TYPE_TIME = 3;
   }
   SemanticType semantic_type = 2;
 
