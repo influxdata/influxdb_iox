@@ -71,7 +71,7 @@ pub(crate) fn compact_chunks(
     let schema = Arc::new(merger.build());
 
     // drop partition lock
-    let partition = partition.unwrap().partition;
+    let partition = partition.into_data().partition;
 
     // create a new read buffer chunk with memory tracking
     let metrics = db
@@ -114,7 +114,7 @@ pub(crate) fn compact_chunks(
         let throughput = (input_rows as u128 * 1_000_000_000) / elapsed.as_nanos();
 
         info!(input_chunks=query_chunks.len(), rub_row_groups=rb_row_groups,
-                input_rows=input_rows, output_rows=guard.table_summary().count(), 
+                input_rows=input_rows, output_rows=guard.table_summary().count(),
                 sort_key=%key_str, compaction_took = ?elapsed, rows_per_sec=?throughput,  "chunk(s) compacted");
 
         Ok(DbChunk::snapshot(&guard))
