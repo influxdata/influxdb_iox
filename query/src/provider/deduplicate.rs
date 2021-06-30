@@ -826,15 +826,27 @@ mod test {
 
         let results = dedupe(vec![batch1, batch2], sort_keys).await;
 
-        let col = results.output[0]
-            .column(results.output[0].schema().column_with_name("t1").unwrap().0)
-            .as_any()
-            .downcast_ref::<DictionaryArray<Int32Type>>()
-            .unwrap();
+        let cols: Vec<_> = results
+            .output
+            .iter()
+            .map(|batch| {
+                batch
+                    .column(batch.schema().column_with_name("t1").unwrap().0)
+                    .as_any()
+                    .downcast_ref::<DictionaryArray<Int32Type>>()
+                    .unwrap()
+            })
+            .collect();
 
         // Should produce optimised dictionaries
-        assert_eq!(col.keys().len(), 2);
-        assert_eq!(col.values().len(), 1); // "a"
+        // The batching is not important
+        assert_eq!(cols.len(), 3);
+        assert_eq!(cols[0].keys().len(), 2);
+        assert_eq!(cols[0].values().len(), 1); // "a"
+        assert_eq!(cols[1].keys().len(), 1);
+        assert_eq!(cols[1].values().len(), 1); // "b"
+        assert_eq!(cols[2].keys().len(), 1);
+        assert_eq!(cols[2].values().len(), 1); // "c"
 
         let expected = vec![
             "+----+----+----+----+",

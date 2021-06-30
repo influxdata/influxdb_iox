@@ -178,7 +178,12 @@ impl RecordBatchDeduplicator {
                     }
                 })
                 .collect::<ArrowResult<Vec<ArrayRef>>>()?;
-            RecordBatch::try_new(batch.schema(), new_columns)
+
+            let batch = RecordBatch::try_new(batch.schema(), new_columns)?;
+            // At time of writing, `MutableArrayData` concatenates the
+            // contents of dictionaries as well; Do a post pass to remove the
+            // redundancy if possible
+            optimize_dictionaries(&batch)
         }
     }
 
@@ -235,6 +240,10 @@ impl RecordBatchDeduplicator {
             .collect();
 
         let batch = RecordBatch::try_new(schema, new_columns)?;
+
+        // At time of writing, `concat_batches` concatenates the
+        // contents of dictionaries as well; Do a post pass to remove the
+        // redundancy if possible
         optimize_dictionaries(&batch)
     }
 }
