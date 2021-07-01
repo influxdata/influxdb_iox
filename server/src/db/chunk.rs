@@ -214,7 +214,7 @@ impl QueryChunk for DbChunk {
         // Assume that only data in the MUB can contain duplicates
         // within itself as it has the raw incoming stream of writes.
         //
-        // All all other types of chunks are deduplicated as part of
+        // All other types of chunks are deduplicated as part of
         // of the reorganization plan run as part of their creation
         matches!(self.state, State::MutableBuffer { .. })
     }
