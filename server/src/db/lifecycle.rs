@@ -34,6 +34,18 @@ mod move_chunk;
 mod unload;
 mod write;
 
+/// A newtype wrapper around `&Arc<Db>` to workaround trait orphan rules
+#[derive(Debug, Clone, Copy)]
+pub struct ArcDb<'a>(pub(super) &'a Arc<Db>);
+
+impl<'a> std::ops::Deref for ArcDb<'a> {
+    type Target = &'a Arc<Db>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 ///
 /// A `LockableCatalogChunk` combines a `CatalogChunk` with its owning `Db`
 ///
@@ -43,7 +55,7 @@ mod write;
 ///
 #[derive(Debug, Clone)]
 pub struct LockableCatalogChunk<'a> {
-    pub db: &'a Db,
+    pub db: ArcDb<'a>,
     pub chunk: Arc<RwLock<CatalogChunk>>,
 }
 
@@ -99,7 +111,7 @@ impl<'a> LockableChunk for LockableCatalogChunk<'a> {
 ///
 #[derive(Debug, Clone)]
 pub struct LockableCatalogPartition<'a> {
-    pub db: &'a Db,
+    pub db: ArcDb<'a>,
     pub partition: Arc<RwLock<Partition>>,
 }
 
@@ -162,7 +174,7 @@ impl<'a> LockablePartition for LockableCatalogPartition<'a> {
     }
 }
 
-impl<'a> LifecycleDb for &'a Db {
+impl<'a> LifecycleDb for ArcDb<'a> {
     type Chunk = LockableCatalogChunk<'a>;
     type Partition = LockableCatalogPartition<'a>;
 

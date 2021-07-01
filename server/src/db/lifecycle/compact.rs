@@ -47,7 +47,7 @@ pub(crate) fn compact_chunks(
         .into_iter()
         .map(|mut chunk| {
             // Sanity-check
-            assert!(std::ptr::eq(db, chunk.data().db));
+            assert!(Arc::ptr_eq(&db, &chunk.data().db));
             assert_eq!(chunk.table_name().as_ref(), table_name.as_str());
 
             chunk.set_compacting(&registration)?;
