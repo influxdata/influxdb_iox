@@ -24,7 +24,7 @@ pub const LIFECYCLE_ACTION_BACKOFF: Duration = Duration::from_secs(10);
 /// of the `LifecycleChunk` contained within this `LifecycleDb`
 pub struct LifecyclePolicy<M>
 where
-    M: LifecycleDb + Copy,
+    M: LifecycleDb,
 {
     /// The `LifecycleDb` this policy is automating
     db: M,
@@ -35,7 +35,7 @@ where
 
 impl<M> LifecyclePolicy<M>
 where
-    M: LifecycleDb + Copy,
+    M: LifecycleDb,
 {
     pub fn new(db: M) -> Self {
         Self {
@@ -813,7 +813,7 @@ mod tests {
         type Chunk = TestLockableChunk<'a>;
         type Partition = TestLockablePartition<'a>;
 
-        fn buffer_size(self) -> usize {
+        fn buffer_size(&self) -> usize {
             // All chunks are 20 bytes
             self.partitions
                 .read()
@@ -822,11 +822,11 @@ mod tests {
                 .sum()
         }
 
-        fn rules(self) -> LifecycleRules {
+        fn rules(&self) -> LifecycleRules {
             self.rules.clone()
         }
 
-        fn partitions(self) -> Vec<Self::Partition> {
+        fn partitions(&self) -> Vec<Self::Partition> {
             self.partitions
                 .read()
                 .iter()

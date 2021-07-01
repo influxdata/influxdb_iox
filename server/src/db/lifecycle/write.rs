@@ -33,7 +33,7 @@ use super::error::{
 /// Returns a future registered with the tracker registry, and the corresponding tracker
 /// The caller can either spawn this future to tokio, or block directly on it
 pub fn write_chunk_to_object_store(
-    mut guard: LifecycleWriteGuard<'_, CatalogChunk, LockableCatalogChunk<'_>>,
+    mut guard: LifecycleWriteGuard<'_, CatalogChunk, LockableCatalogChunk>,
 ) -> Result<(
     TaskTracker<Job>,
     TrackedFuture<impl Future<Output = Result<Arc<DbChunk>>> + Send>,

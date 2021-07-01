@@ -34,12 +34,12 @@ mod move_chunk;
 mod unload;
 mod write;
 
-/// A newtype wrapper around `&Arc<Db>` to workaround trait orphan rules
-#[derive(Debug, Clone, Copy)]
-pub struct ArcDb<'a>(pub(super) &'a Arc<Db>);
+/// A newtype wrapper around `Arc<Db>` to workaround trait orphan rules
+#[derive(Debug, Clone)]
+pub struct ArcDb(pub(super) Arc<Db>);
 
-impl<'a> std::ops::Deref for ArcDb<'a> {
-    type Target = &'a Arc<Db>;
+impl std::ops::Deref for ArcDb {
+    type Target = Db;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -54,12 +54,12 @@ impl<'a> std::ops::Deref for ArcDb<'a> {
 /// without allowing concurrent modification
 ///
 #[derive(Debug, Clone)]
-pub struct LockableCatalogChunk<'a> {
-    pub db: ArcDb<'a>,
+pub struct LockableCatalogChunk {
+    pub db: Arc<Db>,
     pub chunk: Arc<RwLock<CatalogChunk>>,
 }
 
-impl<'a> LockableChunk for LockableCatalogChunk<'a> {
+impl LockableChunk for LockableCatalogChunk {
     type Chunk = CatalogChunk;
 
     type Job = Job;
@@ -110,15 +110,15 @@ impl<'a> LockableChunk for LockableCatalogChunk<'a> {
 /// without allowing concurrent modification
 ///
 #[derive(Debug, Clone)]
-pub struct LockableCatalogPartition<'a> {
-    pub db: ArcDb<'a>,
+pub struct LockableCatalogPartition {
+    pub db: Arc<Db>,
     pub partition: Arc<RwLock<Partition>>,
 }
 
-impl<'a> LockablePartition for LockableCatalogPartition<'a> {
+impl LockablePartition for LockableCatalogPartition {
     type Partition = Partition;
 
-    type Chunk = LockableCatalogChunk<'a>;
+    type Chunk = LockableCatalogChunk;
 
     type Error = super::lifecycle::Error;
 
@@ -135,19 +135,18 @@ impl<'a> LockablePartition for LockableCatalogPartition<'a> {
         chunk_id: u32,
     ) -> Option<Self::Chunk> {
         s.chunk(chunk_id).map(|chunk| LockableCatalogChunk {
-            db: s.data().db,
+            db: Arc::clone(&s.data().db),
             chunk: Arc::clone(chunk),
         })
     }
 
     fn chunks(s: &LifecycleReadGuard<'_, Self::Partition, Self>) -> Vec<(u32, Self::Chunk)> {
-        let db = s.data().db;
         s.keyed_chunks()
             .map(|(id, chunk)| {
                 (
                     id,
                     LockableCatalogChunk {
-                        db,
+                        db: Arc::clone(&s.data().db),
                         chunk: Arc::clone(chunk),
                     },
                 )
@@ -174,24 +173,24 @@ impl<'a> LockablePartition for LockableCatalogPartition<'a> {
     }
 }
 
-impl<'a> LifecycleDb for ArcDb<'a> {
-    type Chunk = LockableCatalogChunk<'a>;
-    type Partition = LockableCatalogPartition<'a>;
+impl LifecycleDb for ArcDb {
+    type Chunk = LockableCatalogChunk;
+    type Partition = LockableCatalogPartition;
 
-    fn buffer_size(self) -> usize {
+    fn buffer_size(&self) -> usize {
         self.catalog.metrics().memory().total()
     }
 
-    fn rules(self) -> LifecycleRules {
+    fn rules(&self) -> LifecycleRules {
         self.rules.read().lifecycle_rules.clone()
     }
 
-    fn partitions(self) -> Vec<Self::Partition> {
+    fn partitions(&self) -> Vec<Self::Partition> {
         self.catalog
             .partitions()
             .into_iter()
             .map(|partition| LockableCatalogPartition {
-                db: self,
+                db: Arc::clone(&self.0),
                 partition,
             })
             .collect()

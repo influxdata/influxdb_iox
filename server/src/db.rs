@@ -331,15 +331,15 @@ impl Db {
         self.catalog.chunk(table_name, partition_key, chunk_id)
     }
 
-    pub fn lockable_chunk<'a>(
-        self: &'a Arc<Self>,
+    pub fn lockable_chunk(
+        self: &Arc<Self>,
         table_name: &str,
         partition_key: &str,
         chunk_id: u32,
-    ) -> catalog::Result<LockableCatalogChunk<'a>> {
+    ) -> catalog::Result<LockableCatalogChunk> {
         let chunk = self.chunk(table_name, partition_key, chunk_id)?;
         Ok(LockableCatalogChunk {
-            db: ArcDb(self),
+            db: Arc::clone(self),
             chunk,
         })
     }
@@ -393,7 +393,7 @@ impl Db {
         let fut = {
             let partition = self.partition(table_name, partition_key)?;
             let partition = LockableCatalogPartition {
-                db: ArcDb(self),
+                db: Arc::clone(&self),
                 partition,
             };
 
@@ -497,7 +497,7 @@ impl Db {
         tokio::join!(
             // lifecycle policy loop
             async {
-                let mut policy = ::lifecycle::LifecyclePolicy::new(ArcDb(&self));
+                let mut policy = ::lifecycle::LifecyclePolicy::new(ArcDb(Arc::clone(&self)));
 
                 while !shutdown.is_cancelled() {
                     self.worker_iterations_lifecycle
