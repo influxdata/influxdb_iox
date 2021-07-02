@@ -28,6 +28,7 @@ pub struct PersistenceWindows {
 }
 
 /// A handle for flushing data from the `PersistenceWindows`
+/// while preventing additional modification to the `persistable` list
 #[derive(Debug)]
 pub struct FlushHandle {
     guard: ReadGuard<Option<Window>>,
@@ -136,6 +137,8 @@ impl PersistenceWindows {
             self.closed.push_back(self.open.take().unwrap())
         }
 
+        // if there is no ongoing persistence operation, try and 
+        // add closed windows to the `perstable` list
         if let Some(persistable) = self.persistable.get_mut() {
             while let Some(w) = self.closed.pop_front() {
                 if now.duration_since(w.created_at) >= self.late_arrival_period {
@@ -153,7 +156,7 @@ impl PersistenceWindows {
 
     /// Acquire a handle that prevents mutation of the persistable window until dropped
     ///
-    /// Returns `None` if there is an outstanding read guard
+    /// Returns `None` if there is an outstanding handle
     pub fn flush_handle(&mut self) -> Option<FlushHandle> {
         // Verify no active flush handles
         self.persistable.get_mut()?;
@@ -956,7 +959,7 @@ mod tests {
         assert_eq!(w.persistable_row_count(), 5);
 
         // Min time should have been truncated by persist operation to be
-        // o nanosecond more than was persisted
+        // 3 nanosecond more than was persisted
         let truncated_time =
             start + chrono::Duration::seconds(2) + chrono::Duration::nanoseconds(1);
 
