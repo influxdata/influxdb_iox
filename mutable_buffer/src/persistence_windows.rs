@@ -137,7 +137,7 @@ impl PersistenceWindows {
             self.closed.push_back(self.open.take().unwrap())
         }
 
-        // if there is no ongoing persistence operation, try and 
+        // if there is no ongoing persistence operation, try and
         // add closed windows to the `perstable` list
         if let Some(persistable) = self.persistable.get_mut() {
             while let Some(w) = self.closed.pop_front() {
