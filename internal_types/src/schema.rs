@@ -219,7 +219,7 @@ impl Schema {
     }
 
     /// Set the order of sort columns to the primary key id the schema
-    pub fn set_sort_key (&mut self, sort_key: &SortKey<'_>) {
+    pub fn set_sort_key(&mut self, sort_key: &SortKey<'_>) {
         let fields = self.inner.fields();
 
         // create a new_fields that are the fields with their sort keys set
@@ -231,13 +231,13 @@ impl Schema {
                     set_field_metadata(&mut new_field, None, Some(sort));
                 }
                 new_field
-            } )
+            })
             .collect();
 
         let new_meta = self.inner.metadata().clone();
         let new_schema = ArrowSchema::new_with_metadata(new_fields, new_meta);
         self.inner = Arc::new(new_schema);
-    }   
+    }
 
     /// Provide a reference to the underlying Arrow Schema object
     pub fn inner(&self) -> &ArrowSchemaRef {
