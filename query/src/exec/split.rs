@@ -584,7 +584,7 @@ mod tests {
             .as_ref()
             .clone()
             .try_into()
-            .expect("could make logical schema");
+            .expect("could not make logical schema");
 
         physical_planner
             .create_physical_expr(
