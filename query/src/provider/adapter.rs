@@ -123,7 +123,7 @@ impl SchemaAdapterStream {
             // not present in the desired output schema (otherwise we
             // are dropping fields -- theys should have been selected
             // out with projection push down)
-            if output_schema
+            if !output_schema
                 .fields()
                 .iter()
                 .any(|output_field| input_field.name() == output_field.name())
