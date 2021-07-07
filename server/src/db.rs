@@ -291,7 +291,12 @@ impl Db {
     }
 
     /// Rolls over the active chunk in the database's specified
-    /// partition. Returns the previously open (now closed) Chunk if there was any.
+    /// partition. Returns the previously open (now closed) Chunk if
+    /// there was any.
+    ///
+    /// NOTE: this function is only used in tests and can be invoked
+    /// by the management API. It is not called automatically by the
+    /// lifecycle manager during normal operation.
     pub async fn rollover_partition(
         &self,
         table_name: &str,
@@ -302,6 +307,7 @@ impl Db {
             .read()
             .open_chunk();
 
+        info!(%table_name, %partition_key, found_chunk=chunk.is_some(), "rolling over a partition");
         if let Some(chunk) = chunk {
             let mut chunk = chunk.write();
             chunk.freeze().context(FreezingChunk)?;
@@ -484,6 +490,11 @@ impl Db {
     /// Returns the number of iterations of the background worker lifecycle loop
     pub fn worker_iterations_cleanup(&self) -> usize {
         self.worker_iterations_cleanup.load(Ordering::Relaxed)
+    }
+
+    /// Perform sequencer-driven replay for this DB.
+    pub async fn perform_replay(&self) {
+        // TODO: implement replay
     }
 
     /// Background worker function
