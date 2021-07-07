@@ -3,7 +3,7 @@
 use arrow::array::ArrayRef;
 use data_types::partition_metadata::{ColumnSummary, Statistics, TableSummary};
 use datafusion::{
-    logical_plan::{Column, Expr, ExprRewriter},
+    logical_plan::{Column, Expr},
     physical_optimizer::pruning::{PruningPredicate, PruningStatistics},
     scalar::ScalarValue,
 };
@@ -72,18 +72,6 @@ where
 {
     trace!(?filter_expr, schema=?chunk.schema(), "creating pruning predicate");
 
-    // HACK strip all relation names
-    // otherwise we get a prediate like #cpu.bar < 5
-    // but our schema only has a columns like bar
-    let filter_expr = match filter_expr.clone().rewrite(&mut RemoveQualifier {}) {
-        Ok(filter_expr) => filter_expr,
-        Err(e) => {
-            observer.could_not_prune_chunk(chunk, "Can not rewrite filter predicate");
-            trace!(%e, ?filter_expr, "Can not rewrite filter predicate");
-            return true;
-        }
-    };
-
     let pruning_predicate = match PruningPredicate::try_new(&filter_expr, chunk.schema().as_arrow())
     {
         Ok(p) => p,
@@ -112,23 +100,6 @@ where
             observer.could_not_prune_chunk(chunk, "Can not evaluate pruning predicate");
             trace!(%e, ?filter_expr, "Can not evauate pruning predicate");
             true
-        }
-    }
-}
-
-/// HACK to remove the expression qualifiers (TODO file a ticket upstream with DataFusion)
-struct RemoveQualifier {}
-impl ExprRewriter for RemoveQualifier {
-    fn mutate(&mut self, expr: Expr) -> datafusion::error::Result<Expr> {
-        if let Expr::Column(col) = expr {
-            // remove the relation from here
-            let Column { relation: _, name } = col;
-            Ok(Expr::Column(Column {
-                relation: None,
-                name,
-            }))
-        } else {
-            Ok(expr)
         }
     }
 }
@@ -172,7 +143,6 @@ impl<'a> PruningStatistics for ChunkMetaStats<'a> {
             .column_summary(&column.name)
             .and_then(|c| min_to_scalar(&c.stats))
             .map(|s| s.to_array_of_size(1));
-        debug!(?column, name=%column.name, ?min, "Looking for min_values");
         min
     }
 
@@ -181,8 +151,6 @@ impl<'a> PruningStatistics for ChunkMetaStats<'a> {
             .column_summary(&column.name)
             .and_then(|c| max_to_scalar(&c.stats))
             .map(|s| s.to_array_of_size(1));
-
-        debug!(?column, name=%column.name, ?max, "Looking for max_values");
         max
     }
 
