@@ -135,7 +135,7 @@ jobs:
   # object store features
   #
   # I don't think this adds much actual coverage
-  test-object-store:
+  test_object_store:
     docker:
       - image: quay.io/influxdb/rust:ci
     resource_class: xlarge # use of a smaller executor tends crashes on link
@@ -331,6 +331,7 @@ workflows:
       - lint
       - protobuf-lint
       - test
+      - test_object_store
       - test_kafka_integration
       - test_influxdb2_client
       - build
