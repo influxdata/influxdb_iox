@@ -107,7 +107,7 @@ impl<W: Write> std::fmt::Debug for Runner<W> {
 }
 
 /// Struct that calls println! to print out its data. Used rather than
-/// `std::io::stdout` which is not captured by the resut test runner
+/// `std::io::stdout` which is not captured by the result test runner
 /// for some reason. This writer expects to get valid utf8 sequences
 pub struct PrintlnWriter {}
 impl Write for PrintlnWriter {
