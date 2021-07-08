@@ -17,14 +17,26 @@
 //!
 //! Future compatibility will include Azure Blob Storage, Minio, and Ceph.
 
+#[cfg(feature = "aws")]
 mod aws;
+#[cfg(feature = "azure")]
 mod azure;
 mod buffer;
 pub mod disk;
+#[cfg(feature = "gcp")]
 mod gcp;
 pub mod memory;
 pub mod path;
 pub mod throttle;
+
+pub mod dummy;
+
+#[cfg(not(feature = "aws"))]
+use dummy as aws;
+#[cfg(not(feature = "azure"))]
+use dummy as azure;
+#[cfg(not(feature = "gcp"))]
+use dummy as gcp;
 
 use aws::AmazonS3;
 use azure::MicrosoftAzure;
@@ -497,6 +509,9 @@ pub enum Error {
 
     #[snafu(display("In-memory-based Object Store error: {}", source))]
     InMemoryObjectStoreError { source: memory::Error },
+
+    #[snafu(display("Unconfigured Object Store error: {}", source))]
+    DummyObjectStoreError { source: dummy::Error },
 }
 
 impl From<disk::Error> for Error {
@@ -505,18 +520,21 @@ impl From<disk::Error> for Error {
     }
 }
 
+#[cfg(feature = "gcp")]
 impl From<gcp::Error> for Error {
     fn from(source: gcp::Error) -> Self {
         Self::GcsObjectStoreError { source }
     }
 }
 
+#[cfg(feature = "aws")]
 impl From<aws::Error> for Error {
     fn from(source: aws::Error) -> Self {
         Self::AwsObjectStoreError { source }
     }
 }
 
+#[cfg(feature = "azure")]
 impl From<azure::Error> for Error {
     fn from(source: azure::Error) -> Self {
         Self::AzureObjectStoreError { source }
@@ -526,6 +544,12 @@ impl From<azure::Error> for Error {
 impl From<memory::Error> for Error {
     fn from(source: memory::Error) -> Self {
         Self::InMemoryObjectStoreError { source }
+    }
+}
+
+impl From<dummy::Error> for Error {
+    fn from(source: dummy::Error) -> Self {
+        Self::DummyObjectStoreError { source }
     }
 }
 
