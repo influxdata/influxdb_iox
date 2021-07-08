@@ -59,18 +59,16 @@ pub(super) fn persist_chunks(
 
     // Mark and snapshot chunks, then drop locks
     let mut input_rows = 0;
-    let query_chunks = chunks
-        .into_iter()
-        .map(|mut chunk| {
-            // Sanity-check
-            assert!(Arc::ptr_eq(&db, &chunk.data().db));
-            assert_eq!(chunk.table_name().as_ref(), table_name.as_str());
+    let mut query_chunks = vec![];
+    for mut chunk in chunks {
+        // Sanity-check
+        assert!(Arc::ptr_eq(&db, &chunk.data().db));
+        assert_eq!(chunk.table_name().as_ref(), table_name.as_str());
 
-            input_rows += chunk.table_summary().count();
-            chunk.set_writing_to_object_store(&registration)?;
-            Ok(DbChunk::snapshot(&*chunk))
-        })
-        .collect::<Result<Vec<_>>>()?;
+        input_rows += chunk.table_summary().count();
+        chunk.set_writing_to_object_store(&registration)?;
+        query_chunks.push(DbChunk::snapshot(&*chunk));
+    }
 
     // drop partition lock guard
     let partition = partition.into_data().partition;
