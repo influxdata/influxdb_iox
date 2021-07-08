@@ -285,7 +285,17 @@ where
 
         let persistable_age_seconds = partition
             .minimum_unpersisted_age()
-            .map(|x| now.duration_since(x).as_secs())
+            .and_then(|minimum_unpersisted_age| {
+                // If writes happened between when the policy loop
+                // started and this check is done, the duration may be
+                // negative. Skip persistence in this case to avoid
+                // panic in `duration_since`
+                if minimum_unpersisted_age <= now {
+                    Some(now.duration_since(minimum_unpersisted_age).as_secs())
+                } else {
+                    None
+                }
+            })
             .unwrap_or_default() as u32;
 
         debug!(%db_name, %partition,
