@@ -478,6 +478,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "aws")]
     fn valid_s3_config() {
         let config = Config::from_iter_safe(&[
             "server",
@@ -513,6 +514,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "gcp")]
     fn valid_google_config() {
         let config = Config::from_iter_safe(&[
             "server",
@@ -547,6 +549,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "azure")]
     fn valid_azure_config() {
         let config = Config::from_iter_safe(&[
             "server",
