@@ -138,9 +138,16 @@ impl ObjectStore {
         Self(ObjectStoreIntegration::InMemory(in_mem))
     }
 
-    /// Configure throttled in-memory storage.
+    /// For Testing: Configure throttled in-memory storage.
     pub fn new_in_memory_throttled(in_mem_throttled: ThrottledStore<InMemory>) -> Self {
         Self(ObjectStoreIntegration::InMemoryThrottled(in_mem_throttled))
+    }
+
+    /// For Testing: Configure a object store with invalid credentials
+    /// that will always fail on operations (hopefully)
+    pub fn new_failing_store() -> Result<Self> {
+        let s3 = aws::new_failing_s3()?;
+        Ok(Self(ObjectStoreIntegration::AmazonS3(s3)))
     }
 
     /// Configure local file storage.
@@ -725,6 +732,7 @@ mod tests {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn get_nonexistent_object(
         storage: &ObjectStore,
         location: Option<<ObjectStore as ObjectStoreApi>::Path>,

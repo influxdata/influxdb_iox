@@ -96,6 +96,11 @@ pub(crate) fn new_s3(
     NotConfigured { name: "aws" }.fail()
 }
 
+#[allow(dead_code)]
+pub(crate) fn new_failing_s3() -> Result<AmazonS3> {
+    Ok(DummyObjectStore { name: "aws".into() })
+}
+
 /// Stub when gcs is not configured
 #[allow(dead_code)]
 pub(crate) fn new_gcs(

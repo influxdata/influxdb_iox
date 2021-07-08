@@ -110,6 +110,7 @@ jobs:
       - store_artifacts:
           path: target/doc/
           destination: rustdoc
+
   test:
     docker:
       - image: quay.io/influxdb/rust:ci
@@ -129,6 +130,31 @@ jobs:
           name: Cargo test
           command: cargo test --workspace
       - cache_save
+
+  # Temporary test to see how much slower it is to test using full
+  # object store features
+  #
+  # I don't think this adds much actual coverage
+  test-object-store:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+    resource_class: xlarge # use of a smaller executor tends crashes on link
+    environment:
+        # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+        CARGO_INCREMENTAL: "0"
+        # Disable full debug symbol generation to speed up CI build
+        # "1" means line tables only, which is useful for panic tracebacks.
+        RUSTFLAGS: "-C debuginfo=1"
+        RUST_BACKTRACE: "1"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Cargo test
+          command: cargo test --workspace --features="aws,gcp,azure"
+      - cache_save
+
 
   test_kafka_integration:
     machine: true
