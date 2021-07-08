@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use data_types::job::Job;
 use lifecycle::{LifecycleWriteGuard, LockableChunk};
 use observability_deps::tracing::info;
@@ -25,8 +26,9 @@ use persistence_windows::persistence_windows::FlushHandle;
 ///
 /// TODO: Replace low-level locks with transaction object
 pub(super) fn persist_chunks(
-    mut partition: LifecycleWriteGuard<'_, Partition, LockableCatalogPartition>,
+    partition: LifecycleWriteGuard<'_, Partition, LockableCatalogPartition>,
     chunks: Vec<LifecycleWriteGuard<'_, CatalogChunk, LockableCatalogChunk>>,
+    max_persistable_timestamp: DateTime<Utc>,
     flush_handle: FlushHandle,
 ) -> Result<(
     TaskTracker<Job>,
@@ -40,15 +42,7 @@ pub(super) fn persist_chunks(
 
     info!(%table_name, %partition_key, ?chunk_ids, "splitting and persisting chunks");
 
-    let persistence_windows = partition
-        .persistence_windows_mut()
-        .expect("expected persistence windows");
-
-    let max_persistable_timestamp = persistence_windows.max_persistable_timestamp();
-
-    let flush_timestamp = max_persistable_timestamp
-        .expect("expected persistable data")
-        .timestamp_nanos();
+    let flush_timestamp = max_persistable_timestamp.timestamp_nanos();
 
     let (tracker, registration) = db.jobs.register(Job::PersistChunks {
         db_name: partition.db_name().to_string(),

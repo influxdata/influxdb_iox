@@ -88,7 +88,7 @@ pub trait LockablePartition: Sized + std::fmt::Display {
     /// Combines and deduplicates the data in `chunks` into two new chunks:
     ///
     /// 1. A read buffer chunk that contains any rows with timestamps
-    /// prior to the partition's `max_persistable_timestamp`
+    /// prior to `max_persistable_timestamp`
     ///
     /// 2. A read buffer chunk (also written to the object store) with
     /// all other rows
@@ -97,6 +97,7 @@ pub trait LockablePartition: Sized + std::fmt::Display {
     fn persist_chunks(
         partition: LifecycleWriteGuard<'_, Self::Partition, Self>,
         chunks: Vec<LifecycleWriteGuard<'_, <Self::Chunk as LockableChunk>::Chunk, Self::Chunk>>,
+        max_persistable_timestamp: DateTime<Utc>,
         handle: Self::PersistHandle,
     ) -> Result<TaskTracker<<Self::Chunk as LockableChunk>::Job>, Self::Error>;
 

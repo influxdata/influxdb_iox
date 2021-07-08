@@ -209,10 +209,12 @@ impl LockablePartition for LockableCatalogPartition {
     fn persist_chunks(
         partition: LifecycleWriteGuard<'_, Partition, Self>,
         chunks: Vec<LifecycleWriteGuard<'_, CatalogChunk, Self::Chunk>>,
+        max_persistable_timestamp: DateTime<Utc>,
         handle: FlushHandle,
     ) -> Result<TaskTracker<Job>, Self::Error> {
         info!(table=%partition.table_name(), partition=%partition.partition_key(), "persisting chunks");
-        let (tracker, fut) = persist::persist_chunks(partition, chunks, handle)?;
+        let (tracker, fut) =
+            persist::persist_chunks(partition, chunks, max_persistable_timestamp, handle)?;
         let _ = tokio::spawn(async move { fut.await.log_if_error("persisting chunks") });
         Ok(tracker)
     }

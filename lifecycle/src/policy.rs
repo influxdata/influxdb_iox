@@ -307,7 +307,7 @@ where
         // Upgrade partition to be able to rotate persistence windows
         let mut partition = partition.upgrade();
 
-        let (persist_handle, flush_timestamp) = match LockablePartition::prepare_persist(
+        let (persist_handle, max_persistable_timestamp) = match LockablePartition::prepare_persist(
             &mut partition,
         ) {
             Some(x) => x,
@@ -339,7 +339,7 @@ where
             // Chunk's data is entirely after the time we are flushing
             // up to, and thus there is reason to include it in the
             // plan
-            if chunk.min_timestamp() > flush_timestamp {
+            if chunk.min_timestamp() > max_persistable_timestamp {
                 // Can safely ignore chunk
                 debug!(%db_name, %partition, chunk=%chunk.addr(),
                        "chunk does not contain data eligible for persistence");
@@ -363,9 +363,14 @@ where
             .map(|chunk| chunk.upgrade())
             .collect();
 
-        let tracker = LockablePartition::persist_chunks(partition, chunks, persist_handle)
-            .expect("failed to persist chunks")
-            .with_metadata(ChunkLifecycleAction::Persisting);
+        let tracker = LockablePartition::persist_chunks(
+            partition,
+            chunks,
+            max_persistable_timestamp,
+            persist_handle,
+        )
+        .expect("failed to persist chunks")
+        .with_metadata(ChunkLifecycleAction::Persisting);
 
         self.trackers.push(tracker);
         false
@@ -779,6 +784,7 @@ mod tests {
         fn persist_chunks(
             mut partition: LifecycleWriteGuard<'_, TestPartition, Self>,
             chunks: Vec<LifecycleWriteGuard<'_, TestChunk, Self::Chunk>>,
+            _max_persistable_timestamp: DateTime<Utc>,
             _handle: Self::PersistHandle,
         ) -> Result<TaskTracker<()>, Self::Error> {
             let flush_timestamp = partition.max_persistable_timestamp.unwrap();
