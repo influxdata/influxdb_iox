@@ -258,9 +258,14 @@ where
 
     /// Check persistence
     ///
-    /// Looks for read buffer chunks to persist
+    /// Looks for chunks to combine together in the "persist"
+    /// operation. The "persist" operation combines the data from a
+    /// list chunks and creates two new chunks: one persisted, with
+    /// all data that eligible for persistence, and the second with
+    /// all data that is not yet eligible for persistence (it was
+    /// written to recently)
     ///
-    /// A chunk will be persisted if either:
+    /// A chunk will be chosen for the persist operation if either:
     ///
     /// 1. it has more than `persist_row_threshold` rows
     /// 2. it was last written to more than `late_arrive_window_seconds` ago

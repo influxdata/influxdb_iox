@@ -61,7 +61,7 @@ pub trait LockablePartition: Sized + std::fmt::Display {
         chunk_id: u32,
     ) -> Option<Self::Chunk>;
 
-    /// Return a list of lockable chunks - the returned order must be stable
+    /// Return a list of lockable chunks in this partition - the returned order must be stable
     fn chunks(s: &LifecycleReadGuard<'_, Self::Partition, Self>) -> Vec<(u32, Self::Chunk)>;
 
     /// Compact chunks into a single read buffer chunk
@@ -83,7 +83,15 @@ pub trait LockablePartition: Sized + std::fmt::Display {
         partition: &mut LifecycleWriteGuard<'_, Self::Partition, Self>,
     ) -> Option<(Self::PersistHandle, DateTime<Utc>)>;
 
-    /// Split and persist chunks
+    /// Split and persist chunks.
+    ///
+    /// Combines and deduplicates the data in `chunks` into two new chunks:
+    ///
+    /// 1. A read buffer chunk that contains any rows with timestamps
+    /// prior to the partition's `max_persistable_timestamp`
+    ///
+    /// 2. A read buffer chunk (also written to the object store) with
+    /// all other rows
     ///
     /// TODO: Encapsulate these locks into a CatalogTransaction object
     fn persist_chunks(
