@@ -113,7 +113,7 @@ pub(super) fn persist_chunks(
 
             // Upsert remainder to catalog
             if remainder.rows() > 0 {
-                partition.create_rub_chunk(remainder, schema.clone());
+                partition.create_rub_chunk(remainder, Arc::clone(&schema));
             }
 
             assert!(to_persist.rows() > 0);
