@@ -161,6 +161,8 @@ pub async fn make_chunk_given_record_batch(
         chunk_id: addr.chunk_id,
         partition_checkpoint,
         database_checkpoint,
+        time_of_first_write: todo!(),
+        time_of_last_write: todo!(),
     };
     let (path, parquet_metadata) = storage
         .write_to_object_store(addr.clone(), stream, metadata)
@@ -175,6 +177,8 @@ pub async fn make_chunk_given_record_batch(
         Arc::clone(&store),
         Arc::new(parquet_metadata),
         ChunkMetrics::new_unregistered(),
+        todo!(),
+        todo!(),
     )
 }
 

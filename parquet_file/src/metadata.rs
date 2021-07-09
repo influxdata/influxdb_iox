@@ -92,7 +92,7 @@ use chrono::{DateTime, Utc};
 use data_types::partition_metadata::{
     ColumnSummary, InfluxDbType, StatValues, Statistics, TableSummary,
 };
-use generated_types::influxdata::iox::catalog::v1 as proto;
+use generated_types::{google::protobuf::Timestamp, influxdata::iox::catalog::v1 as proto};
 use internal_types::schema::{InfluxColumnType, InfluxFieldType, Schema};
 use parquet::{
     arrow::parquet_to_arrow_schema,
@@ -255,6 +255,9 @@ pub struct IoxMetadata {
     /// Timestamp when this file was created.
     pub creation_timestamp: DateTime<Utc>,
 
+    pub time_of_first_write: DateTime<Utc>, // TODO: METADATA_VERSION?
+    pub time_of_last_write: DateTime<Utc>,
+
     /// Table that holds this parquet file.
     pub table_name: Arc<str>,
 
@@ -287,15 +290,20 @@ impl IoxMetadata {
             });
         }
 
-        // extract creation timestamp
-        let creation_timestamp: DateTime<Utc> = proto_msg
-            .creation_timestamp
-            .context(IoxMetadataFieldMissing {
-                field: "creation_timestamp"
-            })?
+        fn timestamp_to_datetime(value: Option<Timestamp>, field: &'static str) -> Result<DateTime<Utc>> {
+            value.context(IoxMetadataFieldMissing { field })?
             .try_into()
             .map_err(|err| Box::new(err) as _)
-            .context(IoxMetadataBroken)?;
+            .context(IoxMetadataBroken)
+        }
+
+        // extract creation timestamp
+        let creation_timestamp = timestamp_to_datetime(proto_msg.creation_timestamp, "creation_timestamp")?;
+        // extract time of first write
+        let time_of_first_write = timestamp_to_datetime(proto_msg.time_of_first_write, "time_of_first_write")?;
+        // extract time of last write
+        let time_of_last_write = timestamp_to_datetime(proto_msg.time_of_last_write, "time_of_last_write")?;
+
 
         // extract strings
         let table_name = Arc::from(proto_msg.table_name.as_ref());
@@ -349,6 +357,8 @@ impl IoxMetadata {
 
         Ok(Self {
             creation_timestamp,
+            time_of_first_write,
+            time_of_last_write,
             table_name,
             partition_key,
             chunk_id: proto_msg.chunk_id,
@@ -388,6 +398,8 @@ impl IoxMetadata {
         let proto_msg = proto::IoxMetadata {
             version: METADATA_VERSION,
             creation_timestamp: Some(self.creation_timestamp.into()),
+            time_of_first_write: Some(self.time_of_first_write.into()),
+            time_of_last_write: Some(self.time_of_last_write.into()),
             table_name: self.table_name.to_string(),
             partition_key: self.partition_key.to_string(),
             chunk_id: self.chunk_id,
@@ -484,6 +496,9 @@ impl IoxParquetMetaData {
 
         table_summary_agg.context(NoRowGroup)
     }
+
+    pub fn time_of_first_write(&self) -> Option<DateTime<Utc>> { None }
+    pub fn time_of_last_write(&self) -> Option<DateTime<Utc>> { None }
 
     /// Encode [Apache Parquet] metadata as freestanding [Apache Thrift]-encoded bytes.
     ///

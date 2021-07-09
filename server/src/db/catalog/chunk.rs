@@ -319,6 +319,10 @@ impl CatalogChunk {
             schema: chunk.schema(),
         });
 
+        let time_of_first_write = chunk.time_of_first_write();
+        let time_of_last_write = chunk.time_of_last_write();
+
+
         let stage = ChunkStage::Persisted {
             parquet: chunk,
             read_buffer: None,
@@ -330,8 +334,8 @@ impl CatalogChunk {
             stage,
             lifecycle_action: None,
             metrics,
-            time_of_first_write: None,
-            time_of_last_write: None,
+            time_of_first_write,
+            time_of_last_write,
             time_closed: None,
         }
     }
