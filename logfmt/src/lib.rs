@@ -17,7 +17,7 @@ use std::{io::Write, time::SystemTime};
 ///
 /// At time of writing, I could find no good existing crate
 ///
-/// https://github.com/mcountryman/logfmt_logger from @mcountryman
+/// <https://github.com/mcountryman/logfmt_logger> from @mcountryman
 /// looked very small and did not (obviously) work with the tracing subscriber
 ///
 /// [logfmt]: https://brandur.org/logfmt
