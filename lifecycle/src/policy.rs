@@ -273,6 +273,21 @@ where
     /// Returns true if persistence is being blocked by compaction,
     /// signaling compaction should be stalled to allow persistence to
     /// make progress
+    ///
+    /// Returns a boolean to indicate if it should stall compaction to allow
+    /// persistence to make progress
+    ///
+    /// The rationale for stalling compaction until a persist can start:
+    ///
+    /// 1. It is a simple way to ensure a persist can start. Once the
+    /// persist has started (which might also effectively compact
+    /// several chunks as well) then compactions can start again
+    ///
+    /// 2. It is not likely to change the number of compactions
+    /// significantly. Since the policy goal at time of writing is to
+    /// end up with ~ 2 unpersisted chunks at any time, any chunk that
+    /// is persistable is also likely to be one of the ones being
+    /// compacted.
     fn maybe_persist_chunks<P: LockablePartition>(
         &mut self,
         db_name: &DatabaseName<'static>,
@@ -442,10 +457,10 @@ where
             // Persistence cannot split chunks if they are currently being compacted
             //
             // To avoid compaction "starving" persistence we employ a
-            // possibly overly heavy-handed approach and temporarily
-            // pause compaction if the criteria for persistence have
-            // been satisfied, but persistence cannot proceed because
-            // of in-progress compactions
+            // heavy-handed approach of temporarily pausing compaction
+            // if the criteria for persistence have been satisfied,
+            // but persistence cannot proceed because of in-progress
+            // compactions
             let stall_compaction = if rules.persist {
                 self.maybe_persist_chunks(&db_name, partition, &rules, now_instant)
             } else {
