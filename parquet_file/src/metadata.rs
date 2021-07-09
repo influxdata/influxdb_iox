@@ -290,8 +290,8 @@ impl IoxMetadata {
         // extract creation timestamp
         let creation_timestamp: DateTime<Utc> = proto_msg
             .creation_timestamp
-            .ok_or_else(|| Error::IoxMetadataFieldMissing {
-                field: "creation_timestamp".to_string(),
+            .context(IoxMetadataFieldMissing {
+                field: "creation_timestamp"
             })?
             .try_into()
             .map_err(|err| Box::new(err) as _)
@@ -305,8 +305,8 @@ impl IoxMetadata {
         let proto_partition_checkpoint =
             proto_msg
                 .partition_checkpoint
-                .ok_or_else(|| Error::IoxMetadataFieldMissing {
-                    field: "partition_checkpoint".to_string(),
+                .context(IoxMetadataFieldMissing {
+                    field: "partition_checkpoint",
                 })?;
         let sequencer_numbers = proto_partition_checkpoint
             .sequencer_numbers
@@ -321,8 +321,8 @@ impl IoxMetadata {
             .collect::<Result<BTreeMap<u32, MinMaxSequence>>>()?;
         let min_unpersisted_timestamp = proto_partition_checkpoint
             .min_unpersisted_timestamp
-            .ok_or_else(|| Error::IoxMetadataFieldMissing {
-                field: "partition_checkpoint.min_unpersisted_timestamp".to_string(),
+            .context(IoxMetadataFieldMissing {
+                field: "partition_checkpoint.min_unpersisted_timestamp",
             })?
             .try_into()
             .map_err(|err| Box::new(err) as _)
@@ -338,8 +338,8 @@ impl IoxMetadata {
         let proto_database_checkpoint =
             proto_msg
                 .database_checkpoint
-                .ok_or_else(|| Error::IoxMetadataFieldMissing {
-                    field: "database_checkpoint".to_string(),
+                .context(IoxMetadataFieldMissing {
+                    field: "database_checkpoint",
                 })?;
         let min_sequencer_numbers = proto_database_checkpoint
             .min_sequencer_numbers
