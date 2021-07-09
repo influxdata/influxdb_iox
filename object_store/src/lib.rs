@@ -517,7 +517,7 @@ pub enum Error {
     #[snafu(display("In-memory-based Object Store error: {}", source))]
     InMemoryObjectStoreError { source: memory::Error },
 
-    #[snafu(display("Unconfigured Object Store error: {}", source))]
+    #[snafu(display("{}", source))]
     DummyObjectStoreError { source: dummy::Error },
 }
 

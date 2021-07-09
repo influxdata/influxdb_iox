@@ -9,8 +9,11 @@ use crate::{path::cloud::CloudPath, ObjectStoreApi};
 #[derive(Debug, Snafu, Clone)]
 #[allow(missing_docs)]
 pub enum Error {
-    #[snafu(display("object_store crate of type '{}' is not configured", name))]
-    NotConfigured { name: String },
+    #[snafu(display(
+        "'{}' not supported with this build. Hint: recompile with appropriate features",
+        name
+    ))]
+    NotSupported { name: String },
 }
 /// Result for the dummy object store
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -21,13 +24,13 @@ pub struct DummyObjectStore {
     name: String,
 }
 
-/// If aws is not configured, use DummyObjectStore
+/// If aws feature not available, use DummyObjectStore
 pub type AmazonS3 = DummyObjectStore;
 
-/// If azure is not configured, use DummyObjectStore
+/// If azure feature not available, use DummyObjectStore
 pub type MicrosoftAzure = DummyObjectStore;
 
-/// If gcp is not configured, use DummyObjectStore
+/// If gcp feature not available, use DummyObjectStore
 pub type GoogleCloudStorage = DummyObjectStore;
 
 #[async_trait]
@@ -48,7 +51,7 @@ impl ObjectStoreApi for DummyObjectStore {
     where
         S: futures::Stream<Item = std::io::Result<bytes::Bytes>> + Send + Sync + 'static,
     {
-        NotConfigured { name: &self.name }.fail()
+        NotSupported { name: &self.name }.fail()
     }
 
     async fn get(
@@ -58,11 +61,11 @@ impl ObjectStoreApi for DummyObjectStore {
         futures::stream::BoxStream<'static, crate::Result<bytes::Bytes, Self::Error>>,
         Self::Error,
     > {
-        NotConfigured { name: &self.name }.fail()
+        NotSupported { name: &self.name }.fail()
     }
 
     async fn delete(&self, _location: &Self::Path) -> crate::Result<(), Self::Error> {
-        NotConfigured { name: &self.name }.fail()
+        NotSupported { name: &self.name }.fail()
     }
 
     async fn list<'a>(
@@ -72,14 +75,14 @@ impl ObjectStoreApi for DummyObjectStore {
         futures::stream::BoxStream<'a, crate::Result<Vec<Self::Path>, Self::Error>>,
         Self::Error,
     > {
-        NotConfigured { name: &self.name }.fail()
+        NotSupported { name: &self.name }.fail()
     }
 
     async fn list_with_delimiter(
         &self,
         _prefix: &Self::Path,
     ) -> crate::Result<crate::ListResult<Self::Path>, Self::Error> {
-        NotConfigured { name: &self.name }.fail()
+        NotSupported { name: &self.name }.fail()
     }
 }
 
@@ -93,7 +96,7 @@ pub(crate) fn new_s3(
     _endpoint: Option<impl Into<String>>,
     _session_token: Option<impl Into<String>>,
 ) -> Result<DummyObjectStore> {
-    NotConfigured { name: "aws" }.fail()
+    NotSupported { name: "aws" }.fail()
 }
 
 #[allow(dead_code)]
@@ -107,7 +110,7 @@ pub(crate) fn new_gcs(
     _service_account_path: impl AsRef<std::ffi::OsStr>,
     _bucket_name: impl Into<String>,
 ) -> Result<DummyObjectStore> {
-    NotConfigured { name: "gcs" }.fail()
+    NotSupported { name: "gcs" }.fail()
 }
 
 /// Stub when azure is not configured
@@ -117,5 +120,5 @@ pub(crate) fn new_azure(
     _access_key: impl Into<String>,
     _container_name: impl Into<String>,
 ) -> Result<DummyObjectStore> {
-    NotConfigured { name: "azure" }.fail()
+    NotSupported { name: "azure" }.fail()
 }

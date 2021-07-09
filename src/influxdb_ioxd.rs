@@ -65,13 +65,13 @@ pub enum Error {
     // Creating a new S3 object store can fail if the region is *specified* but
     // not *parseable* as a rusoto `Region`. The other object store constructors
     // don't return `Result`.
-    #[snafu(display("Amazon S3 configuration was invalid: {}", source))]
+    #[snafu(display("Error configuring Amazon S3: {}", source))]
     InvalidS3Config { source: object_store::Error },
 
-    #[snafu(display("GCS configuration was invalid: {}", source))]
+    #[snafu(display("Error configuring GCS: {}", source))]
     InvalidGCSConfig { source: object_store::Error },
 
-    #[snafu(display("Microsoft Azure configuration was invalid: {}", source))]
+    #[snafu(display("Error configuring Microsoft Azure: {}", source))]
     InvalidAzureConfig { source: object_store::Error },
 
     #[snafu(display("Cannot read from object store: {}", source))]
