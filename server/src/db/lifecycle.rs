@@ -13,13 +13,15 @@ use data_types::partition_metadata::{InfluxDbType, Statistics, TableSummary};
 use data_types::DatabaseName;
 use datafusion::physical_plan::SendableRecordBatchStream;
 use hashbrown::HashMap;
+use internal_types::schema::merge::SchemaMerger;
 use internal_types::schema::sort::SortKey;
-use internal_types::schema::TIME_COLUMN_NAME;
+use internal_types::schema::{Schema, TIME_COLUMN_NAME};
 use lifecycle::{
     LifecycleChunk, LifecyclePartition, LifecycleReadGuard, LifecycleWriteGuard, LockableChunk,
     LockablePartition,
 };
 use observability_deps::tracing::{info, trace};
+use query::QueryChunkMeta;
 use tracker::{RwLock, TaskTracker};
 
 use crate::db::catalog::chunk::CatalogChunk;
@@ -32,6 +34,8 @@ pub(crate) use move_chunk::move_chunk_to_read_buffer;
 use persistence_windows::persistence_windows::FlushHandle;
 pub(crate) use unload::unload_read_buffer_chunk;
 pub(crate) use write::write_chunk_to_object_store;
+
+use super::DbChunk;
 
 mod compact;
 mod error;
@@ -373,4 +377,20 @@ async fn collect_rub(
         }
     }
     Ok(())
+}
+
+/// Return the merged schema for the chunks that are being
+/// reorganized.
+///
+/// This is infallable because the schemas of chunks within a
+/// partition are assumed to be compatible because that schema was
+/// enforced as part of writing into the partition
+fn merge_schemas(chunks: &[Arc<DbChunk>]) -> Arc<Schema> {
+    let mut merger = SchemaMerger::new();
+    for db_chunk in chunks {
+        merger = merger
+            .merge(&db_chunk.schema())
+            .expect("schemas compatible");
+    }
+    Arc::new(merger.build())
 }

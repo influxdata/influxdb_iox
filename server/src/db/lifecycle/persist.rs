@@ -15,7 +15,7 @@ use tracker::{TaskTracker, TrackedFuture, TrackedFutureExt};
 use crate::db::catalog::chunk::CatalogChunk;
 use crate::db::catalog::partition::Partition;
 use crate::db::lifecycle::{
-    collect_rub, compute_sort_key, new_rub_chunk, write_chunk_to_object_store,
+    collect_rub, compute_sort_key, merge_schemas, new_rub_chunk, write_chunk_to_object_store,
 };
 use crate::db::DbChunk;
 
@@ -75,8 +75,12 @@ pub(super) fn persist_chunks(
         let key = compute_sort_key(query_chunks.iter().map(|x| x.summary()));
         let key_str = format!("\"{}\"", key); // for logging
 
+        // build schema
+        let schema = merge_schemas(&query_chunks);
+
         // Cannot move query_chunks as the sort key borrows the column names
         let (schema, plan) = ReorgPlanner::new().split_plan(
+            schema,
             query_chunks.iter().map(Arc::clone),
             key,
             flush_timestamp,
