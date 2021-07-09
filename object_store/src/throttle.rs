@@ -13,12 +13,12 @@ use tokio::{
 /// Configuration settings for throttled store
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ThrottleConfig {
-    /// Sleep duration for every call to [`delete`](Self::delete).
+    /// Sleep duration for every call to [`delete`](ThrottledStore::delete).
     ///
     /// Sleeping is done before the underlying store is called and independently of the success of the operation.
     pub wait_delete_per_call: Duration,
 
-    /// Sleep duration for every byte received during [`get`](Self::get).
+    /// Sleep duration for every byte received during [`get`](ThrottledStore::get).
     ///
     /// Sleeping is performed after the underlying store returned and only for successful gets. The sleep duration is
     /// additive to [`wait_get_per_call`](Self::wait_get_per_call).
@@ -27,19 +27,19 @@ pub struct ThrottleConfig {
     /// intermediate failure (i.e. after partly consuming the output bytes), the resulting sleep time will be partial as well.
     pub wait_get_per_byte: Duration,
 
-    /// Sleep duration for every call to [`get`](Self::get).
+    /// Sleep duration for every call to [`get`](ThrottledStore::get).
     ///
     /// Sleeping is done before the underlying store is called and independently of the success of the operation. The
     /// sleep duration is additive to [`wait_get_per_byte`](Self::wait_get_per_byte).
     pub wait_get_per_call: Duration,
 
-    /// Sleep duration for every call to [`list`](Self::list).
+    /// Sleep duration for every call to [`list`](ThrottledStore::list).
     ///
     /// Sleeping is done before the underlying store is called and independently of the success of the operation. The
     /// sleep duration is additive to [`wait_list_per_entry`](Self::wait_list_per_entry).
     pub wait_list_per_call: Duration,
 
-    /// Sleep duration for every entry received during [`list`](Self::list).
+    /// Sleep duration for every entry received during [`list`](ThrottledStore::list).
     ///
     /// Sleeping is performed after the underlying store returned and only for successful lists. The sleep duration is
     /// additive to [`wait_list_per_call`](Self::wait_list_per_call).
@@ -48,19 +48,19 @@ pub struct ThrottleConfig {
     /// intermediate failure (i.e. after partly consuming the output entries), the resulting sleep time will be partial as well.
     pub wait_list_per_entry: Duration,
 
-    /// Sleep duration for every call to [`list_with_delimiter`](Self::list_with_delimiter).
+    /// Sleep duration for every call to [`list_with_delimiter`](ThrottledStore::list_with_delimiter).
     ///
     /// Sleeping is done before the underlying store is called and independently of the success of the operation. The
     /// sleep duration is additive to [`wait_list_with_delimiter_per_entry`](Self::wait_list_with_delimiter_per_entry).
     pub wait_list_with_delimiter_per_call: Duration,
 
-    /// Sleep duration for every entry received during [`list_with_delimiter`](Self::list_with_delimiter).
+    /// Sleep duration for every entry received during [`list_with_delimiter`](ThrottledStore::list_with_delimiter).
     ///
     /// Sleeping is performed after the underlying store returned and only for successful gets. The sleep duration is
     /// additive to [`wait_list_with_delimiter_per_call`](Self::wait_list_with_delimiter_per_call).
     pub wait_list_with_delimiter_per_entry: Duration,
 
-    /// Sleep duration for every byte send during [`put`](Self::put).
+    /// Sleep duration for every byte send during [`put`](ThrottledStore::put).
     ///
     /// Sleeping is done before the underlying store is called and independently of the complete success of the operation. The
     /// sleep duration is additive to [`wait_put_per_call`](Self::wait_put_per_call).
@@ -69,7 +69,7 @@ pub struct ThrottleConfig {
     /// intermediate failure (i.e. after partly consuming the input bytes), the resulting sleep time will be partial as well.
     pub wait_put_per_byte: Duration,
 
-    /// Sleep duration for every call to [`put`](Self::put).
+    /// Sleep duration for every call to [`put`](ThrottledStore::put).
     ///
     /// Sleeping is done before the underlying store is called and independently of the success of the operation. The
     /// sleep duration is additive to [`wait_put_per_byte`](Self::wait_put_per_byte).
