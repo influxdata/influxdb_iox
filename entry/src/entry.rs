@@ -2639,8 +2639,7 @@ mod tests {
         };
 
         let result = pb_to_entry(&p);
-        // TODO in the future, IOx type tables will allow zero-to-many time columns with any name
-        assert!(matches!(result.unwrap_err(), Error::TimeColumnMissing));
+        assert!(!result.is_err());
 
         // InfluxDB 2.x fields and time columns (not named 'time') cannot exist in a single table batch
         let p = pb::DatabaseBatch {
