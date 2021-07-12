@@ -2198,6 +2198,7 @@ mod tests {
                     table_name,
                     id,
                     storage,
+                    lifecycle_action,
                     estimated_bytes,
                     row_count,
                     ..
@@ -2207,6 +2208,7 @@ mod tests {
                     table_name,
                     id,
                     storage,
+                    lifecycle_action,
                     estimated_bytes,
                     row_count,
                 )
@@ -2237,6 +2239,7 @@ mod tests {
             Arc::from("cpu"),
             0,
             ChunkStorage::OpenMutableBuffer,
+            None,
             70,
             1,
         )];
@@ -2340,12 +2343,15 @@ mod tests {
         let chunk_summaries = db.chunk_summaries().expect("expected summary to return");
         let chunk_summaries = normalize_summaries(chunk_summaries);
 
+        let lifecycle_action = None;
+
         let expected = vec![
             ChunkSummary::new_without_timestamps(
                 Arc::from("1970-01-01T00"),
                 Arc::from("cpu"),
                 0,
                 ChunkStorage::ReadBufferAndObjectStore,
+                lifecycle_action,
                 2139, // size of RB and OS chunks
                 1,
             ),
@@ -2354,6 +2360,7 @@ mod tests {
                 Arc::from("cpu"),
                 1,
                 ChunkStorage::OpenMutableBuffer,
+                lifecycle_action,
                 64,
                 1,
             ),
@@ -2362,6 +2369,7 @@ mod tests {
                 Arc::from("cpu"),
                 0,
                 ChunkStorage::ClosedMutableBuffer,
+                lifecycle_action,
                 2190,
                 1,
             ),
@@ -2370,6 +2378,7 @@ mod tests {
                 Arc::from("cpu"),
                 1,
                 ChunkStorage::OpenMutableBuffer,
+                lifecycle_action,
                 87,
                 1,
             ),
