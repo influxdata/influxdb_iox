@@ -1909,7 +1909,6 @@ mod tests {
 
     use super::test_helpers::*;
     use super::*;
-    use crate::Error::TimeColumnMissing;
 
     const ARBITRARY_DEFAULT_TIME: i64 = 456;
 
@@ -2628,7 +2627,7 @@ mod tests {
                             i64_values: vec![],
                             f64_values: vec![],
                             u64_values: vec![],
-                            string_values: vec!["three"],
+                            string_values: vec!["three".to_string()],
                             bool_values: vec![],
                             bytes_values: vec![],
                         }),
@@ -2641,7 +2640,7 @@ mod tests {
 
         let result = pb_to_entry(&p);
         // TODO in the future, IOx type tables will allow zero-to-many time columns with any name
-        assert!(result.unwrap_err() == TimeColumnMissing);
+        assert!(matches!(result.unwrap_err(), Error::TimeColumnMissing));
 
         // InfluxDB 2.x fields and time columns (not named 'time') cannot exist in a single table batch
         let p = pb::DatabaseBatch {
