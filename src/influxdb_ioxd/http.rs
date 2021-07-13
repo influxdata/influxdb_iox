@@ -160,6 +160,9 @@ pub enum ApplicationError {
     #[snafu(display("Error decompressing body as gzip: {}", source))]
     ReadingBodyAsGzip { source: std::io::Error },
 
+    #[snafu(display("Client hung up while sending body: {}", source))]
+    ClientHangup { source: hyper::Error },
+
     #[snafu(display("No handler for {:?} {}", method, path))]
     RouteNotFound { method: Method, path: String },
 
@@ -252,6 +255,7 @@ impl ApplicationError {
             Self::ReadingBodyAsUtf8 { .. } => self.bad_request(),
             Self::ParsingLineProtocol { .. } => self.bad_request(),
             Self::ReadingBodyAsGzip { .. } => self.bad_request(),
+            Self::ClientHangup { .. } => self.bad_request(),
             Self::RouteNotFound { .. } => self.not_found(),
             Self::DatabaseError { .. } => self.internal_error(),
             Self::JsonGenerationError { .. } => self.internal_error(),
@@ -425,7 +429,7 @@ async fn parse_body(req: hyper::Request<Body>) -> Result<Bytes, ApplicationError
 
     let mut body = BytesMut::new();
     while let Some(chunk) = payload.next().await {
-        let chunk = chunk.expect("Should have been able to read the next chunk");
+        let chunk = chunk.context(ClientHangup)?;
         // limit max size of in-memory payload
         if (body.len() + chunk.len()) > MAX_SIZE {
             return Err(ApplicationError::RequestSizeExceeded {
@@ -867,6 +871,7 @@ mod tests {
     use object_store::ObjectStore;
     use serde::de::DeserializeOwned;
     use server::{db::Db, ConnectionManagerImpl, ServerConfig as AppServerConfig};
+    use tokio_stream::wrappers::ReceiverStream;
 
     fn config() -> (metrics::TestMetricRegistry, AppServerConfig) {
         let registry = Arc::new(metrics::MetricRegistry::new());
@@ -1168,17 +1173,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_gzip_write() {
-        let (_, config) = config();
-        let app_server = Arc::new(AppServer::new(ConnectionManagerImpl::new(), config));
-        app_server.set_id(ServerId::try_from(1).unwrap()).unwrap();
-        app_server.maybe_initialize_server().await;
-        app_server
-            .create_database(DatabaseRules::new(
-                DatabaseName::new("MyOrg_MyBucket").unwrap(),
-            ))
-            .await
-            .unwrap();
-        let server_url = test_server(Arc::clone(&app_server));
+        let (app_server, server_url) = setup_server().await;
 
         let client = Client::new();
         let lp_data = "h2o_temperature,location=santa_monica,state=CA surface_degrees=65.2,bottom_degrees=50.4 1617286224000000000";
@@ -1217,17 +1212,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_to_invalid_database() {
-        let (_, config) = config();
-        let app_server = Arc::new(AppServer::new(ConnectionManagerImpl::new(), config));
-        app_server.set_id(ServerId::try_from(1).unwrap()).unwrap();
-        app_server.maybe_initialize_server().await;
-        app_server
-            .create_database(DatabaseRules::new(
-                DatabaseName::new("MyOrg_MyBucket").unwrap(),
-            ))
-            .await
-            .unwrap();
-        let server_url = test_server(Arc::clone(&app_server));
+        let (_, server_url) = setup_server().await;
 
         let client = Client::new();
 
@@ -1248,6 +1233,32 @@ mod tests {
             Some(""),
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn client_hangup_during_parse() {
+        #[derive(Debug, Snafu)]
+        enum TestError {
+            #[snafu(display("Blarg Error"))]
+            Blarg {},
+        }
+
+        let (tx, rx) = tokio::sync::mpsc::channel(2);
+        let body = Body::wrap_stream(ReceiverStream::new(rx));
+
+        tx.send(Ok("foo")).await.unwrap();
+        tx.send(Err(TestError::Blarg {})).await.unwrap();
+
+        let request = Request::builder()
+            .uri("https://ye-olde-non-existent-server/")
+            .body(body)
+            .unwrap();
+
+        let parse_result = parse_body(request).await.unwrap_err();
+        assert_eq!(
+            parse_result.to_string(),
+            "Client hung up while sending body: error reading a body from connection: Blarg Error"
+        );
     }
 
     fn get_content_type(response: &Result<Response, reqwest::Error>) -> String {
@@ -1341,5 +1352,22 @@ mod tests {
             .collect(physical_plan, ExecutorType::Query)
             .await
             .unwrap()
+    }
+
+    /// return a test server and the url to contact it for `MyOrg_MyBucket`
+    async fn setup_server() -> (Arc<AppServer<ConnectionManagerImpl>>, String) {
+        let (_, config) = config();
+        let app_server = Arc::new(AppServer::new(ConnectionManagerImpl::new(), config));
+        app_server.set_id(ServerId::try_from(1).unwrap()).unwrap();
+        app_server.maybe_initialize_server().await;
+        app_server
+            .create_database(DatabaseRules::new(
+                DatabaseName::new("MyOrg_MyBucket").unwrap(),
+            ))
+            .await
+            .unwrap();
+        let server_url = test_server(Arc::clone(&app_server));
+
+        (app_server, server_url)
     }
 }
