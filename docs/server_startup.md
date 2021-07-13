@@ -49,7 +49,21 @@ collection / clean up) or the database has to be in an error state. Either use t
 or the CLI:
 
 ```shell
-influxdb_iox database catalog wipe ...
+influxdb_iox database catalog wipe some_db --host ...
+```
+
+This call will fail (on purpose) with an "Token wrong or missing" error. The server writes a token to its log that looks
+something like this:
+
+```text
+Jun 29 17:54:33.321  INFO token_challenge::log: New token to wipe preserved catalog for database some_db token=Token("AAAAAGDbQjl7fvgUrWC//zH4QvR3FI+SLHGAQeDbpfioJIn+unZbIw==")
+```
+
+Use that token and trigger the action again. This double check will hopefully prevent one or the other fat-fingered
+accident:
+
+```shell
+influxdb_iox database catalog wipe some_db --host ... --token 'AAAAAGDbQjl7fvgUrWC//zH4QvR3FI+SLHGAQeDbpfioJIn+unZbIw=='
 ```
 
 Once the catalog is wiped, the server will retry to initialize the database. Process will be logged. If the database

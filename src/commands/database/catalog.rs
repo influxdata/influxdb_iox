@@ -16,9 +16,6 @@ pub enum Error {
         source: influxdb_iox_client::connection::Error,
     },
 
-    #[snafu(display("Need to pass `--force`"))]
-    NeedsTheForceError,
-
     #[snafu(display("Error wiping persisted catalog: {}", source))]
     WipeError { source: WipePersistedCatalogError },
 
@@ -47,12 +44,12 @@ enum Command {
 /// Wipe persisted catalog.
 #[derive(Debug, StructOpt)]
 struct Wipe {
-    /// Force wipe. Required option to prevent accidental erasure
-    #[structopt(long)]
-    force: bool,
-
     /// The name of the database
     db_name: String,
+
+    /// Token that you get from the log files.
+    #[structopt(long)]
+    token: Option<String>,
 }
 
 pub async fn command(url: String, config: Config) -> Result<()> {
@@ -64,14 +61,10 @@ pub async fn command(url: String, config: Config) -> Result<()> {
 
     match config.command {
         Command::Wipe(wipe) => {
-            let Wipe { force, db_name } = wipe;
-
-            if !force {
-                return Err(Error::NeedsTheForceError);
-            }
+            let Wipe { db_name, token } = wipe;
 
             let operation: Operation = client
-                .wipe_persisted_catalog(db_name)
+                .wipe_persisted_catalog(db_name, token)
                 .await
                 .context(WipeError)?
                 .try_into()

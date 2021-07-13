@@ -288,6 +288,10 @@ pub enum WipePersistedCatalogError {
     #[error("Server ID not set")]
     NoServerId,
 
+    /// Token wrong or missing
+    #[error("Token wrong or missing, see server logs for new token")]
+    Token,
+
     /// Database already exists
     #[error("Database already exists")]
     DatabaseAlreadyExists,
@@ -727,16 +731,29 @@ impl Client {
     pub async fn wipe_persisted_catalog(
         &mut self,
         db_name: impl Into<String> + Send,
+        fatfinger_token: Option<String>,
     ) -> Result<Operation, WipePersistedCatalogError> {
         let db_name = db_name.into();
 
         let response = self
             .inner
-            .wipe_preserved_catalog(WipePreservedCatalogRequest { db_name })
+            .wipe_preserved_catalog(WipePreservedCatalogRequest {
+                db_name,
+                fatfinger_token: fatfinger_token.unwrap_or_else(String::new),
+            })
             .await
             .map_err(|status| match status.code() {
                 tonic::Code::AlreadyExists => WipePersistedCatalogError::DatabaseAlreadyExists,
-                tonic::Code::FailedPrecondition => WipePersistedCatalogError::NoServerId,
+                tonic::Code::FailedPrecondition
+                    if status.message().to_lowercase().contains("server id") =>
+                {
+                    WipePersistedCatalogError::NoServerId
+                }
+                tonic::Code::FailedPrecondition
+                    if status.message().to_lowercase().contains("token") =>
+                {
+                    WipePersistedCatalogError::Token
+                }
                 tonic::Code::InvalidArgument => WipePersistedCatalogError::InvalidArgument(status),
                 _ => WipePersistedCatalogError::ServerError(status),
             })?;

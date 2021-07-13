@@ -318,6 +318,9 @@ message Error {
 message WipePreservedCatalogRequest {
   // the name of the database
   string db_name = 1;
+
+  // token for sanity checking
+  string fatfinger_token = 2;
 }
 
 message WipePreservedCatalogResponse {

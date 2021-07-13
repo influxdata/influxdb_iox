@@ -590,9 +590,28 @@ async fn test_close_partition_chunk_error() {
 
 #[tokio::test]
 async fn test_wipe_persisted_catalog() {
-    let server_fixture = ServerFixture::create_shared().await;
+    // need single use server so it's easier to wait for the token
+    let server_fixture = ServerFixture::create_single_use().await;
+    let mut client = server_fixture.management_client();
+    client.update_server_id(42).await.expect("set ID failed");
+    server_fixture.wait_server_initialized().await;
+
     let addr = server_fixture.grpc_base();
     let db_name = rand_name();
+
+    // fail w/o token
+    Command::cargo_bin("influxdb_iox")
+        .unwrap()
+        .arg("database")
+        .arg("catalog")
+        .arg("wipe")
+        .arg(&db_name)
+        .arg("--host")
+        .arg(addr)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Token wrong or missing"));
+    let token = server_fixture.wait_token().await;
 
     let stdout: Operation = serde_json::from_slice(
         &Command::cargo_bin("influxdb_iox")
@@ -603,7 +622,8 @@ async fn test_wipe_persisted_catalog() {
             .arg(&db_name)
             .arg("--host")
             .arg(addr)
-            .arg("--force")
+            .arg("--token")
+            .arg(token)
             .assert()
             .success()
             .get_output()
@@ -622,11 +642,19 @@ async fn test_wipe_persisted_catalog() {
 }
 
 #[tokio::test]
-async fn test_wipe_persisted_catalog_error_force() {
-    let server_fixture = ServerFixture::create_shared().await;
+async fn test_wipe_persisted_catalog_error_db_exists() {
+    // need single use server so it's easier to wait for the token
+    let server_fixture = ServerFixture::create_single_use().await;
+    let mut client = server_fixture.management_client();
+    client.update_server_id(42).await.expect("set ID failed");
+    server_fixture.wait_server_initialized().await;
+
     let addr = server_fixture.grpc_base();
     let db_name = rand_name();
 
+    create_readable_database(&db_name, server_fixture.grpc_channel()).await;
+
+    // fail w/o token
     Command::cargo_bin("influxdb_iox")
         .unwrap()
         .arg("database")
@@ -637,16 +665,8 @@ async fn test_wipe_persisted_catalog_error_force() {
         .arg(addr)
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Need to pass `--force`"));
-}
-
-#[tokio::test]
-async fn test_wipe_persisted_catalog_error_db_exists() {
-    let server_fixture = ServerFixture::create_shared().await;
-    let addr = server_fixture.grpc_base();
-    let db_name = rand_name();
-
-    create_readable_database(&db_name, server_fixture.grpc_channel()).await;
+        .stderr(predicate::str::contains("Token wrong or missing"));
+    let token = server_fixture.wait_token().await;
 
     Command::cargo_bin("influxdb_iox")
         .unwrap()
@@ -656,7 +676,8 @@ async fn test_wipe_persisted_catalog_error_db_exists() {
         .arg(&db_name)
         .arg("--host")
         .arg(addr)
-        .arg("--force")
+        .arg("--token")
+        .arg(token)
         .assert()
         .failure()
         .stderr(predicate::str::contains("Database already exists"));

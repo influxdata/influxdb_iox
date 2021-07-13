@@ -10,6 +10,7 @@ use std::{
     },
     time::Instant,
 };
+use token_challenge::log::test_helpers::extract_last_token_from_logs;
 
 use assert_cmd::prelude::*;
 use futures::prelude::*;
@@ -236,6 +237,28 @@ impl ServerFixture {
     pub fn dir(&self) -> &Path {
         &self.server.dir.path()
     }
+
+    /// Location of the log file.
+    pub async fn log_path(&self) -> Box<Path> {
+        self.server.server_process.lock().await.log_path.clone()
+    }
+
+    /// Get last emitted token (if any).
+    pub async fn token(&self) -> Option<String> {
+        extract_last_token_from_logs(&std::fs::read_to_string(&self.log_path().await).unwrap())
+    }
+
+    /// Wait for last token.
+    pub async fn wait_token(&self) -> String {
+        let t_0 = Instant::now();
+        loop {
+            if let Some(token) = self.token().await {
+                return token;
+            }
+            assert!(t_0.elapsed() < Duration::from_secs(10));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -256,8 +279,8 @@ struct TestServer {
     /// Which ports this server should use
     addrs: BindAddresses,
 
-    // The temporary directory **must** be last so that it is
-    // dropped after the database closes.
+    /// The temporary directory **must** be last so that it is
+    /// dropped after the database closes.
     dir: TempDir,
 }
 

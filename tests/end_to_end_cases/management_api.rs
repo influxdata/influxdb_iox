@@ -775,14 +775,27 @@ async fn test_chunk_lifecycle() {
 async fn test_wipe_preserved_catalog() {
     use influxdb_iox_client::management::generated_types::operation_metadata::Job;
 
-    let fixture = ServerFixture::create_shared().await;
+    // need single use server so it's easier to wait for the token
+    let fixture = ServerFixture::create_single_use().await;
     let mut management_client = fixture.management_client();
     let mut operations_client = fixture.operations_client();
 
+    // init server
+    management_client
+        .update_server_id(42)
+        .await
+        .expect("set ID failed");
+    fixture.wait_server_initialized().await;
+
     let db_name = rand_name();
 
+    management_client
+        .wipe_persisted_catalog(&db_name, None)
+        .await
+        .expect_err("operation w/o token must fail");
+    let token = fixture.wait_token().await;
     let operation = management_client
-        .wipe_persisted_catalog(&db_name)
+        .wipe_persisted_catalog(&db_name, Some(token))
         .await
         .expect("wipe persisted catalog");
 
