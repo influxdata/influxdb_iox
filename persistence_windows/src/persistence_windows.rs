@@ -223,6 +223,56 @@ impl PersistenceWindows {
     pub fn minimum_unpersisted_age(&self) -> Option<Instant> {
         self.minimum_window().map(|x| x.created_at)
     }
+
+    /// Returns minimum (aka earliest) timestamp of unpersisted data.
+    pub fn minimum_unpersisted_timestamp(&self) -> Option<DateTime<Utc>> {
+        self.minimum_window().map(|x| x.min_time)
+    }
+
+    /// Return per-sequencer sequence number range starting at the minimum unpersisted number up to the last number
+    /// registered/seen.
+    pub fn sequencer_numbers_range(&self) -> BTreeMap<u32, MinMaxSequence> {
+        let mut res = BTreeMap::new();
+
+        if let Some(window) = self.persistable.as_ref() {
+            Self::merge_sequencer_numbers(&mut res, &window.sequencer_numbers);
+        }
+        for window in self.closed.iter() {
+            Self::merge_sequencer_numbers(&mut res, &window.sequencer_numbers);
+        }
+        if let Some(window) = self.open.as_ref() {
+            Self::merge_sequencer_numbers(&mut res, &window.sequencer_numbers);
+        }
+
+        res
+    }
+
+    /// Merge two sequencer numbers maps by taking the per-sequencer min/max sequence number.
+    fn merge_sequencer_numbers(
+        existing: &mut BTreeMap<u32, MinMaxSequence>,
+        new: &BTreeMap<u32, MinMaxSequence>,
+    ) {
+        // fast path
+        if new.is_empty() {
+            return;
+        }
+        if existing.is_empty() {
+            *existing = new.clone();
+        }
+
+        for (sequencer_id, min_max) in new.iter() {
+            match existing.entry(*sequencer_id) {
+                std::collections::btree_map::Entry::Vacant(v) => {
+                    v.insert(*min_max);
+                }
+                std::collections::btree_map::Entry::Occupied(mut o) => {
+                    let e = o.get_mut();
+                    *e =
+                        MinMaxSequence::new(e.min().min(min_max.min()), e.max().max(min_max.max()));
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -599,11 +649,22 @@ mod tests {
 
         let mins = w.persistable.as_ref().unwrap().sequencer_numbers.clone();
         assert_eq!(mins, w.minimum_unpersisted_sequence().unwrap());
+        assert_eq!(start_time, w.minimum_unpersisted_timestamp().unwrap());
+        let sequencer_numbers_range: BTreeMap<u32, MinMaxSequence> =
+            IntoIterator::into_iter([(1, MinMaxSequence::new(2, 5))]).collect();
+        assert_eq!(sequencer_numbers_range, w.sequencer_numbers_range());
+
+        // flush
         let handle = w.flush_handle().unwrap();
         w.flush(handle);
+
         assert!(w.persistable.is_none());
         let mins = w.closed[0].sequencer_numbers.clone();
         assert_eq!(mins, w.minimum_unpersisted_sequence().unwrap());
+        assert_eq!(second_start, w.minimum_unpersisted_timestamp().unwrap());
+        let sequencer_numbers_range: BTreeMap<u32, MinMaxSequence> =
+            IntoIterator::into_iter([(1, MinMaxSequence::new(3, 5))]).collect();
+        assert_eq!(sequencer_numbers_range, w.sequencer_numbers_range());
 
         let c = &w.closed[0];
         assert_eq!(c.row_count, 3);
@@ -681,11 +742,25 @@ mod tests {
 
         let mins = w.persistable.as_ref().unwrap().sequencer_numbers.clone();
         assert_eq!(mins, w.minimum_unpersisted_sequence().unwrap());
+        assert_eq!(start_time, w.minimum_unpersisted_timestamp().unwrap());
+        let sequencer_numbers_range: BTreeMap<u32, MinMaxSequence> =
+            IntoIterator::into_iter([(1, MinMaxSequence::new(2, 5))]).collect();
+        assert_eq!(sequencer_numbers_range, w.sequencer_numbers_range());
+
+        // flush
         let flush = w.flush_handle().unwrap();
         w.flush(flush);
+
         assert!(w.persistable.is_none());
         let mins = w.closed[0].sequencer_numbers.clone();
         assert_eq!(mins, w.minimum_unpersisted_sequence().unwrap());
+        assert_eq!(
+            Utc.timestamp_nanos(first_end.timestamp_nanos() + 1),
+            w.minimum_unpersisted_timestamp().unwrap()
+        );
+        let sequencer_numbers_range: BTreeMap<u32, MinMaxSequence> =
+            IntoIterator::into_iter([(1, MinMaxSequence::new(3, 5))]).collect();
+        assert_eq!(sequencer_numbers_range, w.sequencer_numbers_range());
 
         // the first closed window should have a min time equal to the flush
         let c = &w.closed[0];

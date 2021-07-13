@@ -14,6 +14,7 @@ use tracker::{TaskTracker, TrackedFuture, TrackedFutureExt};
 
 use crate::db::catalog::chunk::CatalogChunk;
 use crate::db::catalog::partition::Partition;
+use crate::db::lifecycle::write::collect_checkpoints;
 use crate::db::lifecycle::{
     collect_rub, compute_sort_key, merge_schemas, new_rub_chunk, write_chunk_to_object_store,
 };
@@ -104,6 +105,8 @@ pub(super) fn persist_chunks(
 
         let persisted_rows = to_persist.rows();
         let remainder_rows = remainder.rows();
+        let (partition_checkpoint, database_checkpoint) =
+            collect_checkpoints(&partition, &partition_key, &table_name, &db.catalog);
 
         let persist_fut = {
             let mut partition = partition.write();
@@ -127,7 +130,7 @@ pub(super) fn persist_chunks(
             // Drop partition lock guard after locking chunk
             std::mem::drop(partition);
 
-            write_chunk_to_object_store(to_persist)?.1
+            write_chunk_to_object_store(to_persist, partition_checkpoint, database_checkpoint)?.1
         };
 
         // Wait for write operation to complete
