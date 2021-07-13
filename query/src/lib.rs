@@ -93,6 +93,16 @@ pub trait QueryChunk: QueryChunkMeta + Debug + Send + Sync {
         predicate: &Predicate,
     ) -> Result<PredicateMatch, Self::Error>;
 
+    /// Returns the result of applying the `predicate` to the chunk
+    /// using a precise method by finding at least one row that satisfies the
+    /// predicate. The main advantage of `satisfies_predicate` is to know that
+    /// there exists row data satisfying a predicate without having to
+    /// materialise it.
+    ///
+    /// Implementations should return `PredicateMatch::Unknown` if they are
+    /// unable to fully apply a predicate.
+    fn satisfies_predicate(&self, predicate: &Predicate) -> PredicateMatch;
+
     /// Returns a set of Strings with column names from the specified
     /// table that have at least one row that matches `predicate`, if
     /// the predicate can be evaluated entirely on the metadata of

@@ -337,6 +337,29 @@ impl QueryChunk for DbChunk {
         }
     }
 
+    fn satisfies_predicate(&self, predicate: &Predicate) -> PredicateMatch {
+        match &self.state {
+            State::MutableBuffer { .. } => PredicateMatch::Unknown,
+            State::ParquetFile { .. } => PredicateMatch::Unknown,
+            State::ReadBuffer { chunk, .. } => {
+                // If the predicate is not supported by the Read Buffer then
+                // it can't determine if at least one row satisfies it.
+                let rb_predicate = match to_read_buffer_predicate(&predicate) {
+                    Ok(rb_predicate) => rb_predicate,
+                    Err(e) => {
+                        debug!(?predicate, %e, "read buffer predicate not supported for `satisfies_predicate`, falling back");
+                        return PredicateMatch::Unknown;
+                    }
+                };
+
+                if chunk.satisfies_predicate(&rb_predicate) {
+                    return PredicateMatch::AtLeastOne;
+                }
+                PredicateMatch::Zero
+            }
+        }
+    }
+
     fn column_names(
         &self,
         predicate: &Predicate,

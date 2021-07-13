@@ -1,4 +1,5 @@
 //! Tests for the Influx gRPC queries
+use datafusion::logical_plan::{col, lit};
 use query::{
     exec::stringset::{IntoStringSet, StringSetRef},
     frontend::influxrpc::InfluxRpcPlanner,

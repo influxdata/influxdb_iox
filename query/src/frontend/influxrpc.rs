@@ -186,32 +186,49 @@ impl InfluxRpcPlanner {
     {
         let mut builder = StringSetPlanBuilder::new();
 
-        for chunk in database.chunks(&predicate) {
+        'chunk: for chunk in database.chunks(&predicate) {
             // Try and apply the predicate using only metadata
-            let pred_result = chunk
+            let pred_match_on_meta = chunk
                 .apply_predicate_to_metadata(&predicate)
                 .map_err(|e| Box::new(e) as _)
                 .context(CheckingChunkPredicate {
                     chunk_id: chunk.id(),
                 })?;
 
-            builder = match pred_result {
-                PredicateMatch::AtLeastOne => builder.append_table(chunk.table_name()),
-                // no match, ignore table
-                PredicateMatch::Zero => builder,
-                // can't evaluate predicate, need a new plan
-                PredicateMatch::Unknown => {
-                    // TODO: General purpose plans for
-                    // table_names. For now, return an error
-                    debug!(
-                        chunk = chunk.id(),
-                        ?predicate,
-                        table_name = chunk.table_name(),
-                        "can not evaluate predicate"
-                    );
-                    return UnsupportedPredicateForTableNames { predicate }.fail();
+            // proved chunk satisfies predicate based on meta-data
+            if matches!(pred_match_on_meta, PredicateMatch::AtLeastOne) {
+                builder = builder.append_table(chunk.table_name());
+                continue 'chunk;
+            }
+
+            // If chunk doesn't satisfy predicate based on meta-data then check
+            // it directly if possible
+            if matches!(pred_match_on_meta, PredicateMatch::Unknown) {
+                match chunk.satisfies_predicate(&predicate) {
+                    PredicateMatch::AtLeastOne => {
+                        // the chunk has at least one row satisfying the
+                        // predicate.
+                        builder = builder.append_table(chunk.table_name());
+                    }
+                    PredicateMatch::Zero => {
+                        // this chunk does not have a row that satisfies the
+                        // predicate, so skip the chunk.
+                        continue 'chunk;
+                    }
+                    PredicateMatch::Unknown => {
+                        // TODO: this is existing behaviour but it's not clear
+                        // why we need to return an error rather than try a
+                        // general plan.
+                        debug!(
+                            chunk = chunk.id(),
+                            ?predicate,
+                            table_name = chunk.table_name(),
+                            "can not evaluate predicate"
+                        );
+                        return UnsupportedPredicateForTableNames { predicate }.fail();
+                    }
                 }
-            };
+            }
         }
 
         let plan = builder.build().context(CreatingStringSet)?;
